@@ -73,7 +73,7 @@ to fit what was built.
 ## Installation
 
 ```bash
-pi install npm:pi-quest
+pi install npm:@tty-pt/pi-quest
 ```
 
 `/reload` picks up changes. Developing locally: drop the folder into

@@ -1,12 +1,33 @@
 {
-  "name": "pi-quest",
-  "version": "0.1.0",
+  "name": "@tty-pt/pi-quest",
+  "version": "1.0.0",
   "description": "Quest Journal & Epistemic Workflow Extension for Pi Coding Agent (v2, layered rebuild)",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "quest",
+    "workflow"
+  ],
+  "license": "BSD-2-Clause",
+  "author": "quirinpa",
+  "homepage": "https://github.com/tty-pt/pi-quest",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tty-pt/pi-quest.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tty-pt/pi-quest/issues"
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "skills",
+    "README.md"
   ],
   "main": "index.ts",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "deno test --allow-all --sloppy-imports --node-modules-dir=none tests/",
     "zip": "deno run --allow-all scripts/zip_bundle.ts"
