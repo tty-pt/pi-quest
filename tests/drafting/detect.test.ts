@@ -7,6 +7,7 @@ import { getState, replaceState } from "../../src/app/store.ts";
 import { detectSubstantiveRequest } from "../../src/drafting/detect.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import { draftPath } from "../../src/domain/paths.ts";
+import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 
 function tmp(): string {
@@ -55,4 +56,64 @@ Deno.test("detection ignores acks, commands, and active quests", async () => {
   replaceState(createQuest("existing work", "abc123"));
   check(!await detectSubstantiveRequest(pi, ctx, "A whole new substantive request arrives."), "active quest blocks creation");
   replaceState(IDLE_STATE);
+});
+
+Deno.test("detection ignores casual narrative statements and memory probes", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  check(!await detectSubstantiveRequest(pi, ctx, "I spoke to my grandfather under the cherry tree. The diagnostic token is CHERRY-PROBE-123."), "conversational memory probe ignored");
+  check(!await detectSubstantiveRequest(pi, ctx, "Do you remember me speaking about my grandfather?"), "recall question ignored");
+  check(getState().phase === "idle", "still idle");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("detection uses Jev System One judge to classify quest intent", async () => {
+  let simulatedChoice: "quest" | "conversation" = "quest";
+
+  const server = Deno.serve({ port: 0 }, async () => {
+    return new Response(JSON.stringify({
+      model: "qwen",
+      answers: {
+        quest_intent: {
+          type: "choice",
+          choice: simulatedChoice,
+          confidence: 0.99,
+        },
+      },
+    }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  const port = server.addr.port;
+  const cfg: QuestConfig = {
+    ...DEFAULT_CONFIG,
+    judgeMode: "systemone",
+    judgeUrl: `http://127.0.0.1:${port}`,
+    judgeModel: "qwen",
+  };
+
+  try {
+    // 1. When Jev returns quest
+    replaceState(IDLE_STATE);
+    const pi1 = fakePi();
+    const ctx1 = fakeCtx(tmp());
+    simulatedChoice = "quest";
+    const resQuest = await detectSubstantiveRequest(pi1, ctx1, "Optimize database checkpoints", cfg);
+    check(resQuest, "quest created by Jev decision");
+    check(getState().phase === "provisional", "phase is provisional");
+
+    // 2. When Jev returns conversation
+    replaceState(IDLE_STATE);
+    const pi2 = fakePi();
+    const ctx2 = fakeCtx(tmp());
+    simulatedChoice = "conversation";
+    const resConv = await detectSubstantiveRequest(pi2, ctx2, "My grandfather visited yesterday", cfg);
+    check(!resConv, "conversation ignored by Jev decision");
+    check(getState().phase === "idle", "phase remains idle");
+    replaceState(IDLE_STATE);
+  } finally {
+    await server.shutdown();
+  }
 });

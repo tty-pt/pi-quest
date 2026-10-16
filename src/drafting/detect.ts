@@ -8,14 +8,47 @@ import { ensureDraftFile, listKnownQids } from "../files";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
 import { classifyUserMessage } from "../subquests/triage";
+import { readQuestConfig, type QuestConfig } from "../config";
+import { evaluateQuestIntent } from "./judge";
 
-export async function detectSubstantiveRequest(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
+const QUEST_HEADER_PATTERNS = [
+  /^#+\s*Quest\b/i,
+  /\b(?:Objective|Deliverables|Scope change|Problem statement)\s*[:]/i,
+];
+
+const TASK_DIRECTIVE_PATTERN =
+  /^(?:please\s+)?(?:rebuild|fix|implement|add|create|refactor|update|build|test|investigate|debug|diagnose|audit|reconcile|reproduce|port|remove|delete|clean|wire|hook|check|verify|migrate|configure|enhance|optimize|overhaul|resolve|make|author)\b/i;
+
+const CASUAL_OR_NARRATIVE_PATTERN =
+  /^(?:I\s+(?:spoke|talked|went|met|saw|found|felt|prefer|like|hate|dislike|think|told|visited|remember|recalled|was|am)|My\s+(?:grandfather|grandpa|grandmother|grandma|friend|cat|dog|dad|mom|father|mother|family)|Do\s+you\s+(?:remember|recall|know|think))\b/i;
+
+export function isQuestLikeRequest(text: string): boolean {
+  const trimmed = text.trim();
+  if (CASUAL_OR_NARRATIVE_PATTERN.test(trimmed)) return false;
+  if (QUEST_HEADER_PATTERNS.some((pat) => pat.test(trimmed))) return true;
+  if (TASK_DIRECTIVE_PATTERN.test(trimmed)) return true;
+  return false;
+}
+
+export async function detectSubstantiveRequest(
+  pi: Pi,
+  ctx: PiCtx,
+  text: string,
+  config?: QuestConfig,
+): Promise<boolean> {
   if (getState().qid !== null) return false;
   const trimmed = text.trim();
   if (trimmed.startsWith("/")) return false;
+
   const kind = classifyUserMessage(trimmed);
-  const substantive = kind === "refinement" || (kind === "question" && trimmed.length >= 250);
-  if (!substantive) return false;
+  // Fast filter: explicit acks, confirmations, and short questions are never new quests
+  if (kind === "ack" || kind === "confirmation") return false;
+  if (kind === "question" && trimmed.length < 250) return false;
+
+  const cfg = config ?? await readQuestConfig(ctx.cwd);
+  const decision = await evaluateQuestIntent(trimmed, cfg);
+  if (!decision.isQuest) return false;
+
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
   replaceState(createQuest(trimmed, qid));
   await ensureDraftFile(ctx, qid, qid, trimmed);
