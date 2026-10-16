@@ -1,3 +1,17 @@
+<p align="center">
+  <img src="cover.png" alt="pi-quest cover banner" width="100%">
+</p>
+
+<p align="center">
+  <strong>Supervised, Verifiable Epistemic Workflows for Pi Coding Agent</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/earendil-works/pi-coding-agent"><img src="https://img.shields.io/badge/Pi-Extension-19c7d4?logo=circle" alt="Pi Extension"></a>
+  <a href="https://www.npmjs.com/package/@tty-pt/pi-quest"><img src="https://img.shields.io/npm/v/@tty-pt/pi-quest" alt="npm version"></a>
+  <img src="https://img.shields.io/badge/License-BSD--2--Clause-blue.svg" alt="License">
+</p>
+
 # pi-quest
 
 A quest journal for the Pi coding agent: every task gets a plan, an adversarial
@@ -135,7 +149,11 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
     "draftThresholds": { "requirements": 2, "evidence": 7 },
     "bindings": { "reviewRunner": { "tool": "subagent" } },
     "statusStyle": "icon",
-    "autoArchive": true
+    "autoArchive": true,
+    "judgeMode": "auto",
+    "judgeUrl": "http://127.0.0.1:4242",
+    "judgeModel": "qwen",
+    "judgeFallback": "heuristic"
   }
 }
 ```
@@ -149,6 +167,20 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | `bindings.reviewRunner.tool` | tool name | `subagent` | Sub-agent tool that runs reviewers/validators isolated (falls back to the user path). |
 | `statusStyle` | `icon` / `text` | `icon` | How the active quest renders in the status bar. |
 | `autoArchive` | `true` / `false` | `true` | Whether a validation PASS concludes and archives the quest automatically; when `false`, the agent archives manually. |
+| `judgeMode` | `"auto"` / `"systemone"` / `"heuristic"` / `"off"` | `"auto"` | How quest intent is evaluated on new user messages: `"auto"` / `"systemone"` queries Jev System One, `"heuristic"` uses pattern rules, `"off"` disables automatic quest initiation from prompt text. |
+| `judgeUrl` | URL string | `http://127.0.0.1:4242` | Endpoint for Jev System One decisions (falls back to `PI_QUEST_JUDGE_URL` or `PI_MM_JUDGE_URL`). |
+| `judgeModel` | model name | `"qwen"` | Model identifier submitted to the judge service (falls back to `PI_QUEST_JUDGE_MODEL` or `PI_MM_JUDGE_MODEL`). |
+| `judgeKey` | token string | `undefined` | Optional Bearer authorization token for remote endpoints. |
+| `judgeFallback` | `"heuristic"` / `"skip"` | `"heuristic"` | Fallback policy when the judge endpoint is unreachable or times out. |
+| `judgeTimeoutMs` | number (ms) | `2000` | Network timeout for judge decision evaluations. |
+
+### Intelligent Quest Intent Detection (Jev System One)
+
+When idle, `pi-quest` listens for new user requests to start a quest automatically. Instead of relying solely on brittle regexes or opening quests unconditionally on casual dialogue (such as *"I spoke to my grandfather..."* or memory recall questions), `pi-quest` uses an intelligent decision judge:
+
+- **Automatic Intent Classification**: In `"auto"` or `"systemone"` mode, the judge submits a typed choice question (`quest_intent`) to determine whether the user wants to initiate software engineering work (`quest`) versus casual conversation or questions (`conversation`).
+- **Shared Infrastructure**: If you already use `pi-mm` paired with local [axil-auren](https://github.com/tty-pt/auren), `pi-quest` automatically shares the local judge endpoint and settings with zero additional configuration.
+- **Fail-Open & Resilient**: If the inference service is offline or restarting, `pi-quest` never disrupts your conversation: it cleanly degrades to local heuristics or skips according to `judgeFallback`.
 
 ## Workspace on disk
 

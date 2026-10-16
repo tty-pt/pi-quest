@@ -1,15 +1,18 @@
-// Minimal bundle renderer (re-derived): zips the package source tree +
-// docs into pi-quest-bundle.zip at the project root. Quest-state rendering
-// (run manifest, quest view, session range) lands with the views slice (S3).
+import { join, resolve } from "node:path";
 
-const PKG = new URL("..", import.meta.url).pathname;
-const ROOT = `${PKG}/../../..`;
-const OUT = `${ROOT}/pi-quest-bundle.zip`;
+// Minimal bundle renderer (re-derived): zips the package source tree +
+// docs into pi-quest-bundle.zip at the package root.
+
+const PKG = resolve(new URL("..", import.meta.url).pathname);
+const OUT = join(PKG, "pi-quest-bundle.zip");
 const INPUTS = [
   "index.ts",
   "package.json",
   "AGENTS.md",
   "README.md",
+  "LICENSE",
+  "cover.png",
+  "thumb.png",
   "src",
   "tests",
   "scripts",

@@ -179,7 +179,12 @@ export async function bumpReviewCountAndReboot(
   if (state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
   if (retryAttempts.get(qid) !== attempt) return;
-  const file = join(ctx.cwd, draftPath(qid));
+  let file: string;
+  try {
+    file = join(ctx.cwd, draftPath(qid));
+  } catch {
+    return;
+  }
   let content: string;
   try {
     content = await readFile(file, "utf8");
