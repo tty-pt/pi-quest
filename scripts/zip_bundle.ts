@@ -1,45 +1,18 @@
-import { join, resolve, dirname } from "node:path";
-import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 // Minimal bundle renderer (re-derived): zips the package source tree +
-// docs into pi-quest-bundle.zip at the project root. Quest-state rendering
-// (run manifest, quest view, session range) lands with the views slice (S3).
+// docs into pi-quest-bundle.zip at the package root.
 
 const PKG = resolve(new URL("..", import.meta.url).pathname);
-
-function resolveProjectRoot(pkgDir: string): string {
-  // 1. Env override
-  const envRoot = Deno.env.get("PI_PROJECT_ROOT") || Deno.env.get("PROJECT_ROOT");
-  if (envRoot && existsSync(envRoot)) return resolve(envRoot);
-
-  // 2. Check current working directory
-  const cwd = Deno.cwd();
-  if (existsSync(join(cwd, ".pi")) || existsSync(join(cwd, ".git"))) {
-    return resolve(cwd);
-  }
-
-  // 3. Known project root
-  if (existsSync("/home/quirinpa/site")) return "/home/quirinpa/site";
-
-  // 4. Walk upwards from pkgDir until we find .git or .pi
-  let curr = resolve(pkgDir);
-  while (curr !== dirname(curr)) {
-    if (existsSync(join(curr, ".git")) || existsSync(join(curr, ".pi"))) {
-      return curr;
-    }
-    curr = dirname(curr);
-  }
-
-  return pkgDir;
-}
-
-const ROOT = resolveProjectRoot(PKG);
-const OUT = join(ROOT, "pi-quest-bundle.zip");
+const OUT = join(PKG, "pi-quest-bundle.zip");
 const INPUTS = [
   "index.ts",
   "package.json",
   "AGENTS.md",
   "README.md",
+  "LICENSE",
+  "cover.png",
+  "thumb.png",
   "src",
   "tests",
   "scripts",
@@ -78,9 +51,3 @@ if (code !== 0) {
   Deno.exit(1);
 }
 console.log(`pi-quest-bundle.zip: ${OUT}`);
-if (ROOT !== "/home/quirinpa/site" && existsSync("/home/quirinpa/site")) {
-  try {
-    Deno.copyFileSync(OUT, "/home/quirinpa/site/pi-quest-bundle.zip");
-    console.log(`pi-quest-bundle.zip copied to: /home/quirinpa/site/pi-quest-bundle.zip`);
-  } catch { /* best effort */ }
-}

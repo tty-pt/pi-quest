@@ -11,7 +11,7 @@ import {
 
 Deno.test("tracker supersede cancels the old review and boots fresh", () => {
   let aborted = 0;
-  let booted: string[] = [];
+  const booted: string[] = [];
   trackReview("qid-1", "rev-a", () => {
     aborted += 1;
   });
