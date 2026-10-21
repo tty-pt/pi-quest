@@ -83,6 +83,12 @@ to fit what was built.
 - **Idle boot** — a fresh session starts idle. Nothing takes over until you
   describe a request (which opens a quest) or run `/quest`. With several known
   quests, `/quest` lets you pick one.
+- **Jev System One Quest Intent Judge** — automatically classifies incoming prompts
+  using calibrated local neural judging, cleanly distinguishing casual conversational
+  exchanges from multi-step engineering work that warrants an autonomous quest.
+- **Standalone Distribution Packaging** — package the extension into an offline
+  distribution bundle (`npm run zip` → `pi-quest-bundle.zip`) containing code,
+  diagnostics, and manifests.
 
 ## Installation
 
