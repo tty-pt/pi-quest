@@ -26,6 +26,7 @@ import { checkAnalysisParam, checkPlanParam, profileForSavedDoc } from "./draft-
 import { checkPlanCitations } from "./claims";
 import { carryRefinementsToDraft, writeAnalysisToDraft, writePlanRevision, writePlanToDraft } from "./draft-writer";
 import { spliceAmendmentsSection, hashContent } from "../../drafting/plan-text";
+import { extractRecentConversationContext } from "../../durability/transcript";
 import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
@@ -52,7 +53,8 @@ async function provisionRootQuest(ctx: PiCtx, objective: string, kind: QuestKind
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
   const base = createQuest(objective, qid);
   replaceState(markChanged(base, { kind }));
-  await ensureDraftFile(ctx, qid, qid, objective);
+  const context = extractRecentConversationContext(ctx);
+  await ensureDraftFile(ctx, qid, qid, objective, context);
   return qid;
 }
 

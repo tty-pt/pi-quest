@@ -32,12 +32,18 @@ export async function listKnownQids(cwd: string): Promise<string[]> {
 // Write the draft scaffold for a quest unless one already exists —
 // never clobbers agent-authored content. Called at every provisioning
 // site so future/<qid>.md exists from the moment the quest starts.
-export async function ensureDraftFile(ctx: PiCtx, rawQid: string, name: string, objective: string): Promise<void> {
+export async function ensureDraftFile(
+  ctx: PiCtx,
+  rawQid: string,
+  name: string,
+  objective: string,
+  context?: string,
+): Promise<void> {
   if (!isQid(rawQid)) throw new Error(`invalid qid: ${rawQid}`);
   const qid: Qid = rawQid;
   await mkdir(join(ctx.cwd, FUTURE_DIR), { recursive: true });
   try {
-    await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective), { flag: "wx" });
+    await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective, context), { flag: "wx" });
   } catch (err) {
     if ((err as { code?: string }).code !== "EEXIST") throw err;
   }

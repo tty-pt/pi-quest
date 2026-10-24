@@ -1,5 +1,8 @@
 // HIGH_LEVEL: #storage — the drafting workspace starts from a template.
-export function renderDraftTemplate(name: string, objective: string): string {
+export function renderDraftTemplate(name: string, objective: string, context?: string): string {
+  const contextSection = context && context.trim().length > 0
+    ? `\n## Context / Background Discussion\n\n${context.trim()}\n`
+    : "";
   return `# ${name}
 
 > Draft proposal under adversarial review. Only this file is writable while drafting.
@@ -7,7 +10,7 @@ export function renderDraftTemplate(name: string, objective: string): string {
 ## Original request
 
 ${objective}
-
+${contextSection}
 ## Amendments
 
 <!-- Record any amendments resolving proven contradictions with the original request or technical invariants. Every amendment must cite repository evidence. -->

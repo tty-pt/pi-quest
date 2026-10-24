@@ -5,6 +5,7 @@ import { emitNow, sendSteer } from "../app/interpreter";
 import { createQuest } from "../domain/quest";
 import { nextQid } from "../domain/qid";
 import { ensureDraftFile, listKnownQids } from "../files";
+import { extractRecentConversationContext } from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
 import { classifyUserMessage } from "../subquests/triage";
@@ -69,7 +70,8 @@ export async function detectSubstantiveRequest(
     const objective = trigger.objective;
     const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
     replaceState(createQuest(objective, qid));
-    await ensureDraftFile(ctx, qid, qid, objective);
+    const context = extractRecentConversationContext(ctx);
+    await ensureDraftFile(ctx, qid, qid, objective, context);
     emitNow(pi);
     sendSteer(
       pi,
@@ -91,7 +93,8 @@ export async function detectSubstantiveRequest(
 
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
   replaceState(createQuest(trimmed, qid));
-  await ensureDraftFile(ctx, qid, qid, trimmed);
+  const context = extractRecentConversationContext(ctx);
+  await ensureDraftFile(ctx, qid, qid, trimmed, context);
   emitNow(pi);
   sendSteer(
     pi,
