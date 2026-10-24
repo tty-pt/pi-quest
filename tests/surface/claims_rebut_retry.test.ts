@@ -99,6 +99,29 @@ Deno.test("rebut: rebutTool validates inputs and records rebuttal into reviewDia
   replaceState(withReview);
   const abortedRes = await tool.execute("call5", { rebuttal: "Evidence shows R1 is implemented in audio.c:10" }, abortController.signal, undefined, fakeCtx("/tmp"));
   check(String(abortedRes.content[0].text).includes("Rebuttal aborted"), "handles aborted signal");
+
+  // 6. Successful rebuttal records dialogue round into reviewDialogue
+  const withValidDraft: QuestState = {
+    ...withReview,
+    draft: {
+      ...withReview.draft!,
+      contentHash: "hash123",
+    },
+  };
+  replaceState(withValidDraft);
+  const successRes = await tool.execute(
+    "call6",
+    { rebuttal: "Evidence shows R1 is implemented in audio.c:10" },
+    undefined,
+    undefined,
+    fakeCtx("/tmp"),
+  );
+  check(!successRes.details || !(successRes.details as { error?: string }).error, "rebuttal executed successfully");
+  const dialogue = getState().reviewDialogue;
+  check(dialogue.length === 1, "recorded 1 dialogue round into reviewDialogue");
+  check(dialogue[0].implementerRebuttal === "Evidence shows R1 is implemented in audio.c:10", "recorded implementer rebuttal text");
+  check(dialogue[0].reviewerFindings === "Omitted requirement R1", "recorded reviewer findings");
+  check(dialogue[0].verdictBefore === "FAIL", "recorded verdictBefore as FAIL");
 });
 
 Deno.test("draft_retry: tracks retry counts, exponential backoff, and exhaustion wake", () => {
@@ -138,6 +161,9 @@ Deno.test("draft_retry: tracks retry counts, exponential backoff, and exhaustion
   // Attempt 4: exceeds MAX_REVIEW_RETRIES (3) -> exhausts retries and emits wake
   noteReviewLaunchFailed(pi as unknown as Pi, ctx, config, qid, "target1", "model error", userPathSteered, bootReview);
   check(draftReviewRetryCount(qid) === 0, "retry count deleted on exhaustion");
+  check(pi.sent.length > 0, "wake notification sent to pi on retry exhaustion");
+  const wakeMessage = pi.sent.find((s) => String(s.message.content).includes("Draft review failed 3 times"));
+  check(wakeMessage !== undefined, "wake message contains retry count and failure reason");
 
   // Clean clear
   clearDraftReviewRetry(qid);
