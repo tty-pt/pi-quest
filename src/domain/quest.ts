@@ -289,7 +289,7 @@ export function recordAdvisoryNote(state: QuestState, reason: string, evidence: 
 }
 
 export function recordAmendment(state: QuestState, change: string, reasons: string): QuestState {
-  requirePhase(state, "implementing", "validating");
+  requirePhase(state, "drafting", "implementing", "validating");
   if (change.trim() === "") throw new Error("amendment needs a change");
   return markChanged(state, {
     amendments: [...state.amendments, { change, reasons }],

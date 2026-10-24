@@ -54,8 +54,9 @@ Deno.test("update creates quests and drafts on disk", async () => {
   check(file.includes("Build the thing."), "draft template carries objective");
   const empty = await applyUpdate(pi, ctx, {});
   check(empty.applied.length === 0 && !empty.error, "no-op update");
-  const missing = await applyUpdate(pi, ctx, { amendment: { change: "x", reasons: "y" } });
-  check(missing.error !== undefined, "amendment outside implementing fails honestly");
+  const amended = await applyUpdate(pi, ctx, { amendment: { change: "x", reasons: "y" } });
+  check(!amended.error, "amendment in drafting succeeds");
+  check(getState().amendments.length === 1, "amendment recorded in drafting");
   const planDraft = await applyUpdate(pi, ctx, { plan: "Do step one, then step two." });
   check(getState().draft?.planAuthored === true, "plan marks authored");
   check(planDraft.applied.some((a) => a.includes("plan recorded")), "plan applied");

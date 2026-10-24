@@ -1,14 +1,17 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
 // HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision. The agent's write path: findings, drafts, amendments, claims.
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import {
   createQuest,
+  markChanged,
   recordAmendment,
   recordRefinement,
+  type Amendment,
+  type QuestKind,
   type QuestState,
 } from "../../domain/quest";
 import { claimComplete, createDraft, demoteToDrafting, demoteToImplementing } from "../../domain/transitions";
@@ -22,14 +25,33 @@ import { assertCompletionEligibility, getLatestTestExecution } from "../../valid
 import { checkAnalysisParam, checkPlanParam, profileForSavedDoc } from "./draft-profile";
 import { checkPlanCitations } from "./claims";
 import { carryRefinementsToDraft, writeAnalysisToDraft, writePlanRevision, writePlanToDraft } from "./draft-writer";
+import { spliceAmendmentsSection, hashContent } from "../../drafting/plan-text";
 import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
-async function provisionRootQuest(ctx: PiCtx, objective: string): Promise<Qid> {
+async function syncAmendmentsToDraft(ctx: PiCtx, qid: Qid, amendments: Amendment[]): Promise<void> {
+  const filePath = join(ctx.cwd, draftPath(qid));
+  if (!existsSync(filePath)) return;
+  try {
+    const content = await readFile(filePath, "utf8");
+    const formatted = amendments.map((a) => `${a.change} (${a.reasons})`);
+    const updated = spliceAmendmentsSection(content, formatted);
+    if (updated !== content) {
+      await writeFile(filePath, updated, "utf8");
+      const hash = hashContent(updated);
+      updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true });
+    }
+  } catch {
+    // Best-effort sync to draft doc
+  }
+}
+
+async function provisionRootQuest(ctx: PiCtx, objective: string, kind: QuestKind = "standard"): Promise<Qid> {
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  replaceState(createQuest(objective, qid));
+  const base = createQuest(objective, qid);
+  replaceState(markChanged(base, { kind }));
   await ensureDraftFile(ctx, qid, qid, objective);
   return qid;
 }
@@ -228,11 +250,11 @@ export async function applyUpdate(
   const probe = (await Promise.all([checkPlanParam(ctx, params), checkAnalysisParam(ctx, params)])).find((p) => p.applied.length > 0 || p.error !== undefined);
   if (probe !== undefined) return { applied: probe.applied, error: probe.error };
   if (state.qid === null) {
-    const objective = params["objective"];
+    const objective = params["objective"] ?? params["userPrompt"];
     if (typeof objective !== "string" || objective.trim() === "") {
       return { applied, error: "no active quest; pass objective to create one" };
     }
-    const qid = await provisionRootQuest(ctx, objective.trim());
+    const qid = await provisionRootQuest(ctx, (objective as string).trim(), (kind as QuestKind) ?? "standard");
     state = getState();
     applied.push(`created quest ${qid}`);
   }
@@ -247,8 +269,10 @@ export async function applyUpdate(
   const reasons = ((amendment as Record<string, unknown> | undefined)?.["reasons"] as string | undefined) ?? "";
   if (typeof change === "string" && change.trim() !== "" && state.qid) {
     try {
+      const qid = state.qid;
       state = updateState((s) => recordAmendment(s, change.trim(), typeof reasons === "string" ? reasons : ""));
       applied.push("amendment recorded");
+      await syncAmendmentsToDraft(ctx, qid, state.amendments);
     } catch (err) {
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }

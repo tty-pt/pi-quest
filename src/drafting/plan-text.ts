@@ -15,6 +15,7 @@ export interface DraftSections {
   plan: string;
   // Analysis quests deliver the quest doc's ## Analysis body here (D1).
   analysis: string;
+  amendments?: string[];
 }
 
 export function hashContent(content: string): string {
@@ -52,12 +53,20 @@ export function spliceAnalysisSection(text: string, analysis: string): string {
   return spliceSection(text, "analysis", "Analysis", analysis);
 }
 
+export function spliceAmendmentsSection(text: string, amendments: string[]): string {
+  const body = amendments.length > 0
+    ? amendments.map((a) => `- ${a}`).join("\n")
+    : "<!-- No amendments recorded -->";
+  return spliceSection(text, "amendment", "Amendments", body);
+}
+
 export function parseDraftSections(text: string): DraftSections {
   const requirements: string[] = [];
   const evidence: string[] = [];
   const planLines: string[] = [];
   const analysisLines: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | "analysis" | null = null;
+  const amendments: string[] = [];
+  let section: "requirements" | "evidence" | "plan" | "analysis" | "amendments" | null = null;
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
     if (header) {
@@ -66,6 +75,7 @@ export function parseDraftSections(text: string): DraftSections {
       else if (name.includes("evidence")) section = "evidence";
       else if (name.includes("analysis")) section = "analysis";
       else if (name.includes("implementation plan")) section = "plan";
+      else if (name.includes("amendment")) section = "amendments";
       // Pre-draft investigation recorded via recordRefinement is research:
       // its bullets fold into the evidence list so it counts toward the bar.
       else if (name.includes("findings") && name.includes("pre-draft")) section = "evidence";
@@ -81,9 +91,10 @@ export function parseDraftSections(text: string): DraftSections {
       continue;
     }
     const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
-    if (bullet && (section === "requirements" || section === "evidence")) {
+    if (bullet && (section === "requirements" || section === "evidence" || section === "amendments")) {
       if (section === "requirements") requirements.push(bullet[1]);
-      else evidence.push(bullet[1]);
+      else if (section === "evidence") evidence.push(bullet[1]);
+      else if (section === "amendments") amendments.push(bullet[1]);
     }
   }
   return {
@@ -91,6 +102,7 @@ export function parseDraftSections(text: string): DraftSections {
     evidence,
     plan: planLines.join("\n").trim(),
     analysis: analysisLines.join("\n").trim(),
+    amendments,
   };
 }
 
@@ -258,12 +270,14 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
   const analysis = state.kind === "analysis";
   const deliverable = deliverableBody(sections, state.kind);
   const openRebuttal = [...state.reviewDialogue].reverse().find((d) => d.verdictAfter === undefined);
+  const stateAmendments = state.amendments.map((a) => `${a.change} (${a.reasons})`);
+  const allAmendments = Array.from(new Set([...stateAmendments, ...(sections.amendments ?? [])]));
   const base: ReviewMaterial = {
     objective: state.pendingRootRequest ?? state.objective,
     plan: deliverable,
     kind: state.kind,
     evidence: sections.evidence,
-    amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
+    amendments: allAmendments,
     rebuttal: openRebuttal?.implementerRebuttal,
     claimManifest: buildClaimManifest(sections, state.kind),
   };

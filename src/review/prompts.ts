@@ -120,6 +120,12 @@ ${evidence}
 ${manifest}${codeDiff}${testReceipt}${transcript}${rebuttal}${prior}--- END MATERIAL ---`;
 }
 
+const AMENDMENT_VALIDITY_GUIDANCE = `AMENDMENT VALIDITY EVALUATION:
+When RECORDED AMENDMENTS are present, you MUST explicitly evaluate whether each amendment is VALID:
+- An amendment is valid ONLY if it resolves a genuine, proven contradiction between the original request and existing codebase reality, architectural invariants, physical/technical impossibility, or mutually conflicting instructions. The reason must cite concrete repository facts or evidence.
+- An amendment is INVALID if it weakens acceptance criteria for convenience, drops requirements without demonstrating a real contradiction, or misrepresents repository state.
+- If ANY recorded amendment is invalid, ungrounded, or unnecessary, you MUST issue VERDICT: FAIL specifying why the amendment fails.`;
+
 function draftGuidance(maturity: DraftThresholds, kind: QuestKind | undefined): string {
   if (kind === "analysis") {
     return `WHAT YOU MUST EVALUATE (DRAFT REVIEW):
@@ -132,6 +138,7 @@ You review the ANALYSIS deliverable, not implementation. Compare it against the 
 6. Whether it stays in scope or substitutes a different problem;
 7. Whether it contradicts itself;
 8. Whether it credibly satisfies the request.
+${AMENDMENT_VALIDITY_GUIDANCE}
 MATURITY BAR: a reviewable analysis has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an authored ## Analysis section. Below the bar, FAIL fast naming exactly what is missing.
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
   }
@@ -143,6 +150,7 @@ You review the PLAN, not implementation. Compare the draft plan against the exac
 7. Whether complexity is unnecessary; 8. Whether an alternative was dismissed without evidence;
 9. Whether it commits prematurely; 10. Whether it contradicts itself;
 11. Whether it credibly satisfies the request.
+${AMENDMENT_VALIDITY_GUIDANCE}
 MATURITY BAR: a reviewable draft has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an actionable plan. Below the bar, FAIL fast naming exactly what is missing.
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
 }
@@ -154,8 +162,9 @@ You review the ANALYSIS deliverable against the original request: is it complete
 1. Every requirement in the request is addressed by the analysis;
 2. Conclusions are grounded — spot-check claims against the repository and the RESEARCH TRANSCRIPT extract;
 3. The analysis stays in scope; covering a different problem is a failure;
-4. The research backing is adequate for the claim made.
-Reviewer preference NEVER blocks; only unmet requirements, ungrounded claims, or out-of-scope drift do.`;
+4. The research backing is adequate for the claim made;
+5. All RECORDED AMENDMENTS are valid: each must resolve a genuine, proven contradiction backed by repository evidence.
+Reviewer preference NEVER blocks; only unmet requirements, ungrounded claims, invalid amendments, or out-of-scope drift do.`;
   }
   return `WHAT YOU MUST EVALUATE (ROOT INTEGRATION VALIDATION):
 You are an adversarial auditor defending the codebase from incomplete or shallow work.
@@ -165,7 +174,37 @@ You review the IMPLEMENTATION against the original request, approved plan, and r
 3. Scan the GIT DIFF for placeholder implementations: TODO, FIXME, stub functions returning dummy values, or commented-out tests. If found, issue VERDICT: FAIL.
 4. Ensure no regression of repository boundaries (e.g. #ifdef in pure-C isomorphic UX, cross-module #include "*.c").
 5. When a revision history is present, judge every plan move: a revision that corrected an impossibility while holding the objective is legitimate; a revision that weakens the acceptance bar to fit what was built must FAIL.
-Reviewer preference NEVER blocks; only unmet requirements, unverified code, or out-of-scope drift do.`;
+6. Verify all RECORDED AMENDMENTS: each must resolve a genuine contradiction backed by code reality. If an amendment dropped user requirements without an actual impossibility, issue VERDICT: FAIL.
+Reviewer preference NEVER blocks; only unmet requirements, unverified code, invalid amendments, or out-of-scope drift do.`;
+}
+
+export function getReviewCriteriaSummary(phase: "drafting" | "implementing", kind: QuestKind = "standard"): string {
+  if (phase === "drafting") {
+    if (kind === "analysis") {
+      return `Draft Review Criteria (Analysis):
+- Complete Coverage: Addresses all requirements in objective.
+- Evidence Grounding: Claims grounded in repository evidence.
+- Amendment Validity: Amendments must resolve proven contradictions and cite repo facts; invalid amendments FAIL.
+- Maturity Bar: 2 requirements or 1 req + 7 evidence items with authored ## Analysis.`;
+    }
+    return `Draft Review Criteria (Plan):
+- Complete Coverage: Plan addresses all requirements in request without omissions.
+- Actionable Sequence: Concrete phases with verification steps and testing.
+- Amendment Validity: Amendments must resolve proven contradictions and cite repo facts; invalid amendments FAIL.
+- Maturity Bar: 2 requirements or 1 req + 7 evidence items with actionable ## Implementation Plan.`;
+  }
+  if (kind === "analysis") {
+    return `Validation Criteria (Analysis):
+- Scope & Fidelity: Delivers on original request without drift.
+- Grounded Claims: Verified against repository and transcript extract.
+- Amendments: Verified against genuine contradictions.`;
+  }
+  return `Validation Criteria (Implementation):
+- Diff Completeness: Every request item & RTM requirement implemented in git diff.
+- Verification: Clean test execution (exit code 0) with zero regressions.
+- Zero Placeholders: No TODO/FIXME/stubs or dummy returns.
+- Boundary Integrity: No architectural or module boundary violations.
+- Amendments: Verified against genuine contradictions.`;
 }
 
 const FAST_FAIL = (maturity: DraftThresholds): string =>

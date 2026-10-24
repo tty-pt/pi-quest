@@ -4,6 +4,7 @@ import type { Pi } from "../hooks/events";
 import { getState } from "../app/store";
 import type { QuestState } from "../domain/quest";
 import { draftPath } from "../domain/paths";
+import { getReviewCriteriaSummary } from "../review/prompts";
 import { SNAPSHOT_TYPE } from "./snapshots";
 
 function contextLine(state: QuestState): string {
@@ -15,7 +16,12 @@ function contextLine(state: QuestState): string {
   const draft = state.phase === "drafting" && state.qid !== null
     ? ` Draft file: ${draftPath(state.qid)}.`
     : "";
-  return `Quest ${id} — phase ${state.phase}${pending}.${review}${draft} ${state.exactNextAction}`;
+  let line = `Quest ${id} — phase ${state.phase}${pending}.${review}${draft} ${state.exactNextAction}`;
+  if (state.phase === "drafting" || state.phase === "implementing") {
+    const criteria = getReviewCriteriaSummary(state.phase, state.kind);
+    line += `\n[Compliance Criteria]\n${criteria}`;
+  }
+  return line;
 }
 
 export function injectQuestContext(pi: Pi): void {
