@@ -30,34 +30,24 @@ import {
 } from "./plan-text";
 export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
 
-export const MAX_REVIEW_RETRIES = 3;
-export const REVIEW_RETRY_BASE_MS = 4000;
-
-// HIGH_LEVEL: #drafting — retries are capped and back off; the agent is only
-// woken at the cap. The only paths out of drafting stay a verdict or a real
-// live-user "go" — never the agent's own judgment.
-const retryAttempts = new Map<string, number>();
-
-export function draftReviewRetryCount(qid: string): number {
-  return retryAttempts.get(qid) ?? 0;
-}
-
-export function clearDraftReviewRetry(qid: string): void {
-  retryAttempts.delete(qid);
-}
-
-type RetryDispatcher = (delayMs: number, fn: () => void) => void;
-let dispatchRetry: RetryDispatcher = (delayMs, fn) => {
-  setTimeout(fn, delayMs);
+import {
+  bumpReviewCountAndReboot as doBumpReviewCountAndReboot,
+  clearDraftReviewRetry,
+  draftReviewRetryCount,
+  noteReviewLaunchFailed,
+  setReviewRetryDispatcher,
+  MAX_REVIEW_RETRIES,
+  REVIEW_RETRY_BASE_MS,
+  type RetryDispatcher,
+} from "./draft-retry";
+export {
+  clearDraftReviewRetry,
+  draftReviewRetryCount,
+  setReviewRetryDispatcher,
+  MAX_REVIEW_RETRIES,
+  REVIEW_RETRY_BASE_MS,
+  type RetryDispatcher,
 };
-
-// Test seam: swap the real timer for a recorder to assert retry scheduling
-// deterministically without leaking pending timers.
-export function setReviewRetryDispatcher(next: RetryDispatcher): RetryDispatcher {
-  const previous = dispatchRetry;
-  dispatchRetry = next;
-  return previous;
-}
 
 async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | null> {
   if (state.qid === null) return null;
@@ -69,32 +59,6 @@ async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | nu
 }
 
 const userPathSteered = new Set<string>();
-
-// A launch that never ran a reviewer schedules a marker-bump retry with
-// backoff, capped; the agent is only woken at the cap. The only ways out of
-// drafting stay a completed review or a live user "go".
-function noteReviewLaunchFailed(
-  pi: Pi,
-  ctx: PiCtx,
-  config: QuestConfig,
-  qid: string,
-  target: string,
-  detail: string,
-): void {
-  const attempts = retryAttempts.get(qid) ?? 0;
-  if (attempts < MAX_REVIEW_RETRIES) {
-    const attempt = attempts + 1;
-    retryAttempts.set(qid, attempt);
-    const delay = REVIEW_RETRY_BASE_MS * 2 ** (attempt - 1);
-    dispatchRetry(delay, () => {
-      void bumpReviewCountAndReboot(pi, ctx, config, attempt, target);
-    });
-    return;
-  }
-  retryAttempts.delete(qid);
-  userPathSteered.add(`${qid}:${target}`);
-  sendWake(pi, `Draft review failed ${MAX_REVIEW_RETRIES} times (last error: ${detail}). Revise the plan and save to boot a fresh review — promotion requires a reviewer PASS or a live user "go" reply.`);
-}
 
 export async function bootDraftReview(
   pi: Pi,
@@ -133,7 +97,7 @@ export async function bootDraftReview(
     return;
   }
   if (outcome.status === "failed") {
-    noteReviewLaunchFailed(pi, ctx, config, qid, target, outcome.detail);
+    noteReviewLaunchFailed(pi, ctx, config, qid, target, outcome.detail, userPathSteered, bootDraftReview);
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
@@ -175,44 +139,7 @@ export async function bumpReviewCountAndReboot(
   attempt: number,
   retryTarget: string,
 ): Promise<void> {
-  const state = getState();
-  if (state.phase !== "drafting" || state.qid === null) return;
-  const qid = state.qid;
-  if (retryAttempts.get(qid) !== attempt) return;
-  let file: string;
-  try {
-    file = join(ctx.cwd, draftPath(qid));
-  } catch {
-    return;
-  }
-  let content: string;
-  try {
-    content = await readFile(file, "utf8");
-  } catch {
-    return;
-  }
-  if (hashContent(content) !== retryTarget) {
-    clearDraftReviewRetry(qid);
-    return;
-  }
-  const bumped = bumpReviewCount(content, attempt, getState().kind);
-  if (bumped === content) return;
-  try {
-    await writeFile(file, bumped, "utf8");
-  } catch {
-    return;
-  }
-  const hash = hashContent(bumped);
-  updateState((s) => s.draft === null ? s : {
-    ...s,
-    draft: { ...s.draft, contentHash: hash },
-    snapshotPending: true,
-  });
-  noteDraftUpdated(ctx);
-  if (isCurrentReview(qid, hash)) return;
-  supersedeReviewThenBootFresh(qid, hash, () => {
-    void bootDraftReview(pi, ctx, hash, config);
-  });
+  return doBumpReviewCountAndReboot(pi, ctx, config, attempt, retryTarget, bootDraftReview);
 }
 
 export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
@@ -232,7 +159,13 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   const target = hashContent(content);
   if (state.draft.approvedBy !== null && state.draft.contentHash === target) return;
   if (isCurrentReview(state.qid, target)) return;
-  if (state.parentQid !== null && !childDeviated(getState())) return;
+  if (state.contract !== undefined || (state.parentQid !== null && !childDeviated(getState()))) {
+    const message = promoteAfterPass(pi, ctx, state.qid, "review");
+    if (message !== null) {
+      sendWake(pi, `${message} Sub-quest ${state.qid} auto-promoted to implementing based on contract/parent brief.`);
+    }
+    return;
+  }
   supersedeReviewThenBootFresh(state.qid, target, () => {
     void bootDraftReview(pi, ctx, target, config);
   });
@@ -319,8 +252,17 @@ export async function onTurnEndCatchAll(pi: Pi, ctx: PiCtx): Promise<void> {
     const hash = hashContent(content);
     if (hash === state.draft.contentHash) return;
     if (state.draft.contentHash === null) {
-      // Scaffold absorption: record the baseline silently; creation blinked.
-      updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash } });
+      const sections = parseDraftSections(content);
+      const deliverable = deliverableBody(sections, state.kind).trim();
+      if (deliverable.length === 0) {
+        // Scaffold absorption: record the baseline silently; creation blinked.
+        updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash } });
+        return;
+      }
+      // Plan authored on turn 1: record hash, mark authored, and boot review immediately
+      updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash, planAuthored: true } });
+      noteDraftUpdated(ctx);
+      void maybeBootDraftReview(pi, ctx);
       return;
     }
     if (!handleDraftEdit(expected, hash)) return;

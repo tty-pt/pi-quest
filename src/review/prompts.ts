@@ -28,6 +28,9 @@ export interface ReviewMaterial {
   // The plan's verifiable file:line surface. Reviewers spot-check these lines
   // instead of re-auditing the whole tree for unasserted claims.
   claimManifest?: string;
+  codeDiff?: string;
+  testReceipt?: string;
+  rtmChecklist?: string;
 }
 
 const READ_ONLY_RULES = `MANDATORY INVARIANTS:
@@ -92,11 +95,20 @@ function contextBlock(material: ReviewMaterial): string {
   const transcript = material.transcriptExtract
     ? `\nRESEARCH TRANSCRIPT (bounded extract, most recent first):\n${material.transcriptExtract}\n`
     : "";
+  const rtm = material.rtmChecklist
+    ? `\nREQUIREMENTS TRACEABILITY MATRIX (RTM):\n${material.rtmChecklist}\n`
+    : "";
+  const codeDiff = material.codeDiff
+    ? `\nGIT DIFF (actual changes to verify against requirements):\n${material.codeDiff}\n`
+    : "";
+  const testReceipt = material.testReceipt
+    ? `\nTEST VERIFICATION RECEIPT:\n${material.testReceipt}\n`
+    : "";
   const deliverableLabel = material.kind === "analysis" ? "APPROVED ANALYSIS" : "APPROVED PLAN";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
-
+${rtm}
 ${deliverableLabel}:
 ${material.plan || "(none)"}
 ${diff}
@@ -105,7 +117,7 @@ ${amendments}
 ${history}
 EVIDENCE:
 ${evidence}
-${manifest}${transcript}${rebuttal}${prior}--- END MATERIAL ---`;
+${manifest}${codeDiff}${testReceipt}${transcript}${rebuttal}${prior}--- END MATERIAL ---`;
 }
 
 function draftGuidance(maturity: DraftThresholds, kind: QuestKind | undefined): string {
@@ -145,14 +157,15 @@ You review the ANALYSIS deliverable against the original request: is it complete
 4. The research backing is adequate for the claim made.
 Reviewer preference NEVER blocks; only unmet requirements, ungrounded claims, or out-of-scope drift do.`;
   }
-  return `WHAT YOU MUST EVALUATE (VALIDATION):
-You review the IMPLEMENTATION against the approved plan plus recorded amendments:
-1. Every plan step implemented or explicitly superseded by an amendment;
-2. Amendments stay in scope and carry reasons; scope change is a failure;
-3. Decisions along the way were appropriate and evidenced;
-4. The work is verified (tests, builds, or stated verification).
-When a revision history is present, judge every plan move: a revision that corrected an impossibility while holding the objective is legitimate; a revision that weakens the acceptance bar to fit what was built must FAIL.
-Reviewer preference NEVER blocks; only unmet requirements or out-of-scope drift do.`;
+  return `WHAT YOU MUST EVALUATE (ROOT INTEGRATION VALIDATION):
+You are an adversarial auditor defending the codebase from incomplete or shallow work.
+You review the IMPLEMENTATION against the original request, approved plan, and recorded amendments:
+1. Every item in the request and RTM checklist must correspond to concrete changes in the GIT DIFF. If any requirement is missing from the diff, you MUST issue VERDICT: FAIL.
+2. The TEST VERIFICATION RECEIPT must confirm clean execution (exit code 0). If tests failed or were not run, you MUST issue VERDICT: FAIL.
+3. Scan the GIT DIFF for placeholder implementations: TODO, FIXME, stub functions returning dummy values, or commented-out tests. If found, issue VERDICT: FAIL.
+4. Ensure no regression of repository boundaries (e.g. #ifdef in pure-C isomorphic UX, cross-module #include "*.c").
+5. When a revision history is present, judge every plan move: a revision that corrected an impossibility while holding the objective is legitimate; a revision that weakens the acceptance bar to fit what was built must FAIL.
+Reviewer preference NEVER blocks; only unmet requirements, unverified code, or out-of-scope drift do.`;
 }
 
 const FAST_FAIL = (maturity: DraftThresholds): string =>
@@ -183,4 +196,31 @@ ${contextBlock(material)}
 ${impl}
 ${SELF_ATTACK}
 ${fastFail}${OUTPUT_FORMAT}`;
+}
+
+export function buildContractReviewPrompt(
+  qid: Qid,
+  contractJson: string,
+  diffStat: string,
+  testLog: string,
+): string {
+  return `# TIER-2 CONTRACT AUDIT: ${qid}
+
+You are a Contract Auditor. Verify that Sub-Quest ${qid} fulfilled its contract:
+CONTRACT:
+${contractJson}
+
+GIT DIFF:
+${diffStat}
+
+TEST EXECUTION LOG:
+${testLog}
+
+Verify ONLY:
+1. Did diff stay strictly within allowedPaths?
+2. Did requiredTestCommands execute with exit code 0?
+3. Does the diff implement the assigned acceptance criteria?
+Do NOT debate architecture or system-wide preferences.
+
+${OUTPUT_FORMAT}`;
 }

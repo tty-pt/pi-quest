@@ -15,6 +15,18 @@ export type StatusStyle = "icon" | "text";
 export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
 export type JudgeFallback = "heuristic" | "skip";
 
+export const DEFAULT_TRIGGER_PREFIXES: string[] = [
+  "quest:",
+  "task:",
+  "fix:",
+  "feat:",
+  "refactor:",
+  "chore:",
+  "test:",
+  "@quest",
+  "!quest",
+];
+
 export interface QuestConfig {
   askTimeoutMs: number;
   depthCap: number;
@@ -31,6 +43,7 @@ export interface QuestConfig {
   judgeKey?: string;
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
+  triggerPrefixes: string[];
 }
 
 export const DEFAULT_CONFIG: QuestConfig = {
@@ -47,8 +60,9 @@ export const DEFAULT_CONFIG: QuestConfig = {
   judgeUrl: undefined,
   judgeModel: "qwen",
   judgeKey: undefined,
-  judgeFallback: "heuristic",
+  judgeFallback: "skip",
   judgeTimeoutMs: 2000,
+  triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
 };
 
 function getEnv(key: string): string | undefined {
@@ -61,18 +75,15 @@ function getEnv(key: string): string | undefined {
   return undefined;
 }
 
-export function loadConfig(raw: unknown): QuestConfig {
-  if (typeof raw !== "object" || raw === null) return DEFAULT_CONFIG;
-  const record = raw as Record<string, unknown>;
-  const timeout = record["askTimeoutMs"];
-  const depth = record["depthCap"];
-  const style = record["statusStyle"];
-  const autoArchive = record["autoArchive"];
-  const reviewInactivity = record["reviewInactivityMs"];
-  const reviewMaxDuration = record["reviewMaxDurationMs"];
-  const thresholds = record["draftThresholds"] as Record<string, unknown> | undefined;
-  const bindings = record["bindings"] as Record<string, unknown> | undefined;
-
+function loadJudgeConfig(record: Record<string, unknown>): {
+  judgeMode: JudgeMode;
+  judgeUrl?: string;
+  judgeModel?: string;
+  judgeKey?: string;
+  judgeFallback: JudgeFallback;
+  judgeTimeoutMs: number;
+  triggerPrefixes: string[];
+} {
   const rawJudgeMode = record["judgeMode"] ?? getEnv("PI_QUEST_JUDGE_MODE") ?? getEnv("PI_MM_JUDGE_MODE");
   const judgeMode: JudgeMode =
     rawJudgeMode === "auto" || rawJudgeMode === "systemone" || rawJudgeMode === "heuristic" || rawJudgeMode === "off"
@@ -113,6 +124,40 @@ export function loadConfig(raw: unknown): QuestConfig {
       ? Number(rawJudgeTimeout)
       : DEFAULT_CONFIG.judgeTimeoutMs;
 
+  const rawTriggers = record["triggerPrefixes"] ?? getEnv("PI_QUEST_TRIGGERS");
+  let triggerPrefixes: string[] = DEFAULT_TRIGGER_PREFIXES;
+  if (Array.isArray(rawTriggers)) {
+    triggerPrefixes = rawTriggers
+      .filter((t) => typeof t === "string" && t.trim() !== "")
+      .map((t) => (t as string).trim());
+  } else if (typeof rawTriggers === "string" && rawTriggers.trim() !== "") {
+    triggerPrefixes = rawTriggers.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+
+  return {
+    judgeMode,
+    judgeUrl,
+    judgeModel,
+    judgeKey,
+    judgeFallback,
+    judgeTimeoutMs,
+    triggerPrefixes,
+  };
+}
+
+export function loadConfig(raw: unknown): QuestConfig {
+  if (typeof raw !== "object" || raw === null) return DEFAULT_CONFIG;
+  const record = raw as Record<string, unknown>;
+  const timeout = record["askTimeoutMs"];
+  const depth = record["depthCap"];
+  const style = record["statusStyle"];
+  const autoArchive = record["autoArchive"];
+  const reviewInactivity = record["reviewInactivityMs"];
+  const reviewMaxDuration = record["reviewMaxDurationMs"];
+  const thresholds = record["draftThresholds"] as Record<string, unknown> | undefined;
+  const bindings = record["bindings"] as Record<string, unknown> | undefined;
+  const judge = loadJudgeConfig(record);
+
   return {
     askTimeoutMs: typeof timeout === "number" ? timeout : DEFAULT_CONFIG.askTimeoutMs,
     depthCap: typeof depth === "number" ? depth : DEFAULT_CONFIG.depthCap,
@@ -141,12 +186,7 @@ export function loadConfig(raw: unknown): QuestConfig {
       ? reviewMaxDuration
       : DEFAULT_CONFIG.reviewMaxDurationMs,
     planEditor: typeof record["planEditor"] === "string" ? record["planEditor"] : DEFAULT_CONFIG.planEditor,
-    judgeMode,
-    judgeUrl,
-    judgeModel,
-    judgeKey,
-    judgeFallback,
-    judgeTimeoutMs,
+    ...judge,
   };
 }
 

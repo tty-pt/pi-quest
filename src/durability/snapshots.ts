@@ -78,6 +78,13 @@ export function normalizeState(raw: Record<string, unknown>): QuestState {
       })) as QuestState["children"]
       : [],
     reviewDialogue: Array.isArray(raw["reviewDialogue"]) ? (raw["reviewDialogue"] as QuestState["reviewDialogue"]) : [],
+    contract: raw["contract"] && typeof raw["contract"] === "object" ? (raw["contract"] as QuestState["contract"]) : undefined,
+    rtm: Array.isArray(raw["rtm"]) ? (raw["rtm"] as QuestState["rtm"]) : undefined,
+    questStack: Array.isArray(raw["questStack"]) ? (raw["questStack"] as QuestState["questStack"]) : [],
+    handbackReceipts: Array.isArray(raw["handbackReceipts"]) ? (raw["handbackReceipts"] as QuestState["handbackReceipts"]) : [],
+    lastTestReceipt: raw["lastTestReceipt"] && typeof raw["lastTestReceipt"] === "object"
+      ? (raw["lastTestReceipt"] as QuestState["lastTestReceipt"])
+      : undefined,
     snapshotPending: get("snapshotPending", false),
   };
 }

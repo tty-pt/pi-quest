@@ -21,6 +21,7 @@ export interface FakePi extends Pi {
   tools: PiToolSpec[];
   commands: CommandReg[];
   shortcuts: ShortcutReg[];
+  entryRenderers: Map<string, unknown>;
   execCalls: Array<{ command: string; args: string[] }>;
   execCode: number;
   toolNames: string[];
@@ -34,6 +35,7 @@ export function fakePi(): FakePi {
   const tools: PiToolSpec[] = [];
   const commands: CommandReg[] = [];
   const shortcuts: ShortcutReg[] = [];
+  const entryRenderers = new Map<string, unknown>();
   const execCalls: Array<{ command: string; args: string[] }> = [];
   const subscriptions: string[] = [];
   const eventHandlers: Record<string, Array<(event: unknown, ctx: PiCtx) => unknown>> = {};
@@ -43,6 +45,7 @@ export function fakePi(): FakePi {
     tools,
     commands,
     shortcuts,
+    entryRenderers,
     execCalls,
     subscriptions,
     eventHandlers,
@@ -55,6 +58,9 @@ export function fakePi(): FakePi {
     },
     appendEntry(customType: string, data: unknown): void {
       appended.push({ customType, data });
+    },
+    registerEntryRenderer(type: string, renderer: unknown): void {
+      entryRenderers.set(type, renderer);
     },
     registerTool(tool: PiToolSpec): void {
       tools.push(tool);

@@ -3,6 +3,7 @@
 // SPEC: B1.0 (identity), B1.1-B1.5 (lifecycle), B1.4 (Exact Next Action).
 import type { Qid } from "./qid";
 import { isQid } from "./qid";
+import type { HandbackReceipt, RtmItem, SubQuestContract } from "./contract";
 
 // --- Mode vocabulary (HIGH_LEVEL words; B1.1 codes map onto these) ---
 
@@ -79,6 +80,13 @@ export interface Setback {
   evidence: string[];
 }
 
+export interface VerificationReceipt {
+  command: string;
+  exitCode: number;
+  tailOutput: string;
+  executedAt?: number;
+}
+
 export interface Amendment {
   change: string;
   reasons: string;
@@ -98,6 +106,14 @@ export interface HumanAnswer {
   question: string;
   answer: string;
   late: boolean;
+}
+
+export interface StackFrame {
+  qid: Qid;
+  role: "coordinator" | "worker";
+  contract?: SubQuestContract;
+  savedPhase: Phase;
+  savedState: QuestState;
 }
 
 // --- State ---
@@ -121,6 +137,11 @@ export interface QuestState {
   setbacks: Setback[];
   amendments: Amendment[];
   children: ChildLink[];
+  contract?: SubQuestContract;
+  rtm?: RtmItem[];
+  questStack: StackFrame[];
+  handbackReceipts: HandbackReceipt[];
+  lastTestReceipt?: VerificationReceipt;
   archivedOutcome: ArchivedOutcome | null;
   snapshotPending: boolean;
 }
@@ -144,6 +165,11 @@ export const IDLE_STATE: QuestState = {
   setbacks: [],
   amendments: [],
   children: [],
+  contract: undefined,
+  rtm: undefined,
+  questStack: [],
+  handbackReceipts: [],
+  lastTestReceipt: undefined,
   archivedOutcome: null,
   snapshotPending: false,
 };

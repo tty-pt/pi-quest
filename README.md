@@ -77,6 +77,16 @@ to fit what was built.
 - **Asks that never block** — when the agent needs a human decision it records
   a recommended default, waits a minute, and proceeds on absence. A late
   answer still applies whenever it arrives.
+- **Autonomous Foreman Sub-Quest Dispatcher** — parses markdown backlog items
+  from the plan and sequences sub-quests automatically, mounting each child onto
+  the stack and resuming the coordinator when all tasks complete (or halting on failure).
+- **Deterministic Semantic Linters** — zero-token pre-validation linter verifying
+  codebase constraints (pure-C UX `#ifdef` prevention, cross-module `#include "*.c"`
+  barriers, git conflict markers) before expensive LLM review passes.
+- **Persistent Test Receipts** — captures build and test execution exit codes and log
+  tails, surviving transcript compactions and session reloads.
+- **State & Disk Dual-Reconciliation** — automatically syncs parent markdown checkboxes
+  and records execution receipts into `## Sub-Quests` upon child completion.
 - **Full-screen plan viewer** — `[^Q]` floats the active quest's plan; the status
   bar shows the current phase and qid at all times.
 - **External editor** — opens the plan in your configured editor (falls back to `$EDITOR`).
@@ -177,16 +187,28 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | `judgeUrl` | URL string | `http://127.0.0.1:4242` | Endpoint for Jev System One decisions (falls back to `PI_QUEST_JUDGE_URL` or `PI_MM_JUDGE_URL`). |
 | `judgeModel` | model name | `"qwen"` | Model identifier submitted to the judge service (falls back to `PI_QUEST_JUDGE_MODEL` or `PI_MM_JUDGE_MODEL`). |
 | `judgeKey` | token string | `undefined` | Optional Bearer authorization token for remote endpoints. |
-| `judgeFallback` | `"heuristic"` / `"skip"` | `"heuristic"` | Fallback policy when the judge endpoint is unreachable or times out. |
+| `judgeFallback` | `"skip"` / `"heuristic"` | `"skip"` | Fallback policy when the judge is unreachable or times out: `"skip"` fails closed to conversation with trigger prompts, `"heuristic"` falls back to legacy pattern rules. |
 | `judgeTimeoutMs` | number (ms) | `2000` | Network timeout for judge decision evaluations. |
+| `triggerPrefixes` | array of strings | `["quest:", "task:", "fix:", "feat:", "refactor:", "chore:", "test:", "@quest", "!quest"]` | Deterministic word families that immediately start a quest without querying the judge. |
 
-### Intelligent Quest Intent Detection (Jev System One)
+### Deterministic Trigger Word Families & Intent Detection
 
-When idle, `pi-quest` listens for new user requests to start a quest automatically. Instead of relying solely on brittle regexes or opening quests unconditionally on casual dialogue (such as *"I spoke to my grandfather..."* or memory recall questions), `pi-quest` uses an intelligent decision judge:
+`pi-quest` uses a 2-tier deterministic architecture instead of unpredictable regex guessing:
 
-- **Automatic Intent Classification**: In `"auto"` or `"systemone"` mode, the judge submits a typed choice question (`quest_intent`) to determine whether the user wants to initiate software engineering work (`quest`) versus casual conversation or questions (`conversation`).
-- **Shared Infrastructure**: If you already use `pi-mm` paired with local [axil-auren](https://github.com/tty-pt/auren), `pi-quest` automatically shares the local judge endpoint and settings with zero additional configuration.
-- **Fail-Open & Resilient**: If the inference service is offline or restarting, `pi-quest` never disrupts your conversation: it cleanly degrades to local heuristics or skips according to `judgeFallback`.
+1. **Trigger Word Families (Deterministic First)**:
+   If a prompt starts with any recognized prefix (e.g. `quest:`, `task:`, `fix:`, `feat:`, `@quest`), `pi-quest` cleanly strips the prefix and starts the quest immediately. Zero network requests, zero latency, 100% deterministic.
+2. **Intelligent Judge Evaluation (System One)**:
+   When no trigger prefix is present and the local neural daemon is online, `pi-quest` queries System One on port `4242` to classify whether the user is initiating software tasks versus conversational dialogue.
+3. **Offline Fail-Closed Safety**:
+   If the judge is offline or times out, `pi-quest` avoids false-positive regex guesses: it leaves the conversation active and notifies the user to use a trigger prefix (e.g. `quest:`) or `/quest`.
+
+### Diagnostic Commands
+
+Run `/quest doctor` (or `/quest-doctor`) in the terminal to inspect health:
+```text
+/quest doctor
+```
+Outputs live endpoint connectivity, latency, loaded models, active trigger prefixes, and evaluation policy.
 
 ## Workspace on disk
 

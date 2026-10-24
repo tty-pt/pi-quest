@@ -10,11 +10,15 @@ ${objective}
 
 ## Requirements
 
-<!-- Author each requirement as its own bullet. A draft reaches the review bar at 2 requirements, or 1 requirement + 7 evidence items, with an actionable plan. -->
+<!-- Author each requirement as its own bullet (e.g. - R1: description). A draft reaches the review bar at 2 requirements, or 1 requirement + 7 evidence items, with an actionable plan mapping every requirement. -->
 
 ## Evidence
 
 <!-- Record file-backed proof per requirement (file:line citations or measured verification). -->
+
+## Sub-Quests
+
+<!-- For complex tasks, define bounded sub-quests with assigned requirements, allowed paths, and verification commands. -->
 
 ## Analysis
 

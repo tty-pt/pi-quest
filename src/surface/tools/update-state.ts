@@ -1,5 +1,6 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
 // HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision. The agent's write path: findings, drafts, amendments, claims.
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
@@ -17,6 +18,7 @@ import { draftPath } from "../../domain/paths";
 import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
+import { assertCompletionEligibility, getLatestTestExecution } from "../../validation/evidence-gate";
 import { checkAnalysisParam, checkPlanParam, profileForSavedDoc } from "./draft-profile";
 import { checkPlanCitations } from "./claims";
 import { carryRefinementsToDraft, writeAnalysisToDraft, writePlanRevision, writePlanToDraft } from "./draft-writer";
@@ -48,6 +50,31 @@ async function claimForValidation(
   if (unfinished.length > 0) {
     throw new Error(`complete blocked: unfinished children ${unfinished.map((c) => c.qid).join(", ")}`);
   }
+
+  const hasGit = existsSync(join(ctx.cwd, ".git"));
+
+  if (hasGit) {
+    await assertCompletionEligibility(state, {
+      getDiffStat: async () => {
+        try {
+          const res = await pi.exec("git", ["diff", "--stat", "HEAD"], { cwd: ctx.cwd });
+          return res.code === 0 ? res.stdout : "";
+        } catch {
+          return "";
+        }
+      },
+      getDiffPatch: async () => {
+        try {
+          const res = await pi.exec("git", ["diff", "HEAD"], { cwd: ctx.cwd });
+          return res.code === 0 ? res.stdout : "";
+        } catch {
+          return "";
+        }
+      },
+      getLatestTest: () => state.lastTestReceipt ?? getLatestTestExecution(),
+    });
+  }
+
   const claimed = updateState((s) => claimComplete(s));
   // The claim is unverified until the validator passes: the doc tracks the
   // phase but never marks completion as true on the agent's say-so.

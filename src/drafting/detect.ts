@@ -8,9 +8,30 @@ import { ensureDraftFile, listKnownQids } from "../files";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
 import { classifyUserMessage } from "../subquests/triage";
-import { readQuestConfig, type QuestConfig } from "../config";
+import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../config";
 import { evaluateQuestIntent } from "./judge";
 
+export function matchTriggerPrefix(
+  text: string,
+  prefixes: string[] = DEFAULT_TRIGGER_PREFIXES,
+): { matched: boolean; prefix?: string; objective: string } {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  for (const p of prefixes) {
+    const pLower = p.toLowerCase();
+    if (lower.startsWith(pLower)) {
+      let rest = trimmed.slice(p.length).trim();
+      // Handle optional leading colon, dash, or whitespace: e.g. "quest: foo", "quest:foo", "@quest foo"
+      rest = rest.replace(/^[:\-\s]+/, "").trim();
+      return { matched: true, prefix: p, objective: rest || trimmed };
+    }
+  }
+
+  return { matched: false, objective: trimmed };
+}
+
+// Deprecated legacy heuristic check - kept for explicit opt-in compatibility
 const QUEST_HEADER_PATTERNS = [
   /^#+\s*Quest\b/i,
   /\b(?:Objective|Deliverables|Scope change|Problem statement)\s*[:]/i,
@@ -40,13 +61,32 @@ export async function detectSubstantiveRequest(
   const trimmed = text.trim();
   if (trimmed.startsWith("/")) return false;
 
+  const cfg = config ?? await readQuestConfig(ctx.cwd);
+
+  // 1. Explicit deterministic trigger word families (fast & unambiguous)
+  const trigger = matchTriggerPrefix(trimmed, cfg.triggerPrefixes);
+  if (trigger.matched) {
+    const objective = trigger.objective;
+    const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
+    replaceState(createQuest(objective, qid));
+    await ensureDraftFile(ctx, qid, qid, objective);
+    emitNow(pi);
+    sendSteer(
+      pi,
+      `New quest ${qid} opened via trigger '${trigger.prefix}': "${objective.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
+        `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
+        `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly. During drafting the quest doc is the only writable file; during implementing and validating it is locked — revise the plan via quest_update_state {planRevision: ...} (peer-reviewed) and claim completion via quest_update_state {claimComplete: true}.`,
+    );
+    return true;
+  }
+
   const kind = classifyUserMessage(trimmed);
   // Fast filter: explicit acks, confirmations, and short questions are never new quests
   if (kind === "ack" || kind === "confirmation") return false;
   if (kind === "question" && trimmed.length < 250) return false;
 
-  const cfg = config ?? await readQuestConfig(ctx.cwd);
-  const decision = await evaluateQuestIntent(trimmed, cfg);
+  // 2. Intelligent judge intent classification
+  const decision = await evaluateQuestIntent(trimmed, cfg, ctx);
   if (!decision.isQuest) return false;
 
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));

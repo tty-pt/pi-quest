@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { updateState } from "./app/store";
 import { hashContent } from "./drafting/plan-text";
 import { draftPath } from "./domain/paths";
-import { upsertDocStatus } from "./domain/quest-doc";
+import { reconcileDocContent, upsertDocStatus } from "./domain/quest-doc";
+import type { HandbackReceipt } from "./domain/contract";
 import type { Qid } from "./domain/qid";
 import type { PiCtx } from "./hooks/events";
 
@@ -45,4 +46,29 @@ export async function setDocStatus(
       ? s
       : { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true }
   );
+}
+
+// Reconcile parent document on sub-quest return: check off completed RTM requirements
+// and append sub-quest receipt findings. Best-effort: file errors never break execution.
+export async function reconcileParentDocOnReturn(
+  cwd: string,
+  parentQid: Qid,
+  receipt: HandbackReceipt,
+): Promise<void> {
+  const filePath = join(cwd, draftPath(parentQid));
+  try {
+    const content = await readFile(filePath, "utf8");
+    const updated = reconcileDocContent(content, receipt);
+    if (updated !== content) {
+      await writeFile(filePath, updated, "utf8");
+      const hash = hashContent(updated);
+      updateState((s) =>
+        s.qid === parentQid && s.draft !== null
+          ? { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true }
+          : s
+      );
+    }
+  } catch {
+    // Best-effort: missing or unwritable doc never throws
+  }
 }

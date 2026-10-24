@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 import type { QuestKind, QuestState } from "../domain/quest";
 import type { ReviewMaterial } from "../review/prompts";
+import { checkRtmCoverage, type RtmItem } from "../domain/contract";
 import { diffPlans } from "./plan-diff";
 
 export interface DraftSections {
@@ -93,6 +94,22 @@ export function parseDraftSections(text: string): DraftSections {
   };
 }
 
+export function extractRtmFromRequirements(requirements: string[]): RtmItem[] {
+  const rtm: RtmItem[] = [];
+  for (const req of requirements) {
+    const clean = req.replace(/^\*+|\*+$/g, "").trim();
+    const m = clean.match(/^([A-Za-z0-9_-]+)[:\-]\s*(.*)$/);
+    if (m && /^R\d+/i.test(m[1])) {
+      rtm.push({
+        id: m[1].toUpperCase(),
+        description: m[2],
+        status: "pending",
+      });
+    }
+  }
+  return rtm;
+}
+
 export function meetsReviewThresholds(
   sections: DraftSections,
   thresholds = DEFAULT_CONFIG.draftThresholds,
@@ -102,7 +119,15 @@ export function meetsReviewThresholds(
   const ev = sections.evidence.length;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
   const authored = kind === "analysis" ? sections.analysis !== "" : sections.plan.length > 0;
-  return counts && authored;
+  if (!counts || !authored) return false;
+  if (kind === "standard") {
+    const rtm = extractRtmFromRequirements(sections.requirements);
+    if (rtm.length > 0) {
+      const coverage = checkRtmCoverage(rtm, sections.plan);
+      if (!coverage.covered) return false;
+    }
+  }
+  return true;
 }
 
 // The deterministic draft profile the agent sees before and at every save:
@@ -137,6 +162,11 @@ export function draftProfileText(
       gaps.push(`add ${thresholds.requirements - req} more requirements`);
     } else if (ev < thresholds.evidence) {
       gaps.push(`add ${thresholds.evidence - ev} more evidence items`);
+    }
+    const rtm = extractRtmFromRequirements(sections.requirements);
+    const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
+    if (!rtmCoverage.covered) {
+      gaps.push(`map requirement(s) ${rtmCoverage.missing.join(", ")} into the plan or sub-quest backlog`);
     }
     lines.push(`reviewability: maturity bar NOT met${gapLeg}; missing: ${gaps.join("; ") || "none"}`);
   }
