@@ -69,15 +69,6 @@ export function parseDraftSections(text: string): DraftSections {
   let section: "requirements" | "evidence" | "plan" | "analysis" | "amendments" | null = null;
   let inComment = false;
   for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (inComment) {
-      if (trimmed.includes("-->")) inComment = false;
-      continue;
-    }
-    if (trimmed.startsWith("<!--")) {
-      if (!trimmed.includes("-->")) inComment = true;
-      continue;
-    }
     const header = line.match(/^##\s+(.+?)\s*$/);
     if (header) {
       const name = header[1].toLowerCase();
@@ -98,6 +89,15 @@ export function parseDraftSections(text: string): DraftSections {
     }
     if (section === "analysis") {
       analysisLines.push(line);
+      continue;
+    }
+    const trimmed = line.trim();
+    if (inComment) {
+      if (trimmed.includes("-->")) inComment = false;
+      continue;
+    }
+    if (trimmed.startsWith("<!--")) {
+      if (!trimmed.includes("-->")) inComment = true;
       continue;
     }
     const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
@@ -280,7 +280,7 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
   const analysis = state.kind === "analysis";
   const deliverable = deliverableBody(sections, state.kind);
   const openRebuttal = [...state.reviewDialogue].reverse().find((d) => d.verdictAfter === undefined);
-  const stateAmendments = state.amendments.map((a) => `${a.change} (${a.reasons})`);
+  const stateAmendments = state.amendments.map((a: { change: string; reasons: string }) => `${a.change} (${a.reasons})`);
   const allAmendments = Array.from(new Set([...stateAmendments, ...(sections.amendments ?? [])]));
   const base: ReviewMaterial = {
     objective: state.pendingRootRequest ?? state.objective,
