@@ -67,7 +67,17 @@ export function parseDraftSections(text: string): DraftSections {
   const analysisLines: string[] = [];
   const amendments: string[] = [];
   let section: "requirements" | "evidence" | "plan" | "analysis" | "amendments" | null = null;
+  let inComment = false;
   for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (inComment) {
+      if (trimmed.includes("-->")) inComment = false;
+      continue;
+    }
+    if (trimmed.startsWith("<!--")) {
+      if (!trimmed.includes("-->")) inComment = true;
+      continue;
+    }
     const header = line.match(/^##\s+(.+?)\s*$/);
     if (header) {
       const name = header[1].toLowerCase();
