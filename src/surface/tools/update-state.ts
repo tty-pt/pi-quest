@@ -82,9 +82,13 @@ async function claimForValidation(
       getDiffStat: async () => {
         try {
           const res = await pi.exec("git", ["diff", "--stat", "HEAD"], { cwd: ctx.cwd });
-          if (res.code === 0 && res.stdout.trim().length > 0) return res.stdout;
+          const code = (res as any).code ?? (res as any).exitCode;
+          const out = (res as any).stdout ?? (res as any).output ?? "";
+          if (code === 0 && out.trim().length > 0) return out;
           const headRes = await pi.exec("git", ["diff", "--stat", "HEAD~1"], { cwd: ctx.cwd });
-          return headRes.code === 0 ? headRes.stdout : "";
+          const headCode = (headRes as any).code ?? (headRes as any).exitCode;
+          const headOut = (headRes as any).stdout ?? (headRes as any).output ?? "";
+          return headCode === 0 ? headOut : "";
         } catch {
           return "";
         }
@@ -92,9 +96,13 @@ async function claimForValidation(
       getDiffPatch: async () => {
         try {
           const res = await pi.exec("git", ["diff", "HEAD"], { cwd: ctx.cwd });
-          if (res.code === 0 && res.stdout.trim().length > 0) return res.stdout;
+          const code = (res as any).code ?? (res as any).exitCode;
+          const out = (res as any).stdout ?? (res as any).output ?? "";
+          if (code === 0 && out.trim().length > 0) return out;
           const headRes = await pi.exec("git", ["diff", "HEAD~1"], { cwd: ctx.cwd });
-          return headRes.code === 0 ? headRes.stdout : "";
+          const headCode = (headRes as any).code ?? (headRes as any).exitCode;
+          const headOut = (headRes as any).stdout ?? (headRes as any).output ?? "";
+          return headCode === 0 ? headOut : "";
         } catch {
           return "";
         }
