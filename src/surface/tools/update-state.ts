@@ -1,13 +1,17 @@
 // HIGH_LEVEL: #tools (main agent) — quest_update_state.
 // HIGH_LEVEL: #plan revision — planRevision stages a re-reviewable revision. The agent's write path: findings, drafts, amendments, claims.
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
 import {
   createQuest,
+  markChanged,
   recordAmendment,
   recordRefinement,
+  type Amendment,
+  type QuestKind,
   type QuestState,
 } from "../../domain/quest";
 import { claimComplete, createDraft, demoteToDrafting, demoteToImplementing } from "../../domain/transitions";
@@ -17,18 +21,40 @@ import { draftPath } from "../../domain/paths";
 import { type Qid } from "../../domain/qid";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { ensureValidationFlow } from "../../validation/flow";
+import { assertCompletionEligibility, getLatestTestExecution } from "../../validation/evidence-gate";
 import { checkAnalysisParam, checkPlanParam, profileForSavedDoc } from "./draft-profile";
 import { checkPlanCitations } from "./claims";
 import { carryRefinementsToDraft, writeAnalysisToDraft, writePlanRevision, writePlanToDraft } from "./draft-writer";
+import { spliceAmendmentsSection, hashContent } from "../../drafting/plan-text";
+import { extractRecentConversationContext } from "../../durability/transcript";
 import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
-async function provisionRootQuest(ctx: PiCtx, objective: string): Promise<Qid> {
+async function syncAmendmentsToDraft(ctx: PiCtx, qid: Qid, amendments: Amendment[]): Promise<void> {
+  const filePath = join(ctx.cwd, draftPath(qid));
+  if (!existsSync(filePath)) return;
+  try {
+    const content = await readFile(filePath, "utf8");
+    const formatted = amendments.map((a) => `${a.change} (${a.reasons})`);
+    const updated = spliceAmendmentsSection(content, formatted);
+    if (updated !== content) {
+      await writeFile(filePath, updated, "utf8");
+      const hash = hashContent(updated);
+      updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true });
+    }
+  } catch {
+    // Best-effort sync to draft doc
+  }
+}
+
+async function provisionRootQuest(ctx: PiCtx, objective: string, kind: QuestKind = "standard"): Promise<Qid> {
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  replaceState(createQuest(objective, qid));
-  await ensureDraftFile(ctx, qid, qid, objective);
+  const base = createQuest(objective, qid);
+  replaceState(markChanged(base, { kind }));
+  const context = extractRecentConversationContext(ctx);
+  await ensureDraftFile(ctx, qid, qid, objective, context);
   return qid;
 }
 
@@ -48,6 +74,35 @@ async function claimForValidation(
   if (unfinished.length > 0) {
     throw new Error(`complete blocked: unfinished children ${unfinished.map((c) => c.qid).join(", ")}`);
   }
+
+  const hasGit = existsSync(join(ctx.cwd, ".git"));
+
+  if (hasGit) {
+    await assertCompletionEligibility(state, {
+      getDiffStat: async () => {
+        try {
+          const res = await pi.exec("git", ["diff", "--stat", "HEAD"], { cwd: ctx.cwd });
+          if (res.code === 0 && res.stdout.trim().length > 0) return res.stdout;
+          const headRes = await pi.exec("git", ["diff", "--stat", "HEAD~1"], { cwd: ctx.cwd });
+          return headRes.code === 0 ? headRes.stdout : "";
+        } catch {
+          return "";
+        }
+      },
+      getDiffPatch: async () => {
+        try {
+          const res = await pi.exec("git", ["diff", "HEAD"], { cwd: ctx.cwd });
+          if (res.code === 0 && res.stdout.trim().length > 0) return res.stdout;
+          const headRes = await pi.exec("git", ["diff", "HEAD~1"], { cwd: ctx.cwd });
+          return headRes.code === 0 ? headRes.stdout : "";
+        } catch {
+          return "";
+        }
+      },
+      getLatestTest: () => state.lastTestReceipt ?? getLatestTestExecution(),
+    });
+  }
+
   const claimed = updateState((s) => claimComplete(s));
   // The claim is unverified until the validator passes: the doc tracks the
   // phase but never marks completion as true on the agent's say-so.
@@ -201,11 +256,11 @@ export async function applyUpdate(
   const probe = (await Promise.all([checkPlanParam(ctx, params), checkAnalysisParam(ctx, params)])).find((p) => p.applied.length > 0 || p.error !== undefined);
   if (probe !== undefined) return { applied: probe.applied, error: probe.error };
   if (state.qid === null) {
-    const objective = params["objective"];
+    const objective = params["objective"] ?? params["userPrompt"];
     if (typeof objective !== "string" || objective.trim() === "") {
       return { applied, error: "no active quest; pass objective to create one" };
     }
-    const qid = await provisionRootQuest(ctx, objective.trim());
+    const qid = await provisionRootQuest(ctx, (objective as string).trim(), (kind as QuestKind) ?? "standard");
     state = getState();
     applied.push(`created quest ${qid}`);
   }
@@ -220,8 +275,10 @@ export async function applyUpdate(
   const reasons = ((amendment as Record<string, unknown> | undefined)?.["reasons"] as string | undefined) ?? "";
   if (typeof change === "string" && change.trim() !== "" && state.qid) {
     try {
+      const qid = state.qid;
       state = updateState((s) => recordAmendment(s, change.trim(), typeof reasons === "string" ? reasons : ""));
       applied.push("amendment recorded");
+      await syncAmendmentsToDraft(ctx, qid, state.amendments);
     } catch (err) {
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }

@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #jev quest judge — intelligent Jev System One classification
+// HIGH_LEVEL: #drafting — intelligent Jev System One classification
 // for determining whether incoming user input constitutes genuine quest material.
 import type { QuestConfig } from "../config.ts";
 import { isQuestLikeRequest } from "./detect.ts";
@@ -119,9 +119,53 @@ export async function callJevQuestJudge(prompt: string, cfg: QuestConfig): Promi
   }
 }
 
+import type { PiCtx } from "../hooks/events.ts";
+
+export interface JudgeHealthReport {
+  ok: boolean;
+  endpoint: string;
+  latencyMs: number;
+  models?: string[];
+  error?: string;
+}
+
+export async function checkJudgeHealth(cfg: QuestConfig): Promise<JudgeHealthReport> {
+  const rawUrl = cfg.judgeUrl ? cfg.judgeUrl.trim() : "http://127.0.0.1:4242";
+  const base = rawUrl.replace(/\/+$/, "").replace(/\/api\/v1\/systemone$/, "").replace(/\/v1$/, "");
+  const start = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.min(cfg.judgeTimeoutMs || 2000, 3000));
+
+  try {
+    const res = await fetch(`${base}/v1/models`, {
+      method: "GET",
+      headers: cfg.judgeKey ? { Authorization: `Bearer ${cfg.judgeKey.trim()}` } : {},
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - start;
+
+    if (!res.ok) {
+      return { ok: false, endpoint: base, latencyMs, error: `HTTP ${res.status}: ${res.statusText}` };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const models = Array.isArray(data?.data)
+      ? data.data.map((m: { id?: string }) => m.id).filter((id: unknown): id is string => typeof id === "string")
+      : undefined;
+
+    return { ok: true, endpoint: base, latencyMs, models };
+  } catch (err: unknown) {
+    const latencyMs = Date.now() - start;
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, endpoint: base, latencyMs, error: msg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface QuestIntentResult {
   isQuest: boolean;
-  source: "llm" | "heuristic";
+  source: "llm" | "heuristic" | "trigger";
   degraded?: boolean;
   reason?: string;
 }
@@ -129,13 +173,14 @@ export interface QuestIntentResult {
 export async function evaluateQuestIntent(
   prompt: string,
   cfg: QuestConfig,
+  ctx?: PiCtx,
 ): Promise<QuestIntentResult> {
   // 1. Off mode
   if (cfg.judgeMode === "off") {
     return { isQuest: false, source: "heuristic", reason: "Judge mode is off" };
   }
 
-  // 2. Explicit heuristic mode
+  // 2. Explicit heuristic mode (opt-in legacy)
   if (cfg.judgeMode === "heuristic") {
     const isQuest = isQuestLikeRequest(prompt);
     return { isQuest, source: "heuristic", reason: isQuest ? "Matched quest heuristic" : "Did not match quest heuristic" };
@@ -143,11 +188,11 @@ export async function evaluateQuestIntent(
 
   // 3. Auto / System One with missing endpoint
   if (!cfg.judgeUrl || cfg.judgeUrl.trim() === "") {
-    if (cfg.judgeFallback === "skip") {
-      return { isQuest: false, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=skip" };
+    if (cfg.judgeFallback === "heuristic") {
+      const isQuest = isQuestLikeRequest(prompt);
+      return { isQuest, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=heuristic" };
     }
-    const isQuest = isQuestLikeRequest(prompt);
-    return { isQuest, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=heuristic" };
+    return { isQuest: false, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=skip" };
   }
 
   // 4. Call Jev System One judge
@@ -160,21 +205,21 @@ export async function evaluateQuestIntent(
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Non-fatal fallback
-    if (cfg.judgeFallback === "skip") {
+    if (cfg.judgeFallback === "heuristic") {
+      const isQuest = isQuestLikeRequest(prompt);
       return {
-        isQuest: false,
+        isQuest,
         source: "heuristic",
         degraded: true,
-        reason: `Judge failed (${msg}); fallback=skip`,
+        reason: `Judge failed (${msg}); fallback=heuristic`,
       };
     }
-    const isQuest = isQuestLikeRequest(prompt);
+
     return {
-      isQuest,
+      isQuest: false,
       source: "heuristic",
       degraded: true,
-      reason: `Judge failed (${msg}); fallback=heuristic`,
+      reason: `Judge failed (${msg}); fallback=skip (triggers or /quest required)`,
     };
   }
 }

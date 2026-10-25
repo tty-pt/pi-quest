@@ -3,6 +3,7 @@
 // it honest on claims and demotes.
 // Pure string helpers over the quest document; file I/O lives in the
 // adapters (quest-doc.ts at src root), never here.
+import type { HandbackReceipt } from "./contract";
 
 export interface DocStatus {
   phase: string | null;
@@ -62,4 +63,45 @@ export function upsertDocStatus(text: string, phase: string, complete: boolean):
   if (!completeSet) insert.push(completeLine);
   if (insert.length > 0) rebuilt.splice(1, 0, ...insert);
   return [...lines.slice(0, header), ...rebuilt, ...lines.slice(end)].join("\n");
+}
+
+export function reconcileDocContent(text: string, receipt: HandbackReceipt): string {
+  let lines = text.split("\n");
+
+  // 1. If COMPLETED, check off assigned requirements
+  if (receipt.status === "COMPLETED" && receipt.assignedRequirements.length > 0) {
+    const assigned = new Set(receipt.assignedRequirements.map((r) => r.toLowerCase()));
+    lines = lines.map((line) => {
+      const match = line.match(/^(\s*-\s*\[)\s*(\]\s*.*?(\b[A-Za-z0-9_.-]+\b).*)$/);
+      if (match) {
+        for (const req of assigned) {
+          const pattern = new RegExp(`\\b${req}\\b`, "i");
+          if (pattern.test(line)) {
+            return line.replace(/^(\s*-\s*\[)\s*(\])/, "$1x$2");
+          }
+        }
+      }
+      return line;
+    });
+  }
+
+  // 2. Format receipt bullet
+  const mark = receipt.status === "COMPLETED" ? "x" : "!";
+  const testInfo = receipt.testCommand ? ` [test: ${receipt.testCommand} ${receipt.testPassed ? "passed" : "failed"}]` : "";
+  const receiptLine = `- [${mark}] Sub-Quest ${receipt.childQid} (${receipt.status}): ${receipt.findings}${testInfo}`;
+
+  // 3. Insert into ## Sub-Quests if present, or append
+  const headerIdx = lines.findIndex((l) => /^##\s+Sub-Quests\b/i.test(l));
+  if (headerIdx !== -1) {
+    lines.splice(headerIdx + 1, 0, receiptLine);
+    return lines.join("\n");
+  }
+
+  const endIdx = lines.findIndex((l) => /^##\s+Implementation Plan\b/i.test(l));
+  if (endIdx !== -1) {
+    lines.splice(endIdx, 0, `## Sub-Quests\n\n${receiptLine}\n`);
+    return lines.join("\n");
+  }
+
+  return `${lines.join("\n").trimEnd()}\n\n## Sub-Quests\n\n${receiptLine}\n`;
 }

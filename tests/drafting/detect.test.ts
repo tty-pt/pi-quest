@@ -14,13 +14,13 @@ function tmp(): string {
   return mkdtempSync(join(tmpdir(), "pi-quest-detect-"));
 }
 
-Deno.test("detection opens a provisional quest on substance", async () => {
+Deno.test("detection opens a provisional quest on substance via trigger prefix", async () => {
   replaceState(IDLE_STATE);
   const pi = fakePi();
   const created = await detectSubstantiveRequest(
     pi,
     fakeCtx(tmp()),
-    "Rebuild the review pipeline so verdicts carry severity and evidence.",
+    "quest: Rebuild the review pipeline so verdicts carry severity and evidence.",
   );
   check(created, "created");
   check(getState().phase === "provisional", "provisional");
@@ -34,13 +34,13 @@ Deno.test("detection pre-creates the draft scaffold file", async () => {
   replaceState(IDLE_STATE);
   const pi = fakePi();
   const cwd = tmp();
-  const request = "Rebuild the review pipeline so verdicts carry severity and evidence.";
+  const request = "quest: Rebuild the review pipeline so verdicts carry severity and evidence.";
   const created = await detectSubstantiveRequest(pi, fakeCtx(cwd), request);
   check(created, "created");
   check(getState().phase === "provisional", "flow unchanged: still provisional");
   check(getState().draft === null, "flow unchanged: first draft still later");
   const file = await readFile(join(cwd, draftPath(getState().qid!)), "utf8");
-  check(file.includes(request), "scaffold carries the request");
+  check(file.includes("Rebuild the review pipeline"), "scaffold carries the objective");
   check(file.includes("## Implementation Plan"), "scaffold has plan section");
   replaceState(IDLE_STATE);
 });
@@ -116,4 +116,47 @@ Deno.test("detection uses Jev System One judge to classify quest intent", async 
   } finally {
     await server.shutdown();
   }
+});
+
+Deno.test("detection opens quest deterministically on trigger prefix without judge", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  const cfg: QuestConfig = {
+    ...DEFAULT_CONFIG,
+    judgeMode: "off", // judge is off completely
+  };
+
+  const res1 = await detectSubstantiveRequest(pi, ctx, "quest: refactor the caching engine", cfg);
+  check(res1, "quest created via 'quest:' prefix");
+  check(getState().phase === "provisional", "phase is provisional");
+  check(getState().objective === "refactor the caching engine", "objective prefix stripped");
+  replaceState(IDLE_STATE);
+
+  const res2 = await detectSubstantiveRequest(pi, ctx, "fix:memory timeout bug", cfg);
+  check(res2, "quest created via 'fix:' prefix without space");
+  check(getState().objective === "memory timeout bug", "objective stripped cleanly");
+  replaceState(IDLE_STATE);
+
+  const res3 = await detectSubstantiveRequest(pi, ctx, "@quest add doctor command", cfg);
+  check(res3, "quest created via '@quest' prefix");
+  check(getState().objective === "add doctor command", "objective stripped cleanly");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("detection fails closed when judge is unreachable and no trigger is present", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  const cfg: QuestConfig = {
+    ...DEFAULT_CONFIG,
+    judgeMode: "auto",
+    judgeUrl: "http://127.0.0.1:59999", // Unreachable port
+    judgeFallback: "skip",
+  };
+
+  const res = await detectSubstantiveRequest(pi, ctx, "Improve latency across all queries", cfg);
+  check(!res, "failed closed without guessing via heuristics");
+  check(getState().phase === "idle", "phase remains idle");
+  replaceState(IDLE_STATE);
 });

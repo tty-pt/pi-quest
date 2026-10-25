@@ -21,6 +21,7 @@ import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
 import { parseDraftSections } from "../drafting/plan-text";
 import { extractQuestTranscript } from "../durability/transcript";
+import { getLatestTestExecution } from "./evidence-gate";
 
 export const CONFIRM_PATTERN = /^\s*confirm(?:ed)?\s*[.!]*$/i;
 
@@ -107,6 +108,15 @@ export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<Re
       transcriptExtract: await extractQuestTranscript(ctx, state.qid),
     };
   }
+  const testReceipt = getLatestTestExecution();
+  const testReceiptText = testReceipt
+    ? `Command: ${testReceipt.command}\nExit Code: ${testReceipt.exitCode}\nOutput Tail:\n${testReceipt.tailOutput}`
+    : "(no test execution recorded in this session)";
+
+  const rtmText = state.rtm && state.rtm.length > 0
+    ? state.rtm.map((r) => `- [${r.status === "satisfied" ? "x" : " "}] ${r.id}: ${r.description} (status: ${r.status})`).join("\n")
+    : undefined;
+
   return {
     objective: state.pendingRootRequest ?? state.objective,
     plan,
@@ -115,10 +125,13 @@ export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<Re
       ...state.refinements,
       ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
       ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
+      ...(state.handbackReceipts ?? []).map((h) => `child ${h.childQid} (${h.status}): ${h.findings} [test: ${h.testCommand}, passed: ${h.testPassed}]`),
     ],
     amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
     planRevisionHistory: formatRevisionHistory(state),
     implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
+    testReceipt: testReceiptText,
+    rtmChecklist: rtmText,
   };
 }
 

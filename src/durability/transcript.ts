@@ -197,3 +197,32 @@ export async function extractQuestTranscript(
   }
   return boundTranscript(texts, maxChars);
 }
+
+export function extractRecentConversationContext(
+  ctx: PiCtx,
+  maxEntries = 6,
+  maxChars = 2500,
+): string {
+  try {
+    if (!ctx || !ctx.sessionManager || typeof ctx.sessionManager.getEntries !== "function") {
+      return "";
+    }
+    const entries = ctx.sessionManager.getEntries();
+    if (!Array.isArray(entries) || entries.length === 0) return "";
+    const texts: string[] = [];
+    for (let i = entries.length - 1; i >= 0 && texts.length < maxEntries; i--) {
+      const entry = entries[i];
+      if (!entry) continue;
+      const text = messageText(entry["data"] ?? entry);
+      if (text !== null && text.trim().length > 0) {
+        texts.unshift(text);
+      }
+    }
+    if (texts.length === 0) return "";
+    const joined = texts.join("\n\n");
+    if (joined.length <= maxChars) return joined;
+    return `... [earlier conversation omitted] ...\n\n${joined.slice(-maxChars)}`;
+  } catch {
+    return "";
+  }
+}

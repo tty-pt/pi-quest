@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 import type { QuestKind, QuestState } from "../domain/quest";
 import type { ReviewMaterial } from "../review/prompts";
+import { checkRtmCoverage, type RtmItem } from "../domain/contract";
 import { diffPlans } from "./plan-diff";
 
 export interface DraftSections {
@@ -14,6 +15,7 @@ export interface DraftSections {
   plan: string;
   // Analysis quests deliver the quest doc's ## Analysis body here (D1).
   analysis: string;
+  amendments?: string[];
 }
 
 export function hashContent(content: string): string {
@@ -51,12 +53,21 @@ export function spliceAnalysisSection(text: string, analysis: string): string {
   return spliceSection(text, "analysis", "Analysis", analysis);
 }
 
+export function spliceAmendmentsSection(text: string, amendments: string[]): string {
+  const body = amendments.length > 0
+    ? amendments.map((a) => `- ${a}`).join("\n")
+    : "<!-- No amendments recorded -->";
+  return spliceSection(text, "amendment", "Amendments", body);
+}
+
 export function parseDraftSections(text: string): DraftSections {
   const requirements: string[] = [];
   const evidence: string[] = [];
   const planLines: string[] = [];
   const analysisLines: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | "analysis" | null = null;
+  const amendments: string[] = [];
+  let section: "requirements" | "evidence" | "plan" | "analysis" | "amendments" | null = null;
+  let inComment = false;
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
     if (header) {
@@ -65,6 +76,7 @@ export function parseDraftSections(text: string): DraftSections {
       else if (name.includes("evidence")) section = "evidence";
       else if (name.includes("analysis")) section = "analysis";
       else if (name.includes("implementation plan")) section = "plan";
+      else if (name.includes("amendment")) section = "amendments";
       // Pre-draft investigation recorded via recordRefinement is research:
       // its bullets fold into the evidence list so it counts toward the bar.
       else if (name.includes("findings") && name.includes("pre-draft")) section = "evidence";
@@ -79,10 +91,20 @@ export function parseDraftSections(text: string): DraftSections {
       analysisLines.push(line);
       continue;
     }
+    const trimmed = line.trim();
+    if (inComment) {
+      if (trimmed.includes("-->")) inComment = false;
+      continue;
+    }
+    if (trimmed.startsWith("<!--")) {
+      if (!trimmed.includes("-->")) inComment = true;
+      continue;
+    }
     const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
-    if (bullet && (section === "requirements" || section === "evidence")) {
+    if (bullet && (section === "requirements" || section === "evidence" || section === "amendments")) {
       if (section === "requirements") requirements.push(bullet[1]);
-      else evidence.push(bullet[1]);
+      else if (section === "evidence") evidence.push(bullet[1]);
+      else if (section === "amendments") amendments.push(bullet[1]);
     }
   }
   return {
@@ -90,7 +112,24 @@ export function parseDraftSections(text: string): DraftSections {
     evidence,
     plan: planLines.join("\n").trim(),
     analysis: analysisLines.join("\n").trim(),
+    amendments,
   };
+}
+
+export function extractRtmFromRequirements(requirements: string[]): RtmItem[] {
+  const rtm: RtmItem[] = [];
+  for (const req of requirements) {
+    const clean = req.replace(/^\*+|\*+$/g, "").trim();
+    const m = clean.match(/^([A-Za-z0-9_-]+)[:\-]\s*(.*)$/);
+    if (m && /^R\d+/i.test(m[1])) {
+      rtm.push({
+        id: m[1].toUpperCase(),
+        description: m[2],
+        status: "pending",
+      });
+    }
+  }
+  return rtm;
 }
 
 export function meetsReviewThresholds(
@@ -102,7 +141,15 @@ export function meetsReviewThresholds(
   const ev = sections.evidence.length;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
   const authored = kind === "analysis" ? sections.analysis !== "" : sections.plan.length > 0;
-  return counts && authored;
+  if (!counts || !authored) return false;
+  if (kind === "standard") {
+    const rtm = extractRtmFromRequirements(sections.requirements);
+    if (rtm.length > 0) {
+      const coverage = checkRtmCoverage(rtm, sections.plan);
+      if (!coverage.covered) return false;
+    }
+  }
+  return true;
 }
 
 // The deterministic draft profile the agent sees before and at every save:
@@ -137,6 +184,11 @@ export function draftProfileText(
       gaps.push(`add ${thresholds.requirements - req} more requirements`);
     } else if (ev < thresholds.evidence) {
       gaps.push(`add ${thresholds.evidence - ev} more evidence items`);
+    }
+    const rtm = extractRtmFromRequirements(sections.requirements);
+    const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
+    if (!rtmCoverage.covered) {
+      gaps.push(`map requirement(s) ${rtmCoverage.missing.join(", ")} into the plan or sub-quest backlog`);
     }
     lines.push(`reviewability: maturity bar NOT met${gapLeg}; missing: ${gaps.join("; ") || "none"}`);
   }
@@ -228,12 +280,14 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
   const analysis = state.kind === "analysis";
   const deliverable = deliverableBody(sections, state.kind);
   const openRebuttal = [...state.reviewDialogue].reverse().find((d) => d.verdictAfter === undefined);
+  const stateAmendments = state.amendments.map((a: { change: string; reasons: string }) => `${a.change} (${a.reasons})`);
+  const allAmendments = Array.from(new Set([...stateAmendments, ...(sections.amendments ?? [])]));
   const base: ReviewMaterial = {
     objective: state.pendingRootRequest ?? state.objective,
     plan: deliverable,
     kind: state.kind,
     evidence: sections.evidence,
-    amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
+    amendments: allAmendments,
     rebuttal: openRebuttal?.implementerRebuttal,
     claimManifest: buildClaimManifest(sections, state.kind),
   };

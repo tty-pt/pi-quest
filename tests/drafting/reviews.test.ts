@@ -1,5 +1,5 @@
 import { check } from "../check.ts";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -209,6 +209,35 @@ Deno.test("turn-end catch-all absorbs the scaffold silently, then blinks on bypa
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("turn-end catch-all boots review immediately if deliverable is authored on turn 1", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-turn1-"));
+  const qid = "t01test" as Qid;
+  replaceState(createDraft(createQuest("req", qid), "thing"));
+  const file = join(cwd, draftPath(qid));
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(
+    file,
+    "# t01test\n\n## Requirements\n- R1\n- R2\n\n## Implementation Plan\nPhase 1: implement\n",
+    "utf8",
+  );
+  const calls: Array<string | undefined> = [];
+  const ctx = fakeCtx(cwd, [], {
+    setStatus: (_key: string, text: string | undefined) => {
+      calls.push(text);
+    },
+  });
+  const pi = fakePi();
+  try {
+    await onTurnEndCatchAll(pi, ctx);
+    check(calls.length > 0, "review booted and status updated on turn 1 authored plan");
+    check(getState().draft?.planAuthored === true, "planAuthored marked true");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 

@@ -6,6 +6,7 @@
 // unknown tools default to allowed; exemption first; block-message invariant).
 import type { QuestState } from "./quest";
 import { draftPath } from "./paths";
+import { isPathAllowedByContract } from "./contract";
 
 export type ToolClass =
   | "read"
@@ -133,6 +134,16 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
   // maintain, and an unrecognized tool never blocks research.
   if (!isWriteSignal(ref.toolClass)) {
     return { allowed: true };
+  }
+  if (state.phase === "implementing" && state.contract && ref.path) {
+    if (!isPathAllowedByContract(state.contract, ref.path)) {
+      const allowedList = state.contract.allowedPaths?.join(", ") ?? "";
+      return blocked(
+        "SCOPE_VIOLATION",
+        "CHILD_PATH_LOCKED",
+        `Sub-quest ${state.qid} is restricted to allowedPaths: [${allowedList}]. Editing ${ref.path} is blocked. Amend parent contract or resolve via parent.`,
+      );
+    }
   }
   if (state.phase === "drafting") {
     return draftDecision(state, draftFile ?? "the draft file");

@@ -153,3 +153,31 @@ Deno.test("bumpReviewCount lands the marker in the analysis body by kind", () =>
   check(sections.plan === "unused", "plan untouched for analysis bump");
   check(bumpReviewCount("## Requirements\n- one\n\n## Analysis\n\n", 2, "analysis") === "## Requirements\n- one\n\n## Analysis\n\n", "empty analysis stays untouched");
 });
+
+Deno.test("parseDraftSections ignores bullets and instructions inside HTML comments", () => {
+  const doc = `# Test Quest
+
+## Requirements
+<!-- Author each requirement as its own bullet:
+- 1. Template instruction requirement that should be ignored
+- [ ] Another commented template bullet
+-->
+- R1: Real requirement that must be parsed
+<!-- Single line comment - R99: ignored -->
+- R2: Second real requirement
+
+## Amendments
+<!-- REVIEW & COMPLIANCE GUIDELINES:
+1. Complete Coverage: Ignored guideline
+2. Amendment Validity: Ignored guideline
+-->
+- Real amendment (valid reason)
+`;
+
+  const sections = parseDraftSections(doc);
+  check(sections.requirements.length === 2, `expected 2 requirements, got ${sections.requirements.length}`);
+  check(sections.requirements[0].includes("R1: Real requirement"), "parsed R1");
+  check(sections.requirements[1].includes("R2: Second real requirement"), "parsed R2");
+  check((sections.amendments?.length ?? 0) === 1, "only real amendment parsed");
+  check(sections.amendments?.[0]?.includes("Real amendment") ?? false, "parsed real amendment");
+});
