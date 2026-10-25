@@ -82,7 +82,9 @@ async function claimForValidation(
       getDiffStat: async () => {
         try {
           const res = await pi.exec("git", ["diff", "--stat", "HEAD"], { cwd: ctx.cwd });
-          return res.code === 0 ? res.stdout : "";
+          if (res.code === 0 && res.stdout.trim().length > 0) return res.stdout;
+          const headRes = await pi.exec("git", ["diff", "--stat", "HEAD~1"], { cwd: ctx.cwd });
+          return headRes.code === 0 ? headRes.stdout : "";
         } catch {
           return "";
         }
@@ -90,7 +92,9 @@ async function claimForValidation(
       getDiffPatch: async () => {
         try {
           const res = await pi.exec("git", ["diff", "HEAD"], { cwd: ctx.cwd });
-          return res.code === 0 ? res.stdout : "";
+          if (res.code === 0 && res.stdout.trim().length > 0) return res.stdout;
+          const headRes = await pi.exec("git", ["diff", "HEAD~1"], { cwd: ctx.cwd });
+          return headRes.code === 0 ? headRes.stdout : "";
         } catch {
           return "";
         }

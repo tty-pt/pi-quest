@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-10-24
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tty-pt/pi-quest/main/cover.png" alt="pi-quest cover banner" width="100%">
+</p>
+
 ### Added
 - **Autonomous Foreman Sub-Quest Dispatcher (`src/subquests/foreman.ts`)**:
   - Automatically parses markdown backlog tasks (`- [ ] SQ1: Goal [paths: ...] [test: ...] [req: ...]`).
