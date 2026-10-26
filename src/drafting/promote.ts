@@ -23,6 +23,7 @@ export async function promoteAfterPass(
 ): Promise<string | null> {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return null;
+  if (state.draft === null || !state.draft.planAuthored) return null;
   const stateQid = state.qid;
   const how = by === "user" ? 'user "go"' : "reviewer PASS";
   if (state.kind === "analysis") {

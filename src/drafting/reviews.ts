@@ -87,9 +87,12 @@ export async function bootDraftReview(
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
   // Policy-based bypass:
-  // 1. "off": zero subagent reviews — promote immediately
-  // 2. "balanced": subagent reviews complex tasks; non-complex tasks auto-promote
+  // 1. "off": zero subagent reviews — promote immediately once plan is authored and meets thresholds
+  // 2. "balanced": subagent reviews complex tasks; non-complex tasks auto-promote once plan is authored and meets thresholds
   if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex")) {
+    if (belowBar || state.draft === null || !state.draft.planAuthored) {
+      return;
+    }
     clearDraftReviewRetry(qid);
     clearReviewVerdictFails(qid);
     const reason = config.reviewPolicy === "off" ? "policy 'off'" : `policy 'balanced' (${state.difficulty} task)`;
@@ -227,6 +230,16 @@ export async function ensureDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
 export async function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): Promise<boolean> {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return false;
+  if (state.draft === null || !state.draft.planAuthored) {
+    if (by === "user") {
+      try {
+        ctx.ui?.notify("Cannot promote draft: Implementation plan has not been authored yet.", "warning");
+      } catch {
+        // Best effort
+      }
+    }
+    return false;
+  }
   cancelReview(qid);
   clearDraftReviewRetry(qid);
   clearReviewVerdictFails(qid);
@@ -317,18 +330,18 @@ export async function onTurnEndCatchAll(pi: Pi, ctx: PiCtx): Promise<void> {
 
 export function watchDraftFileCatchAll(pi: Pi): void {
   onTurnEnd(pi, (_event, eventCtx) => {
-    void onTurnEndCatchAll(pi, eventCtx);
+    void onTurnEndCatchAll(pi, eventCtx).catch(() => {});
   });
 }
 
 export function watchResume(pi: Pi): void {
   onSessionStart(pi, (_event, eventCtx) => {
-    void ensureDraftReview(pi, eventCtx);
+    void ensureDraftReview(pi, eventCtx).catch(() => {});
   });
 }
 
 export function watchGoInput(pi: Pi): void {
   onUserMessage(pi, (text, eventCtx) => {
-    void handleGoInput(pi, eventCtx, text);
+    void handleGoInput(pi, eventCtx, text).catch(() => {});
   });
 }

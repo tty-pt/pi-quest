@@ -22,6 +22,7 @@ import {
   clearReviewVerdictFails,
   draftReviewRetryCount,
   getReviewVerdictFails,
+  handleGoInput,
   onTurnEndCatchAll,
   setReviewRetryDispatcher,
   watchDraftFileCatchAll,
@@ -654,5 +655,34 @@ Deno.test("roles.reviewer model is forwarded to subagent review request", async 
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("reviewPolicy balanced does not auto-promote when planAuthored is false", async () => {
+  const d = await draftFailureSetup("unauth01" as Qid);
+  const bus = retryBus();
+  // Mark planAuthored = false
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(getState().phase === "drafting", "stays in drafting when plan is not authored");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("handleGoInput does not throw or promote when planAuthored is false", async () => {
+  const d = await draftFailureSetup("unauth02" as Qid);
+  const bus = retryBus();
+  // Mark planAuthored = false
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
+  try {
+    const res = await handleGoInput(bus.pi, fakeCtx(d.cwd), "go");
+    check(res === false, "go input rejected when plan is not authored");
+    check(getState().phase === "drafting", "stays in drafting");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
 
 
