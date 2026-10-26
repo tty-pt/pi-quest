@@ -44,10 +44,24 @@ quest id (`future/<qid>.md`); there are no slugs.
   alternative dismissed without evidence; does it commit prematurely; does it
   contradict itself; does it credibly satisfy the request. Draft so the
   answers are visibly yes:
-  - Write requirements as numbered, objective-stated bullets. A draft clears
-    the review threshold at **2 requirements**, or **1 requirement + 7
-    evidence items**, with an actionable plan — below that, the reviewer
+  - Write requirements as numbered, objective-stated bullets. Thresholds scale
+    dynamically with difficulty (`trivial`: 1 requirement + 2 evidence items;
+    `standard`: 2 requirements, or 1 requirement + 7 evidence items;
+    `complex`: 3 requirements + 10 evidence items) — below the bar, the reviewer
     fails fast.
+  - **Review policies & autonomy:** under `reviewPolicy: "balanced"` (frontier mode),
+    trivial and standard tasks auto-promote to coding immediately without subagent
+    review delay; complex tasks undergo full review. Under `reviewPolicy: "off"`,
+    all subagent reviews are bypassed while retaining full quest journal structure.
+  - **Two-strike safety pause:** if a review or validation is rejected 2 consecutive
+    times, the automated review loop automatically pauses to prevent thrashing and
+    prompts the human operator for guidance.
+  - **Human operator steering:** the operator is the supreme authority. Natural
+    phrasing (`go`, `proceed`, `start coding` in drafting; `ship it`, `confirm`,
+    `looks good` in validation) bypasses automated reviews and advances immediately.
+  - **Sub-quest decomposition:** for complex tasks, define backlog items under
+    `## Sub-Quests` using `- [ ] SQ1: Goal [paths: ...] [tests: ...] [req: ...]`.
+    Upon plan approval, the Foreman automatically mounts `SQ1` into a bounded worker lane.
   - Distinguish a **user requirement** (blocks), a **technical constraint**
     (binds your approach), and a **reviewer preference** (never blocks).
     Each requirement needs evidence or a verification step; research you
