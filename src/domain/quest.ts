@@ -21,6 +21,8 @@ export type ArchivedOutcome = "COMPLETED" | "FAILED" | "ABANDONED";
 // deliverable (## Analysis) for the implementation plan in the same flow.
 export type QuestKind = "standard" | "analysis";
 
+export type QuestDifficulty = "trivial" | "standard" | "complex";
+
 export type ReviewKind = "draft" | "validation";
 
 export type ApprovedBy = "review" | "user";
@@ -121,6 +123,7 @@ export interface StackFrame {
 export interface QuestState {
   phase: Phase;
   kind: QuestKind;
+  difficulty: QuestDifficulty;
   qid: Qid | null;
   parentQid: Qid | null;
   depth: number;
@@ -149,6 +152,7 @@ export interface QuestState {
 export const IDLE_STATE: QuestState = {
   phase: "idle",
   kind: "standard",
+  difficulty: "standard",
   qid: null,
   parentQid: null,
   depth: 0,
@@ -198,16 +202,26 @@ export function markChanged(state: QuestState, patch: Partial<QuestState>): Ques
 // archive) live in ./transitions.ts so this file stays under the complexity
 // budget; they are re-exported by importers from that module.
 
-export function createQuest(request: string, qid: string, parentQid: Qid | null = null): QuestState {
+export function createQuest(
+  request: string,
+  qid: string,
+  parentQid: Qid | null = null,
+  difficulty: QuestDifficulty = "standard",
+): QuestState {
   if (!isQid(qid)) throw new Error(`invalid qid: ${qid}`);
   return markChanged(IDLE_STATE, {
     phase: "provisional",
     qid,
     parentQid,
+    difficulty,
     objective: request,
     pendingRootRequest: request,
     exactNextAction: "Establish quest identity: investigate, then record findings.",
   });
+}
+
+export function setQuestDifficulty(state: QuestState, difficulty: QuestDifficulty): QuestState {
+  return markChanged(state, { difficulty });
 }
 
 // Promotion requires recorded research alongside the actionable plan:

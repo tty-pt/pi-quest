@@ -198,3 +198,32 @@ Deno.test("implementation fingerprint is stable and content-bound", () => {
     "content-bound",
   );
 });
+
+Deno.test("draft review prompt calibrates guidance and packet according to difficulty", () => {
+  // 1. Trivial difficulty
+  const trivialPrompt = buildReviewPrompt("draft", QID, "h1", {
+    objective: "Fix typo in doc",
+    plan: "Update readme.md:42",
+    difficulty: "trivial",
+    requirements: ["R1: Fix typo"],
+    evidence: ["README.md:42"],
+    amendments: [],
+  }, { requirements: 1, evidence: 2 }, true);
+  check(trivialPrompt.includes("QUEST DIFFICULTY: trivial"), "trivial difficulty tag present");
+  check(trivialPrompt.includes("POSTURE (TRIVIAL DIFFICULTY)"), "trivial posture guidance present");
+  check(trivialPrompt.includes("do NOT demand multi-phase sequencing"), "lightweight instruction present");
+  check(trivialPrompt.includes("FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR (trivial difficulty)"), "fast fail mentions trivial difficulty");
+
+  // 2. Complex difficulty
+  const complexPrompt = buildReviewPrompt("draft", QID, "h1", {
+    objective: "Full system redesign",
+    plan: "Phase 1: rewrite",
+    difficulty: "complex",
+    requirements: ["R1: New engine"],
+    evidence: [],
+    amendments: [],
+  }, { requirements: 3, evidence: 10 }, true);
+  check(complexPrompt.includes("QUEST DIFFICULTY: complex"), "complex difficulty tag present");
+  check(complexPrompt.includes("POSTURE (COMPLEX DIFFICULTY)"), "complex posture guidance present");
+  check(complexPrompt.includes("FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR (complex difficulty)"), "fast fail mentions complex difficulty");
+});

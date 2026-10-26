@@ -11,6 +11,7 @@ import {
   recordAmendment,
   recordRefinement,
   type Amendment,
+  type QuestDifficulty,
   type QuestKind,
   type QuestState,
 } from "../../domain/quest";
@@ -31,6 +32,8 @@ import { setDocStatus } from "../../quest-doc";
 import { noteDraftUpdated } from "../../durability/status";
 import { ensureDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
+import { readQuestConfig } from "../../config";
+import { evaluateQuestDifficulty } from "../../drafting/difficulty";
 
 async function syncAmendmentsToDraft(ctx: PiCtx, qid: Qid, amendments: Amendment[]): Promise<void> {
   const filePath = join(ctx.cwd, draftPath(qid));
@@ -49,10 +52,15 @@ async function syncAmendmentsToDraft(ctx: PiCtx, qid: Qid, amendments: Amendment
   }
 }
 
-async function provisionRootQuest(ctx: PiCtx, objective: string, kind: QuestKind = "standard"): Promise<Qid> {
+async function provisionRootQuest(
+  ctx: PiCtx,
+  objective: string,
+  kind: QuestKind = "standard",
+  difficulty: QuestDifficulty = "standard",
+): Promise<Qid> {
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  const base = createQuest(objective, qid);
-  replaceState(markChanged(base, { kind }));
+  const base = createQuest(objective, qid, null, difficulty);
+  replaceState(markChanged(base, { kind, difficulty }));
   const context = extractRecentConversationContext(ctx);
   await ensureDraftFile(ctx, qid, qid, objective, context);
   return qid;
@@ -245,9 +253,29 @@ export async function applyUpdate(
     if (typeof objective !== "string" || objective.trim() === "") {
       return { applied, error: "no active quest; pass objective to create one" };
     }
-    const qid = await provisionRootQuest(ctx, (objective as string).trim(), (kind as QuestKind) ?? "standard");
+    const rawDiff = params["difficulty"];
+    let difficulty: QuestDifficulty;
+    if (rawDiff === "trivial" || rawDiff === "standard" || rawDiff === "complex") {
+      difficulty = rawDiff;
+    } else if (rawDiff !== undefined) {
+      return { applied, error: `unknown difficulty ${JSON.stringify(rawDiff)} — expected "trivial", "standard", or "complex"` };
+    } else {
+      const cfg = await readQuestConfig(ctx.cwd);
+      const evalDiff = await evaluateQuestDifficulty((objective as string).trim(), cfg);
+      difficulty = evalDiff.difficulty;
+    }
+    const qid = await provisionRootQuest(ctx, (objective as string).trim(), (kind as QuestKind) ?? "standard", difficulty);
     state = getState();
     applied.push(`created quest ${qid}`);
+  }
+  const rawDiff = params["difficulty"];
+  if (rawDiff !== undefined && state.qid) {
+    if (rawDiff === "trivial" || rawDiff === "standard" || rawDiff === "complex") {
+      state = updateState((s) => ({ ...s, difficulty: rawDiff, snapshotPending: true }));
+      applied.push(`difficulty updated to ${rawDiff}`);
+    } else {
+      return { applied, error: `unknown difficulty ${JSON.stringify(rawDiff)} — expected "trivial", "standard", or "complex"` };
+    }
   }
   state = await provisionDraft(ctx, state, params, applied);
   const refinement = params["refinement"];
@@ -317,6 +345,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
       properties: {
         objective: { type: "string" },
         kind: { type: "string", description: "Quest kind on creation: \"standard\" (default) or \"analysis\"." },
+        difficulty: { type: "string", description: "Quest difficulty tier: \"trivial\", \"standard\", or \"complex\"." },
         draftName: { type: "string" },
         refinement: { type: "string" },
         plan: { type: "string", description: "Implementation Plan body, spliced into the draft file (drafting only, standard quests)." },

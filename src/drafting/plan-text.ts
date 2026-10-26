@@ -4,7 +4,7 @@
 // re-review by slightly altering the plan.
 import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
-import type { QuestKind, QuestState } from "../domain/quest";
+import type { QuestDifficulty, QuestKind, QuestState } from "../domain/quest";
 import type { ReviewMaterial } from "../review/prompts";
 import { checkRtmCoverage, type RtmItem } from "../domain/contract";
 import { diffPlans } from "./plan-diff";
@@ -160,6 +160,7 @@ export function draftProfileText(
   thresholds: DraftThresholds,
   citationSummary = "",
   kind: QuestKind = "standard",
+  difficulty?: QuestDifficulty,
 ): string {
   const analysis = kind === "analysis";
   const req = sections.requirements.length;
@@ -170,8 +171,9 @@ export function draftProfileText(
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
   const meets = counts && planPresent;
   const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an ${analysis ? "authored analysis" : "actionable plan"})`;
+  const diffTag = difficulty ? ` (difficulty: ${difficulty})` : "";
   const lines = [
-    `draft profile: requirements ${req}, evidence ${ev}, ${noun} ${planPresent ? "present" : "missing"}`,
+    `draft profile${diffTag}: requirements ${req}, evidence ${ev}, ${noun} ${planPresent ? "present" : "missing"}`,
   ];
   if (meets) {
     lines.push(`reviewability: maturity bar: met${gapLeg}`);
@@ -286,6 +288,7 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
     objective: state.pendingRootRequest ?? state.objective,
     plan: deliverable,
     kind: state.kind,
+    difficulty: state.difficulty,
     requirements: sections.requirements,
     evidence: sections.evidence,
     amendments: allAmendments,

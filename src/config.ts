@@ -2,10 +2,22 @@
 // HIGH_LEVEL: #interfaces — the review binding names the peer runner; built-ins apply otherwise.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { QuestDifficulty } from "./domain/quest.ts";
+
 export interface DraftThresholds {
   requirements: number;
   evidence: number;
 }
+
+export type DifficultyMode = "auto" | "judge" | "heuristic" | "off";
+
+export type DifficultyThresholds = Record<QuestDifficulty, DraftThresholds>;
+
+export const DEFAULT_DIFFICULTY_THRESHOLDS: DifficultyThresholds = {
+  trivial: { requirements: 1, evidence: 2 },
+  standard: { requirements: 2, evidence: 7 },
+  complex: { requirements: 3, evidence: 10 },
+};
 
 export interface InterfaceBindings {
   reviewRunner: { tool: string };
@@ -31,6 +43,9 @@ export interface QuestConfig {
   askTimeoutMs: number;
   depthCap: number;
   draftThresholds: DraftThresholds;
+  difficultyMode: DifficultyMode;
+  defaultDifficulty: QuestDifficulty;
+  difficultyThresholds: DifficultyThresholds;
   bindings: InterfaceBindings;
   statusStyle: StatusStyle;
   autoArchive: boolean;
@@ -50,6 +65,9 @@ export const DEFAULT_CONFIG: QuestConfig = {
   askTimeoutMs: 60000,
   depthCap: 3,
   draftThresholds: { requirements: 2, evidence: 7 },
+  difficultyMode: "auto",
+  defaultDifficulty: "standard",
+  difficultyThresholds: DEFAULT_DIFFICULTY_THRESHOLDS,
   bindings: { reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
@@ -158,19 +176,51 @@ export function loadConfig(raw: unknown): QuestConfig {
   const bindings = record["bindings"] as Record<string, unknown> | undefined;
   const judge = loadJudgeConfig(record);
 
+  const rawDiffMode = record["difficultyMode"] ?? getEnv("PI_QUEST_DIFFICULTY_MODE");
+  const difficultyMode: DifficultyMode =
+    rawDiffMode === "auto" || rawDiffMode === "judge" || rawDiffMode === "heuristic" || rawDiffMode === "off"
+      ? rawDiffMode
+      : DEFAULT_CONFIG.difficultyMode;
+
+  const rawDefaultDiff = record["defaultDifficulty"] ?? getEnv("PI_QUEST_DEFAULT_DIFFICULTY");
+  const defaultDifficulty: QuestDifficulty =
+    rawDefaultDiff === "trivial" || rawDefaultDiff === "standard" || rawDefaultDiff === "complex"
+      ? rawDefaultDiff
+      : DEFAULT_CONFIG.defaultDifficulty;
+
+  const rawDiffThresholds = record["difficultyThresholds"] as Record<string, unknown> | undefined;
+  const parseTier = (tier: QuestDifficulty, fallback: DraftThresholds): DraftThresholds => {
+    const obj = rawDiffThresholds?.[tier] as Record<string, unknown> | undefined;
+    return {
+      requirements: typeof obj?.["requirements"] === "number" ? obj["requirements"] : fallback.requirements,
+      evidence: typeof obj?.["evidence"] === "number" ? obj["evidence"] : fallback.evidence,
+    };
+  };
+
+  const draftThresholds: DraftThresholds = {
+    requirements: typeof thresholds?.["requirements"] === "number"
+      ? thresholds["requirements"] as number
+      : DEFAULT_CONFIG.draftThresholds.requirements,
+    evidence: typeof thresholds?.["evidence"] === "number"
+      ? thresholds["evidence"] as number
+      : DEFAULT_CONFIG.draftThresholds.evidence,
+  };
+
+  const difficultyThresholds: DifficultyThresholds = {
+    trivial: parseTier("trivial", DEFAULT_DIFFICULTY_THRESHOLDS.trivial),
+    standard: parseTier("standard", draftThresholds),
+    complex: parseTier("complex", DEFAULT_DIFFICULTY_THRESHOLDS.complex),
+  };
+
   return {
     askTimeoutMs: typeof timeout === "number" ? timeout : DEFAULT_CONFIG.askTimeoutMs,
     depthCap: typeof depth === "number" ? depth : DEFAULT_CONFIG.depthCap,
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
     autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
-    draftThresholds: {
-      requirements: typeof thresholds?.["requirements"] === "number"
-        ? thresholds["requirements"] as number
-        : DEFAULT_CONFIG.draftThresholds.requirements,
-      evidence: typeof thresholds?.["evidence"] === "number"
-        ? thresholds["evidence"] as number
-        : DEFAULT_CONFIG.draftThresholds.evidence,
-    },
+    draftThresholds,
+    difficultyMode,
+    defaultDifficulty,
+    difficultyThresholds,
     bindings: {
       reviewRunner: {
         tool:
@@ -188,6 +238,13 @@ export function loadConfig(raw: unknown): QuestConfig {
     planEditor: typeof record["planEditor"] === "string" ? record["planEditor"] : DEFAULT_CONFIG.planEditor,
     ...judge,
   };
+}
+
+export function getThresholdsForDifficulty(
+  cfg: QuestConfig,
+  difficulty: QuestDifficulty = "standard",
+): DraftThresholds {
+  return cfg.difficultyThresholds?.[difficulty] ?? cfg.draftThresholds ?? DEFAULT_CONFIG.draftThresholds;
 }
 
 export async function readQuestConfig(cwd: string): Promise<QuestConfig> {

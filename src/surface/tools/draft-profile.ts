@@ -7,7 +7,7 @@ import type { PiCtx } from "../../hooks/events";
 import type { QuestKind, QuestState } from "../../domain/quest";
 import { draftPath } from "../../domain/paths";
 import { getState } from "../../app/store";
-import { readQuestConfig } from "../../config";
+import { readQuestConfig, getThresholdsForDifficulty } from "../../config";
 import { draftProfileText, parseDraftSections, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { checkPlanCitations } from "./claims";
 
@@ -34,8 +34,9 @@ async function deliverableProfile(
   const updated = splice(current, body);
   const sections = parseDraftSections(updated);
   const config = await readQuestConfig(ctx.cwd);
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
   const claims = await checkPlanCitations(ctx, body);
-  return { text: draftProfileText(sections, config.draftThresholds, claims, kind) };
+  return { text: draftProfileText(sections, thresholds, claims, kind, state.difficulty) };
 }
 
 export async function applyPlanCheck(
@@ -56,7 +57,9 @@ export async function applyAnalysisCheck(
 
 export async function profileForSavedDoc(ctx: PiCtx, docText: string, kind: QuestKind = "standard"): Promise<string> {
   const config = await readQuestConfig(ctx.cwd);
-  return draftProfileText(parseDraftSections(docText), config.draftThresholds, "", kind);
+  const state = getState();
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  return draftProfileText(parseDraftSections(docText), thresholds, "", kind, state.difficulty);
 }
 
 // The quest_update_state { checkPlan } parameter: a pure read-only probe that

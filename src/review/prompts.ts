@@ -3,13 +3,14 @@
 // HIGH_LEVEL: #review independence — no inherited context, no prior conclusions.
 // HIGH_LEVEL: #independent review contexts — fresh context, no inherited reasoning.
 import type { Qid } from "../domain/qid";
-import type { QuestKind, ReviewKind, ReviewVerdict } from "../domain/quest";
+import type { QuestDifficulty, QuestKind, ReviewKind, ReviewVerdict } from "../domain/quest";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 
 export interface ReviewMaterial {
   objective: string;
   plan: string;
   kind?: QuestKind;
+  difficulty?: QuestDifficulty;
   evidence: string[];
   amendments: string[];
   rebuttal?: string;
@@ -109,11 +110,14 @@ function contextBlock(material: ReviewMaterial): string {
   const requirements = material.requirements !== undefined
     ? `\nREQUIREMENTS (${material.requirements.length} recorded in the draft file's ## Requirements section):\n${material.requirements.length > 0 ? material.requirements.map((r) => r.startsWith("- ") ? r : `- ${r}`).join("\n") : "(no requirements recorded in the draft file)"}\n`
     : "";
+  const difficultyTag = material.difficulty
+    ? `\nQUEST DIFFICULTY: ${material.difficulty}\n`
+    : "";
   const deliverableLabel = material.kind === "analysis" ? "APPROVED ANALYSIS" : "APPROVED PLAN";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
-${rtm}${requirements}
+${difficultyTag}${rtm}${requirements}
 ${deliverableLabel}:
 ${material.plan || "(none)"}
 ${diff}
@@ -131,7 +135,17 @@ When RECORDED AMENDMENTS are present, you MUST explicitly evaluate whether each 
 - An amendment is INVALID if it weakens acceptance criteria for convenience, drops requirements without demonstrating a real contradiction, or misrepresents repository state.
 - If ANY recorded amendment is invalid, ungrounded, or unnecessary, you MUST issue VERDICT: FAIL specifying why the amendment fails.`;
 
-function draftGuidance(maturity: DraftThresholds, kind: QuestKind | undefined): string {
+function draftGuidance(
+  maturity: DraftThresholds,
+  kind: QuestKind | undefined,
+  difficulty?: QuestDifficulty,
+): string {
+  const diffGuidance = difficulty === "trivial"
+    ? `\nPOSTURE (TRIVIAL DIFFICULTY): This task is small/lightweight in scope. Verify the targeted fix and verification step; do NOT demand multi-phase sequencing, extra requirements, or excessive evidence.\n`
+    : difficulty === "complex"
+    ? `\nPOSTURE (COMPLEX DIFFICULTY): This task has high blast radius or system complexity. Rigorously scrutinize boundary invariants, risk mitigation, and requirement coverage.\n`
+    : "";
+
   if (kind === "analysis") {
     return `WHAT YOU MUST EVALUATE (DRAFT REVIEW):
 You review the ANALYSIS deliverable, not implementation. Compare it against the exact recorded request:
@@ -143,7 +157,7 @@ You review the ANALYSIS deliverable, not implementation. Compare it against the 
 6. Whether it stays in scope or substitutes a different problem;
 7. Whether it contradicts itself;
 8. Whether it credibly satisfies the request.
-${AMENDMENT_VALIDITY_GUIDANCE}
+${AMENDMENT_VALIDITY_GUIDANCE}${diffGuidance}
 MATURITY BAR: a reviewable analysis has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an authored ## Analysis section. Below the bar, FAIL fast naming exactly what is missing.
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
   }
@@ -155,7 +169,7 @@ You review the PLAN, not implementation. Compare the draft plan against the exac
 7. Whether complexity is unnecessary; 8. Whether an alternative was dismissed without evidence;
 9. Whether it commits prematurely; 10. Whether it contradicts itself;
 11. Whether it credibly satisfies the request.
-${AMENDMENT_VALIDITY_GUIDANCE}
+${AMENDMENT_VALIDITY_GUIDANCE}${diffGuidance}
 MATURITY BAR: a reviewable draft has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an actionable plan. Below the bar, FAIL fast naming exactly what is missing.
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
 }
@@ -212,8 +226,10 @@ export function getReviewCriteriaSummary(phase: "drafting" | "implementing", kin
 - Amendments: Verified against genuine contradictions.`;
 }
 
-const FAST_FAIL = (maturity: DraftThresholds): string =>
-  `FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR (needs ${maturity.requirements} requirements, or 1 requirement + ${maturity.evidence} evidence items, with an actionable plan). Report exactly what structure is missing for the bar plus any requirement omissions from the request, then FAIL. Do NOT audit the plan in depth — the draft must be built up to the bar first.`;
+const FAST_FAIL = (maturity: DraftThresholds, difficulty?: QuestDifficulty): string => {
+  const diffTag = difficulty ? ` (${difficulty} difficulty)` : "";
+  return `FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR${diffTag} (needs ${maturity.requirements} requirements, or 1 requirement + ${maturity.evidence} evidence items, with an actionable plan). Report exactly what structure is missing for the bar plus any requirement omissions from the request, then FAIL. Do NOT audit the plan in depth — the draft must be built up to the bar first.`;
+};
 
 export function buildReviewPrompt(
   kind: ReviewKind,
@@ -226,11 +242,13 @@ export function buildReviewPrompt(
   const header = kind === "draft"
     ? `ADVERSARIAL DRAFT REVIEW: ${qid} (target revision ${target})`
     : `VALIDATION REVIEW: ${qid} (target implementation snapshot ${target})`;
-  const guidance = kind === "draft" ? draftGuidance(maturity, material.kind) : validationGuidance(material.kind);
+  const guidance = kind === "draft"
+    ? draftGuidance(maturity, material.kind, material.difficulty)
+    : validationGuidance(material.kind);
   const impl = material.implementationSummary
     ? `\nIMPLEMENTATION SUMMARY UNDER REVIEW:\n${material.implementationSummary}\n`
     : "";
-  const fastFail = belowBar ? `\n${FAST_FAIL(maturity)}\n` : "";
+  const fastFail = belowBar ? `\n${FAST_FAIL(maturity, material.difficulty)}\n` : "";
   return `# ${header}
 
 You are an independent reviewer. You run in a fresh context: evaluate only the material below, never continue anyone's reasoning.

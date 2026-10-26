@@ -557,3 +557,26 @@ Deno.test("analysis continueWork returns a validating analysis quest to drafting
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("quest_update_state infers or overrides difficulty tier", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    // 1. Inferred from prompt
+    const created = await applyUpdate(pi, ctx, { objective: "Fix typo in README.md" });
+    check(created.applied.length === 1, "quest created");
+    check(getState().difficulty === "trivial", "inferred trivial from typo objective");
+
+    // 2. Explicit update of difficulty
+    const updated = await applyUpdate(pi, ctx, { difficulty: "complex" });
+    check(updated.applied.includes("difficulty updated to complex"), "difficulty updated message");
+    check(getState().difficulty === "complex", "difficulty state updated");
+
+    // 3. Invalid difficulty rejected
+    const bad = await applyUpdate(pi, ctx, { difficulty: "extreme" });
+    check(bad.error !== undefined && bad.error.includes("unknown difficulty"), "invalid difficulty rejected");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});

@@ -11,6 +11,7 @@ import { onUserMessage } from "../hooks/events";
 import { classifyUserMessage } from "../subquests/triage";
 import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../config";
 import { evaluateQuestIntent } from "./judge";
+import { evaluateQuestDifficulty } from "./difficulty";
 
 export function matchTriggerPrefix(
   text: string,
@@ -68,14 +69,15 @@ export async function detectSubstantiveRequest(
   const trigger = matchTriggerPrefix(trimmed, cfg.triggerPrefixes);
   if (trigger.matched) {
     const objective = trigger.objective;
+    const diff = await evaluateQuestDifficulty(objective, cfg);
     const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-    replaceState(createQuest(objective, qid));
+    replaceState(createQuest(objective, qid, null, diff.difficulty));
     const context = extractRecentConversationContext(ctx);
     await ensureDraftFile(ctx, qid, qid, objective, context);
     emitNow(pi);
     sendSteer(
       pi,
-      `New quest ${qid} opened via trigger '${trigger.prefix}': "${objective.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
+      `New quest ${qid} (difficulty: ${diff.difficulty}) opened via trigger '${trigger.prefix}': "${objective.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
         `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
         `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly. During drafting the quest doc is the only writable file; during implementing and validating it is locked — revise the plan via quest_update_state {planRevision: ...} (peer-reviewed) and claim completion via quest_update_state {claimComplete: true}.`,
     );
@@ -91,14 +93,15 @@ export async function detectSubstantiveRequest(
   const decision = await evaluateQuestIntent(trimmed, cfg, ctx);
   if (!decision.isQuest) return false;
 
+  const diff = await evaluateQuestDifficulty(trimmed, cfg);
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  replaceState(createQuest(trimmed, qid));
+  replaceState(createQuest(trimmed, qid, null, diff.difficulty));
   const context = extractRecentConversationContext(ctx);
   await ensureDraftFile(ctx, qid, qid, trimmed, context);
   emitNow(pi);
   sendSteer(
     pi,
-    `New quest ${qid} opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
+    `New quest ${qid} (difficulty: ${diff.difficulty}) opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
       `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
       `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly. During drafting the quest doc is the only writable file; during implementing and validating it is locked — revise the plan via quest_update_state {planRevision: ...} (peer-reviewed) and claim completion via quest_update_state {claimComplete: true}.`,
   );

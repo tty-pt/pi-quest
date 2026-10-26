@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import { DEFAULT_CONFIG, readQuestConfig, type QuestConfig } from "../config";
+import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, type QuestConfig } from "../config";
 import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
 import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
@@ -74,14 +74,15 @@ export async function bootDraftReview(
   if (content === null) return;
   const sections = parseDraftSections(content);
   const material = reviewMaterial(getState(), sections);
-  const belowBar = !meetsReviewThresholds(sections, config.draftThresholds, kind);
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
   const outcome = await runIsolatedReview({
     pi,
     ctx,
     qid,
     target,
-    prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds, belowBar),
+    prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar),
     runnerTool: config.bindings.reviewRunner.tool,
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
@@ -123,7 +124,7 @@ export async function bootDraftReview(
     ? ""
     : `\n\nReview text (verbatim, budget-bounded):\n${verbatim}`;
   const profile = belowBar
-    ? `\n\nDraft profile:\n${draftProfileText(sections, config.draftThresholds, "", kind)}`
+    ? `\n\nDraft profile:\n${draftProfileText(sections, thresholds, "", kind, state.difficulty)}`
     : "";
   sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the ${deliverableWord(kind).toLowerCase()} and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
 }
