@@ -32,7 +32,7 @@ function holdForRevisionReview(event: ToolCallEvent): { block: true; reason: str
   if (toolClass === "journal" || toolClass === "ask") return undefined;
   return {
     block: true,
-    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn.",
+    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn. (Hint: reply APPROVE or run /quest-cancel-review to unblock immediately.)",
     terminate: true,
   };
 }

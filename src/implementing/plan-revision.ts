@@ -99,8 +99,8 @@ export async function bootPlanRevisionReview(
     prompt: buildReviewPrompt("draft", qid, target, material, getThresholdsForDifficulty(config, state.difficulty)),
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
-    maxDurationMs: config.reviewMaxDurationMs,
-    inactivityLimitMs: config.reviewInactivityMs,
+    maxDurationMs: Math.min(config.reviewMaxDurationMs, 300000),
+    inactivityLimitMs: Math.min(config.reviewInactivityMs, 60000),
   });
   if (outcome.status === "no-runner") {
     if (shouldNoticeReview(qid, target)) {
@@ -229,7 +229,9 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return false;
   if (state.draft.contentHash === null || state.draft.contentHash === state.draft.approvedPlanHash) return false;
-  if (hasInFlight(state.qid)) return false;
+  if (hasInFlight(state.qid)) {
+    cancelReview(state.qid);
+  }
   const content = await readPlanFile(ctx, state);
   if (content === null) return false;
   const sections = parseDraftSections(content);
@@ -243,7 +245,7 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
 
 export function watchApproveInput(pi: Pi): void {
   onUserMessage(pi, (text, eventCtx) => {
-    void handleApproveInput(pi, eventCtx, text);
+    void handleApproveInput(pi, eventCtx, text).catch(() => {});
   });
 }
 

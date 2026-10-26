@@ -8,6 +8,23 @@ import { resumeQuest } from "./quest";
 import { runQuestDoctor, getQuestDoctorLines, createQuestDoctorComponent, type QuestDoctorData } from "./doctor";
 import { getRouterStatusLines } from "./router";
 import { refreshStatus } from "../../durability/status";
+import { hasInFlight, cancelReview } from "../../review/tracker";
+import { clearPlanRevisionRetries } from "../../implementing/plan-revision";
+import { clearDraftReviewRetry } from "../../drafting/reviews";
+import { getState } from "../../app/store";
+
+export function cancelActiveReview(ctx: { ui?: { notify?: (m: string, t: "info" | "warning" | "error") => void } }): string {
+  const state = getState();
+  const qid = state.qid;
+  if (qid === null) return "No active quest.";
+  if (!hasInFlight(qid)) {
+    return `No review currently in-flight for quest ${qid}.`;
+  }
+  cancelReview(qid);
+  clearPlanRevisionRetries(qid);
+  clearDraftReviewRetry(qid);
+  return `Cancelled in-flight review for quest ${qid}. Tool operations unblocked.`;
+}
 
 function notify(ctx: { ui: { notify: (m: string, t: "info" | "warning" | "error") => void } }, text: string): void {
   try {
@@ -37,6 +54,12 @@ export function installCommands(pi: Pi): void {
     description: "Resume a quest or drafting phase, show the active quest, or run 'doctor'.",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
+      if (trimmed === "cancel-review") {
+        const msg = cancelActiveReview(ctx);
+        notify(ctx, msg);
+        refreshStatus(ctx);
+        return;
+      }
       if (trimmed === "doctor") {
         const lines = await getQuestDoctorLines(ctx);
         if (typeof extApi.appendEntry === "function") {
@@ -87,6 +110,14 @@ export function installCommands(pi: Pi): void {
     handler: async (_args, ctx) => {
       const lines = await getRouterStatusLines(ctx);
       notify(ctx, lines.join("\n"));
+    },
+  });
+  pi.registerCommand("quest-cancel-review", {
+    description: "Cancel any currently running in-flight review or validation and unblock tool execution.",
+    handler: async (_args, ctx) => {
+      const msg = cancelActiveReview(ctx);
+      notify(ctx, msg);
+      refreshStatus(ctx);
     },
   });
 }

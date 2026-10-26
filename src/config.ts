@@ -83,6 +83,8 @@ export interface QuestConfig {
   roles: RoleModels;
   reviewInactivityMs: number;
   reviewMaxDurationMs: number;
+  planRevisionInactivityMs?: number;
+  planRevisionMaxDurationMs?: number;
   planEditor: string | null;
   judgeMode: JudgeMode;
   judgeUrl?: string;
@@ -122,6 +124,8 @@ export const DEFAULT_CONFIG: QuestConfig = {
   roles: {},
   reviewInactivityMs: 300000,
   reviewMaxDurationMs: 1500000,
+  planRevisionInactivityMs: 60000,
+  planRevisionMaxDurationMs: 300000,
   planEditor: null,
   judgeMode: "auto",
   judgeUrl: undefined,
@@ -414,6 +418,12 @@ export function loadConfig(raw: unknown): QuestConfig {
     reviewMaxDurationMs: typeof reviewMaxDuration === "number"
       ? reviewMaxDuration
       : DEFAULT_CONFIG.reviewMaxDurationMs,
+    planRevisionInactivityMs: typeof record["planRevisionInactivityMs"] === "number"
+      ? record["planRevisionInactivityMs"] as number
+      : DEFAULT_CONFIG.planRevisionInactivityMs,
+    planRevisionMaxDurationMs: typeof record["planRevisionMaxDurationMs"] === "number"
+      ? record["planRevisionMaxDurationMs"] as number
+      : DEFAULT_CONFIG.planRevisionMaxDurationMs,
     planEditor: typeof record["planEditor"] === "string" ? record["planEditor"] : DEFAULT_CONFIG.planEditor,
     midQuest,
     router: loadRouterConfig(record),
