@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Two-Strike Review & Validation Loop Breakers (`src/drafting/draft-retry.ts`, `src/validation/flow.ts`)**:
   - Automatically tracks consecutive review rejections (`MAX_CONSECUTIVE_REVIEW_FAILS = 2`, `MAX_CONSECUTIVE_VALIDATION_FAILS = 2`).
   - Upon 2 consecutive rejections, the automated re-review loop is paused and the agent stops thrashing, prompting the human operator directly for guidance or approval.
+- **Autonomous Foreman Auto-Kickoff on Plan Approval (`src/drafting/promote.ts`, `src/subquests/foreman.ts`)**:
+  - `promoteAfterPass` now inspects the approved plan for sub-quest backlog items (`- [ ] SQ1: ...`).
+  - When sub-quests are defined, Foreman automatically mounts `SQ1` onto `questStack` immediately upon promotion to `implementing`, setting bounded `allowedPaths` and assigned requirements.
+  - Updated `parseDraftSections` to capture `## Sub-Quests` and fold backlog items into `deliverableBody`, ensuring reviewers inspect sub-quest plans.
+  - Updated `renderDraftTemplate` to inject structured `SQ1`, `SQ2`, `SQ3` active backlog templates when difficulty is `complex`.
 - **Adaptive Difficulty Tiers (`src/config.ts`, `src/drafting/difficulty.ts`)**:
   - Added `QuestDifficulty = "trivial" | "standard" | "complex"` with adaptive maturity thresholds:
     - `trivial`: 1 requirement, 2 evidence items.

@@ -2,23 +2,25 @@
 // to implementing; analysis quests auto-claim straight to validating (D3),
 // falling back to a work phase while sub-quests are still running.
 import { emitNow } from "../app/interpreter";
-import { getState, updateState } from "../app/store";
+import { getState, replaceState, updateState } from "../app/store";
 import type { ApprovedBy } from "../domain/quest";
 import { promote, promoteToValidation } from "../domain/transitions";
 import { unfinishedChildren } from "../domain/children";
-import type { Qid } from "../domain/qid";
+import { nextQid, type Qid } from "../domain/qid";
 import { launchValidation } from "../validation/flow";
 import type { Pi, PiCtx } from "../hooks/events";
+import { listKnownQids } from "../files";
+import { advanceForeman } from "../subquests/foreman";
 
 // Shared by the reviewer-PASS auto-promote path (drafting/reviews.ts) and the
 // live-user "go" path. Returns the promotion message to steer/wake — the
 // caller's medium differs — or null when the quest is no longer drafting.
-export function promoteAfterPass(
+export async function promoteAfterPass(
   pi: Pi,
   ctx: PiCtx,
   qid: Qid,
   by: ApprovedBy,
-): string | null {
+): Promise<string | null> {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return null;
   const stateQid = state.qid;
@@ -36,6 +38,15 @@ export function promoteAfterPass(
     return `Quest ${stateQid} reached the approved analysis milestone (${how}): on to validation. The doc stays live until the validator concludes.`;
   }
   updateState((s) => promote(s, by));
+  const promoted = getState();
+  const knownQids = await listKnownQids(ctx.cwd);
+  const nextChildQid = nextQid(Date.now() / 1000, knownQids);
+  const advanced = advanceForeman(promoted, nextChildQid);
+  if (advanced) {
+    replaceState(advanced.nextMountedState);
+    emitNow(pi);
+    return `Quest ${stateQid} promoted to implementing (${how}). Foreman: Automatically mounting ${advanced.nextItem.id}: "${advanced.nextItem.goal}". Allowed paths: ${advanced.nextItem.allowedPaths.join(", ") || "(all)"}. Proceeding with sub-quest implementation.`;
+  }
   emitNow(pi);
   return `Quest ${stateQid} promoted to implementing (${how}). Proceed autonomously from the draft plan.`;
 }

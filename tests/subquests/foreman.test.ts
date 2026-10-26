@@ -1,5 +1,5 @@
 import { check } from "../check.ts";
-import { createQuest, type QuestState } from "../../src/domain/quest.ts";
+import { createQuest, IDLE_STATE, type QuestState } from "../../src/domain/quest.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { pushStackFrame, popStackFrame } from "../../src/domain/stack.ts";
 import type { HandbackReceipt } from "../../src/domain/contract.ts";
@@ -9,6 +9,11 @@ import {
   advanceForeman,
   createContractForBacklogItem,
 } from "../../src/subquests/foreman.ts";
+import { parseDraftSections, deliverableBody } from "../../src/drafting/plan-text.ts";
+import { renderDraftTemplate } from "../../src/views/draft-template.ts";
+import { promoteAfterPass } from "../../src/drafting/promote.ts";
+import { replaceState, getState } from "../../src/app/store.ts";
+import { fakePi, fakeCtx } from "../fake-pi.ts";
 
 const ROOT_QID = "root01" as Qid;
 const SQ1_QID = "sq0001" as Qid;
@@ -152,3 +157,76 @@ Deno.test("failed SQ1 halts automatic dispatch and preserves failure setback", (
   check(restoredParent.setbacks.length === 1, "failure setback recorded");
   check(restoredParent.exactNextAction.includes("sq0001"), "exactNextAction guides recovery");
 });
+
+Deno.test("parseDraftSections extracts ## Sub-Quests and folds into deliverableBody", () => {
+  const doc = `## Requirements
+- R1: Core engine
+
+## Sub-Quests
+- [ ] SQ1: Core architecture [paths: src/core] [tests: make test] [req: R1]
+
+## Implementation Plan
+### Step 1
+Detailed plan instructions.
+`;
+  const sections = parseDraftSections(doc);
+  check(sections.subquests !== undefined && sections.subquests.includes("SQ1"), "subquests captured");
+  const body = deliverableBody(sections, "standard");
+  check(body.includes("## Sub-Quests"), "deliverableBody includes Sub-Quests header");
+  check(body.includes("SQ1: Core architecture"), "deliverableBody includes SQ1");
+  check(body.includes("Detailed plan instructions"), "deliverableBody includes plan");
+});
+
+Deno.test("renderDraftTemplate injects structured SQ items when difficulty is complex", () => {
+  const standardDoc = renderDraftTemplate("Standard Quest", "Do something", "", "standard");
+  check(standardDoc.includes("<!-- For complex tasks"), "standard comments out SQ");
+
+  const complexDoc = renderDraftTemplate("Complex Quest", "Overhaul engine", "", "complex");
+  check(complexDoc.includes("COMPLEX TASK DETECTED"), "complex banner present");
+  check(complexDoc.includes("- [ ] SQ1:"), "SQ1 active in complex doc");
+  check(complexDoc.includes("- [ ] SQ2:"), "SQ2 active in complex doc");
+});
+
+Deno.test("promoteAfterPass auto-kicks off Foreman to mount SQ1 when backlog is present", async () => {
+  const pi = fakePi();
+  const cwd = Deno.makeTempDirSync({ prefix: "pi-quest-promote-foreman-" });
+  try {
+    const parentQid = "par001" as Qid;
+    const parent = createQuest("Complex Parent Task", parentQid, null, "complex");
+    parent.phase = "drafting";
+    const plan = `## Sub-Quests
+- [ ] SQ1: Core foundation [paths: src/foundation] [tests: npm test] [req: R1]
+- [ ] SQ2: Feature implementation [paths: src/feat] [tests: npm test] [req: R2]
+
+## Implementation Plan
+Detailed execution.`;
+
+    parent.draft = {
+      name: "complex-plan",
+      contentHash: "hash123",
+      lastReviewedPlan: plan,
+      planAuthored: true,
+      approvedBy: null,
+      outstandingFindings: false,
+      approvedPlanHash: null,
+      planRevisions: [],
+    };
+    replaceState(parent);
+
+    const message = await promoteAfterPass(pi, fakeCtx(cwd), parentQid, "review");
+    check(message !== null, "promotion succeeded");
+    check(message!.includes("Foreman: Automatically mounting SQ1"), "Foreman message announced");
+
+    const current = getState();
+    check(current.depth === 1, "child depth is 1");
+    check(current.parentQid === parentQid, "parent is linked");
+    check(current.contract?.assignedRequirements[0] === "R1", "R1 assigned to SQ1");
+    check(current.contract?.allowedPaths[0] === "src/foundation", "paths bounded");
+    check(current.questStack.length === 1, "parent saved in questStack");
+    check(current.questStack[0].qid === parentQid, "parent frame matches");
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+    replaceState(IDLE_STATE);
+  }
+});
+

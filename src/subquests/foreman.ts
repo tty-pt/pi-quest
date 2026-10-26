@@ -25,7 +25,7 @@ export function parseSubQuestBacklog(planText: string): BacklogItem[] {
   const lines = planText.split("\n");
 
   for (const line of lines) {
-    const match = line.match(/^\s*-\s*\[([ xX!])\]\s*(?:\*\*)?([A-Za-z0-9_-]+)(?:\*\*)?:\s*([^\[]+)(.*)$/);
+    const match = line.match(/^\s*-\s*\[([ xX!])\]\s*(?:\*\*)?([A-Za-z0-9_-]+)(?:\*\*)?[:\-]?\s*([^\[]+)(.*)$/);
     if (!match) continue;
 
     const mark = match[1].toLowerCase();
@@ -103,8 +103,9 @@ export function createContractForBacklogItem(
 export function advanceForeman(
   parentState: QuestState,
   nextChildQid: Qid,
+  docText?: string,
 ): { nextMountedState: QuestState; nextItem: BacklogItem } | null {
-  const plan = parentState.draft?.lastReviewedPlan ?? parentState.objective;
+  const plan = docText ?? parentState.draft?.lastReviewedPlan ?? parentState.objective;
   if (!plan) return null;
 
   const items = parseSubQuestBacklog(plan);

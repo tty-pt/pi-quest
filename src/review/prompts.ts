@@ -143,7 +143,7 @@ function draftGuidance(
   const diffGuidance = difficulty === "trivial"
     ? `\nPOSTURE (TRIVIAL DIFFICULTY): This task is small/lightweight in scope. Verify the targeted fix and verification step; do NOT demand multi-phase sequencing, extra requirements, or excessive evidence.\n`
     : difficulty === "complex"
-    ? `\nPOSTURE (COMPLEX DIFFICULTY): This task has high blast radius or system complexity. Rigorously scrutinize boundary invariants, risk mitigation, and requirement coverage.\n`
+    ? `\nPOSTURE (COMPLEX DIFFICULTY): This task has high blast radius or system complexity. Verify that separable work is decomposed into modular sub-quests (e.g. - [ ] SQ1: Goal [paths: ...] [tests: ...] [req: ...]) with bounded allowedPaths and verification commands, and rigorously scrutinize boundary invariants, risk mitigation, and requirement coverage.\n`
     : "";
 
   if (kind === "analysis") {

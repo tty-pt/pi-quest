@@ -15,6 +15,7 @@ export interface DraftSections {
   plan: string;
   // Analysis quests deliver the quest doc's ## Analysis body here (D1).
   analysis: string;
+  subquests?: string;
   amendments?: string[];
 }
 
@@ -53,6 +54,10 @@ export function spliceAnalysisSection(text: string, analysis: string): string {
   return spliceSection(text, "analysis", "Analysis", analysis);
 }
 
+export function spliceSubquestsSection(text: string, subquests: string): string {
+  return spliceSection(text, "sub-quest", "Sub-Quests", subquests);
+}
+
 export function spliceAmendmentsSection(text: string, amendments: string[]): string {
   const body = amendments.length > 0
     ? amendments.map((a) => `- ${a}`).join("\n")
@@ -65,8 +70,9 @@ export function parseDraftSections(text: string): DraftSections {
   const evidence: string[] = [];
   const planLines: string[] = [];
   const analysisLines: string[] = [];
+  const subquestLines: string[] = [];
   const amendments: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | "analysis" | "amendments" | null = null;
+  let section: "requirements" | "evidence" | "plan" | "analysis" | "subquests" | "amendments" | null = null;
   let inComment = false;
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
@@ -75,6 +81,7 @@ export function parseDraftSections(text: string): DraftSections {
       if (name.includes("requirement")) section = "requirements";
       else if (name.includes("evidence")) section = "evidence";
       else if (name.includes("analysis")) section = "analysis";
+      else if (name.includes("sub-quest") || name.includes("subquest")) section = "subquests";
       else if (name.includes("implementation plan")) section = "plan";
       else if (name.includes("amendment")) section = "amendments";
       // Pre-draft investigation recorded via recordRefinement is research:
@@ -89,6 +96,10 @@ export function parseDraftSections(text: string): DraftSections {
     }
     if (section === "analysis") {
       analysisLines.push(line);
+      continue;
+    }
+    if (section === "subquests") {
+      subquestLines.push(line);
       continue;
     }
     const trimmed = line.trim();
@@ -112,6 +123,7 @@ export function parseDraftSections(text: string): DraftSections {
     evidence,
     plan: planLines.join("\n").trim(),
     analysis: analysisLines.join("\n").trim(),
+    subquests: subquestLines.join("\n").trim(),
     amendments,
   };
 }
@@ -269,7 +281,13 @@ export function bumpReviewCount(text: string, count: number, kind: QuestKind = "
 // analysis quests the Analysis itself (D1). Every section-target site keys on
 // this single selector.
 export function deliverableBody(sections: DraftSections, kind: QuestKind): string {
-  return kind === "analysis" ? sections.analysis : sections.plan;
+  if (kind === "analysis") return sections.analysis;
+  if (sections.subquests && sections.subquests.length > 0) {
+    return sections.plan
+      ? `## Sub-Quests\n${sections.subquests}\n\n${sections.plan}`
+      : `## Sub-Quests\n${sections.subquests}`;
+  }
+  return sections.plan;
 }
 
 export function deliverableWord(kind: QuestKind): string {

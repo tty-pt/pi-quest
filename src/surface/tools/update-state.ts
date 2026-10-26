@@ -62,7 +62,7 @@ async function provisionRootQuest(
   const base = createQuest(objective, qid, null, difficulty);
   replaceState(markChanged(base, { kind, difficulty }));
   const context = extractRecentConversationContext(ctx);
-  await ensureDraftFile(ctx, qid, qid, objective, context);
+  await ensureDraftFile(ctx, qid, qid, objective, context, difficulty);
   return qid;
 }
 
@@ -132,7 +132,7 @@ async function provisionDraft(
     ((typeof plan !== "string" || plan.trim() === "") && !analysis);
   state = createDraft(state, name, kind);
   replaceState(state);
-  await ensureDraftFile(ctx, qid, name, state.objective);
+  await ensureDraftFile(ctx, qid, name, state.objective, undefined, state.difficulty);
   state = await carryRefinementsToDraft(ctx, getState());
   applied.push(`draft ${name} created at ${draftPath(qid)} — edit ONLY this file`);
   if (thin) {

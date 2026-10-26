@@ -119,7 +119,7 @@ export async function bootDraftReview(
     }
     // Route by kind: standard quests promote to implementing; analysis quests
     // auto-claim straight to validating (D3) unless sub-quests still run.
-    const message = promoteAfterPass(pi, ctx, qid, "review");
+    const message = await promoteAfterPass(pi, ctx, qid, "review");
     if (message === null) return;
     const advisories = outcome.review.advisories.trim();
     sendWake(pi, `${message}${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
@@ -182,7 +182,7 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   if (state.draft.approvedBy !== null && state.draft.contentHash === target) return;
   if (isCurrentReview(state.qid, target)) return;
   if (state.contract !== undefined || (state.parentQid !== null && !childDeviated(getState()))) {
-    const message = promoteAfterPass(pi, ctx, state.qid, "review");
+    const message = await promoteAfterPass(pi, ctx, state.qid, "review");
     if (message !== null) {
       sendWake(pi, `${message} Sub-quest ${state.qid} auto-promoted to implementing based on contract/parent brief.`);
     }
@@ -207,7 +207,7 @@ export async function ensureDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   await maybeBootDraftReview(pi, ctx);
 }
 
-export function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): boolean {
+export async function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): Promise<boolean> {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return false;
   cancelReview(qid);
@@ -215,7 +215,7 @@ export function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): bool
   clearReviewVerdictFails(qid);
   // Kind-aware routing in promoteAfterPass: standard → implementing, analysis
   // → full-on validating once its children are done (D3).
-  const message = promoteAfterPass(pi, ctx, qid, by);
+  const message = await promoteAfterPass(pi, ctx, qid, by);
   if (message === null) return false;
   sendSteer(pi, message);
   return true;
@@ -230,7 +230,7 @@ export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<b
   if (steering.action !== "advance" && !GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;
-  return approveDraft(pi, ctx, state.qid, "user");
+  return await approveDraft(pi, ctx, state.qid, "user");
 }
 
 async function onWriteResult(pi: Pi, ctx: PiCtx, event: ToolResultEvent): Promise<void> {

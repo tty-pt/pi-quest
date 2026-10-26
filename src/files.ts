@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { PiCtx } from "./hooks/events";
 import { draftPath, FUTURE_DIR } from "./domain/paths";
 import { isQid, type Qid } from "./domain/qid";
+import type { QuestDifficulty } from "./config";
 import { renderDraftTemplate } from "./views/draft-template";
 
 export async function listKnownQids(cwd: string): Promise<string[]> {
@@ -38,12 +39,13 @@ export async function ensureDraftFile(
   name: string,
   objective: string,
   context?: string,
+  difficulty?: QuestDifficulty,
 ): Promise<void> {
   if (!isQid(rawQid)) throw new Error(`invalid qid: ${rawQid}`);
   const qid: Qid = rawQid;
   await mkdir(join(ctx.cwd, FUTURE_DIR), { recursive: true });
   try {
-    await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective, context), { flag: "wx" });
+    await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective, context, difficulty), { flag: "wx" });
   } catch (err) {
     if ((err as { code?: string }).code !== "EEXIST") throw err;
   }

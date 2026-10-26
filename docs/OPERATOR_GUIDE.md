@@ -44,18 +44,33 @@ You don't need to remember cryptic commands or rigid syntax. Speak naturally at 
 
 ---
 
-## Difficulty Tiers
+## Difficulty Tiers & Autonomous Sub-Quests
 
-`pi-quest` automatically assesses task difficulty so simple fixes don't get burdened with bureaucratic paperwork:
+`pi-quest` automatically assesses task difficulty so simple fixes stay fast while massive overhauls stay organized:
 
 - **`trivial`** (e.g. typos, renames, one-liners, minor config tweaks):
-  Needs only 1 requirement and 2 evidence items.
+  Needs only 1 requirement and 2 evidence items. Zero sub-quests.
 - **`standard`** (default feature work and bug fixes):
-  Needs 2 requirements and 7 evidence items.
+  Needs 2 requirements and 7 evidence items. Single-lane execution by default.
 - **`complex`** (major refactors, architecture overhauls, multi-file migrations):
-  Needs 3 requirements and 10 evidence items.
+  Needs 3 requirements and 10 evidence items. Automatically triggers the **Foreman Sub-Quest Pipeline**.
 
-To customize or disable the automated difficulty judge, configure `.pi/settings.json`:
+### The Foreman Sub-Quest Pipeline (for Complex Tasks)
+When a task is classified as `complex`:
+1. The draft scaffold pre-populates structured backlog items under `## Sub-Quests`:
+   ```markdown
+   ## Sub-Quests
+   - [ ] SQ1: Core architecture & contracts [paths: src/core] [tests: npm test] [req: R1]
+   - [ ] SQ2: Feature implementation & integration [paths: src/feat] [tests: npm test] [req: R2]
+   - [ ] SQ3: End-to-end verification [paths: tests/] [tests: npm test] [req: R3]
+   ```
+2. Upon plan approval (via reviewer PASS or operator `go`), the Foreman automatically mounts `SQ1` onto `questStack` with bounded file access (`allowedPaths`) and assigned requirements.
+3. When `SQ1` completes and passes tests, it archives, checks off `- [x] SQ1` on the parent plan doc, and automatically mounts `SQ2`.
+4. When all sub-quests finish, control returns to the parent coordinator for final root integration validation and archive.
+
+---
+
+## Configuration
 ```json
 {
   "pi-quest": {

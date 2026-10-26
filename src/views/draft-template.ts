@@ -1,8 +1,30 @@
 // HIGH_LEVEL: #storage — the drafting workspace starts from a template.
-export function renderDraftTemplate(name: string, objective: string, context?: string): string {
+import type { QuestDifficulty } from "../config.ts";
+
+export function renderDraftTemplate(
+  name: string,
+  objective: string,
+  context?: string,
+  difficulty?: QuestDifficulty,
+): string {
   const contextSection = context && context.trim().length > 0
     ? `\n## Context / Background Discussion\n\n${context.trim()}\n`
     : "";
+
+  const subquestsSection = difficulty === "complex"
+    ? `## Sub-Quests
+
+<!-- COMPLEX TASK DETECTED: Decompose this task into sequential, bounded sub-quests.
+     Each sub-quest executes in a focused worker lane with explicit allowedPaths,
+     required test commands, and assigned requirements: -->
+- [ ] SQ1: Core architecture & contracts [paths: ...] [tests: npm test] [req: R1]
+- [ ] SQ2: Feature implementation & integration [paths: ...] [tests: npm test] [req: R2]
+- [ ] SQ3: End-to-end verification & regression tests [paths: tests/...] [tests: npm test] [req: R3]`
+    : `## Sub-Quests
+
+<!-- For complex tasks, define bounded sub-quests with assigned requirements, allowed paths, and verification commands:
+- [ ] SQ1: Task title [paths: src/path/] [tests: npm test] [req: R1] -->`;
+
   return `# ${name}
 
 > Draft proposal under adversarial review. Only this file is writable while drafting.
@@ -29,9 +51,7 @@ ${contextSection}
 
 <!-- Record file-backed proof per requirement (file:line citations or measured verification). -->
 
-## Sub-Quests
-
-<!-- For complex tasks, define bounded sub-quests with assigned requirements, allowed paths, and verification commands. -->
+${subquestsSection}
 
 ## Analysis
 

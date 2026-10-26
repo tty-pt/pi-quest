@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { QuestDifficulty } from "./domain/quest.ts";
+export type { QuestDifficulty };
 
 export interface DraftThresholds {
   requirements: number;
