@@ -102,6 +102,49 @@ If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your pr
 
 ---
 
+## Phase × Difficulty Model Router (`quest/auto`)
+
+When using a subscription with rolling rate limits (such as Anthropic Claude Pro), coding loops (reading files, `make`, compiler iterations) can quickly deplete quotas. `pi-quest` registers a virtual model (`quest/auto`) that routes each request to an optimal physical model based on the current quest **phase** (`idle`, `provisional`, `drafting`, `implementing`, `validating`) and **difficulty** (`trivial`, `standard`, `complex`).
+
+### Matrix Configuration (`router`)
+Configure the routing matrix in `.pi/settings.json` under `pi-quest.router`:
+
+```json
+{
+  "pi-quest": {
+    "router": {
+      "enabled": true,
+      "provider": "quest",
+      "id": "auto",
+      "default": "antigravity/gemini-3.8-flash",
+      "direct": "antigravity/gemini-3.8-flash:low",
+      "cooldownMs": 900000,
+      "matrix": {
+        "drafting": {
+          "complex": [
+            "anthropic/claude-sonnet-4-5:high",
+            "antigravity/gemini-3.8-flash"
+          ],
+          "*": "antigravity/gemini-3.8-flash"
+        },
+        "implementing": "antigravity/gemini-3.8-flash",
+        "validating": "antigravity/gemini-3.8-flash"
+      }
+    }
+  }
+}
+```
+
+### Key Router Behaviors
+- **Activation**: Switch in the interactive TUI with `/model quest/auto` or set `"defaultModel": "quest/auto"` in `settings.json`.
+- **Wildcards (`*`) & Defaults**: Use `*` to cover all difficulties under a phase, or all phases. Unmatched cells fall back to `router.default`.
+- **Fallback Chains**: Specify an array of models per cell. The router selects the first available model with configured credentials.
+- **Quota & Rate-Limit Cooldown**: When a model encounters a `429`, quota exceeded, or capacity failure, it enters a temporary cooldown (default: 15 min / 900s) and automatically shifts requests to the next fallback model.
+- **Prompt-Cache Friendliness**: Multi-tool continuation turns remain sticky on the current model to preserve prefix caching. Compaction summaries route to `router.direct`.
+- **Inspection Command**: Run `/quest-router` to display the active quest cell, resolved candidate models, cooldown timers, and matrix overview.
+
+---
+
 ## Mid-Quest Directives & Sub-Quest Control
 
 When you speak to the agent mid-quest, `pi-quest` guarantees your instructions are never forgotten. You do not need to memorize any special commands or syntax — simply speak in plain English:

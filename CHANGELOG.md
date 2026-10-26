@@ -5,6 +5,17 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-26
+
+### Added
+- **Configurable Phase × Difficulty Virtual Model Router (`quest/auto`) (`src/router/`, `src/config.ts`, `src/surface/commands/router.ts`)**:
+  - **Dynamic Phase × Difficulty Matrix**: Registers virtual model `quest/auto` routing each request to physical models based on active quest phase (`idle`, `provisional`, `drafting`, `implementing`, `validating`) and difficulty tier (`trivial`, `standard`, `complex`).
+  - **Wildcard Cascades & Fallback Chains**: Full support for wildcard `*` matching across phases and difficulties, single string or array fallback chains, and automatic fallback to `router.default`.
+  - **Subscription Quota & Rate-Limit Cooldown**: Automatically detects `429`, quota exceeded, and capacity exhaustion errors on retry turns, placing affected models on a configurable cooldown (`cooldownMs`, default 15m) and switching requests to secondary fallback models.
+  - **Prompt-Cache Optimization**: Multi-tool continuation turns remain sticky on the active model to preserve prompt prefix caching, and direct tasks (such as compaction summaries) route to an economical `direct` model.
+  - **Status Inspection Command (`/quest-router`)**: Adds `/quest-router` displaying live registration state, active quest cell, resolved candidate models, cooldown timers, and matrix configuration validation warnings.
+  - **Structural Interface Compatibility (`src/hooks/events.ts`)**: Extends pi-quest's internal structural `Pi` and `PiCtx` interfaces with optional `registerVirtualModel` and `modelRegistry` support without coupling to external `@earendil-works` dependencies.
+
 ## [1.3.1] - 2026-10-26
 
 ### Added
