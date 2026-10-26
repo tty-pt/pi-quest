@@ -70,6 +70,38 @@ When a task is classified as `complex`:
 
 ---
 
+## Review Policies & Role Models
+
+`pi-quest` allows you to customize review intensity and delegate roles to different models, balancing speed, cost, and discipline:
+
+### Review Policies (`reviewPolicy`)
+- **`balanced` (Frontier Mode - Recommended for Grok / Claude 3.5)**:
+  - Bypasses plan review for `trivial` and `standard` tasks so your model can start coding immediately.
+  - Skips validator subagent when tests pass cleanly (`exitCode 0`).
+  - Automatically activates full adversarial review on `complex` tasks or when test verification fails.
+- **`strict` (Default / Flash Mode)**:
+  - Adversarial subagents audit every plan and every validation milestone, keeping cheaper/faster models strictly grounded.
+- **`off` (Speedrun Mode)**:
+  - Zero subagent review calls. You retain full quest journal benefits (checklists, git tracking, test receipts, status overlay) without subagent latency or cost.
+
+### Role-Based Model Customization (`roles`)
+If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your primary agent, you don't need to burn expensive tokens on reviewing. Delegate review and validation roles to fast, economical models:
+
+```json
+{
+  "pi-quest": {
+    "reviewPolicy": "balanced",
+    "roles": {
+      "reviewer": "google/gemini-2.5-flash",
+      "validator": "google/gemini-2.5-flash",
+      "judge": "qwen"
+    }
+  }
+}
+```
+
+---
+
 ## Configuration
 ```json
 {

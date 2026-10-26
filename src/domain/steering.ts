@@ -1,6 +1,6 @@
 // HIGH_LEVEL: #steering — natural language circuit breaking and intent evaluation
 // allowing human operators to advance, abort, or refine active quests without rigid keyword matching.
-import type { QuestConfig } from "../config.ts";
+import { type QuestConfig, resolveRoleModel } from "../config.ts";
 import { normalizeJevUrl } from "../drafting/judge.ts";
 
 export type SteeringAction = "advance" | "abort" | "neutral";
@@ -142,7 +142,7 @@ export async function callJevSteeringJudge(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const payload = {
-    model: cfg.judgeModel || "qwen",
+    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "qwen",
     state: `Quest Phase: ${phase}\nUser steering message: ${prompt}`,
     questions: {
       steering_intent: {

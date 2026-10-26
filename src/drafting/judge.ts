@@ -1,6 +1,6 @@
 // HIGH_LEVEL: #drafting — intelligent Jev System One classification
 // for determining whether incoming user input constitutes genuine quest material.
-import type { QuestConfig } from "../config.ts";
+import { type QuestConfig, resolveRoleModel } from "../config.ts";
 import { isQuestLikeRequest } from "./detect.ts";
 
 export function normalizeJevUrl(baseUrlOrUrl: string): string {
@@ -77,7 +77,7 @@ export async function callJevQuestJudge(prompt: string, cfg: QuestConfig): Promi
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const payload = {
-    model: cfg.judgeModel || "qwen",
+    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "qwen",
     state: `User: ${prompt}`,
     questions: {
       quest_intent: {

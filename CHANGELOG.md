@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 </p>
 
 ### Added
+- **Configurable Review Policies (`src/config.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`)**:
+  - Added `reviewPolicy`: `"strict" | "balanced" | "off"` (default `"strict"`).
+  - In `"balanced"` (Frontier Mode): skips plan reviews for `trivial` and `standard` tasks, allowing models like Grok and Claude 3.5 to jump straight to implementation; auto-completes validation when tests pass cleanly (`exitCode 0`), reserving subagents for `complex` tasks or test failures.
+  - In `"off"` (Speedrun Mode): completely bypasses subagent review calls while retaining full quest journal structure, checklists, git tracking, and test receipts.
+- **Role-Based Model Customization (`src/config.ts`, `src/review/flow.ts`, `src/drafting/reviews.ts`)**:
+  - Added `roles`: `{ reviewer?: string; validator?: string; judge?: string; }` with environment overrides (`PI_QUEST_REVIEWER_MODEL`, `PI_QUEST_VALIDATOR_MODEL`, `PI_QUEST_JUDGE_MODEL`).
+  - Enables the Economical Frontier pattern: run expensive reasoning models (e.g. Grok, Claude) as primary implementation workers while delegating review and validation roles to fast, economical auditors (e.g. `google/gemini-2.5-flash`).
 - **Natural Language Steering & Semantic Circuit Breaking (`src/domain/steering.ts`)**:
   - Implemented `evaluateSteeringIntent()` with fast local heuristic intent classification (<5ms) and optional neural judging via Jev System One.
   - Understands conversational operator approval/advancement phrases (e.g. *"proceed"*, *"ship it"*, *"looks good"*, *"start coding"*, *"wrap it up"*, *"avança"*, *"está feito"*) and abort/cancellation phrases without rigid regex constraints.

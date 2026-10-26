@@ -15,7 +15,7 @@ import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
 import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
-import { readQuestConfig } from "../config";
+import { readQuestConfig, resolveRoleModel } from "../config";
 import { cancelReview, hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
@@ -210,6 +210,38 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   }
   if (hasInFlight(qid)) return;
   const config = await readQuestConfig(ctx.cwd);
+
+  // Policy-based bypass in validation:
+  // 1. "off": skip subagent review entirely when tests pass (or analysis)
+  // 2. "balanced": for non-complex tasks, skip subagent review when tests pass
+  const testExecution = state.lastTestReceipt ?? getLatestTestExecution();
+  const testsPassed = testExecution !== null ? testExecution.exitCode === 0 : state.kind === "analysis";
+  const shouldBypassValidation =
+    config.reviewPolicy === "off" ||
+    (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && testsPassed);
+
+  if (shouldBypassValidation) {
+    clearValidationVerdictFails(qid);
+    const reason = config.reviewPolicy === "off"
+      ? "Accepted under reviewPolicy 'off'."
+      : `Accepted under reviewPolicy 'balanced' (${state.difficulty} task, tests passed).`;
+    const syntheticReview: ParsedReview = {
+      verdict: "PASS",
+      severity: "none",
+      findings: reason,
+      advisories: "",
+      text: reason,
+    };
+    updateState((s) => recordReviewResult(s, "PASS", target, reason));
+    emitNow(pi);
+    const concluded = await concludeValidationPass(pi, ctx, qid, target, syntheticReview, config.autoArchive);
+    if (!concluded.archived) {
+      wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} (${reason}) — run quest_archive to complete the quest.`);
+    }
+    return;
+  }
+
+  const validatorModel = resolveRoleModel(config, "validator");
   const brief = await validationBrief(ctx, state);
   const outcome = await runIsolatedReview({
     pi,
@@ -217,6 +249,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     qid,
     target,
     runnerTool: config.bindings.reviewRunner.tool,
+    ...(validatorModel ? { model: validatorModel } : {}),
     prompt: buildReviewPrompt("validation", qid, target, brief),
   });
   if (outcome.status === "no-runner") {

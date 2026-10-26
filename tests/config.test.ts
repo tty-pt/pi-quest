@@ -1,5 +1,5 @@
 import { check } from "./check.ts";
-import { DEFAULT_CONFIG, loadConfig, readQuestConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, readQuestConfig, resolveRoleModel } from "../src/config.ts";
 
 Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.askTimeoutMs === 60000, "one minute default");
@@ -8,6 +8,7 @@ Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.draftThresholds.evidence === 7, "7 evidence");
   check(DEFAULT_CONFIG.bindings.reviewRunner.tool === "subagent", "runner binding");
   check(DEFAULT_CONFIG.statusStyle === "icon", "icon status default");
+  check(DEFAULT_CONFIG.reviewPolicy === "strict", "reviewPolicy defaults to strict");
   check(DEFAULT_CONFIG.reviewInactivityMs === 300000, "5 minute inactivity default");
   check(DEFAULT_CONFIG.reviewMaxDurationMs === 1500000, "25 minute max-duration default");
 });
@@ -43,3 +44,31 @@ Deno.test("config reads the settings file with fallback", async () => {
   check(loaded.bindings.reviewRunner.tool === "custom", "file binding honored");
   check(loaded.depthCap === 3, "absent keys default");
 });
+
+Deno.test("config parses reviewPolicy and role models", () => {
+  const balanced = loadConfig({ reviewPolicy: "balanced" });
+  check(balanced.reviewPolicy === "balanced", "balanced policy honored");
+
+  const off = loadConfig({ reviewPolicy: "off" });
+  check(off.reviewPolicy === "off", "off policy honored");
+
+  const invalid = loadConfig({ reviewPolicy: "yolo" });
+  check(invalid.reviewPolicy === "strict", "invalid policy defaults to strict");
+
+  const customRoles = loadConfig({
+    reviewPolicy: "balanced",
+    roles: {
+      reviewer: "google/gemini-2.5-flash",
+      validator: "google/gemini-2.5-pro",
+      judge: "qwen-local",
+    },
+  });
+  check(customRoles.roles.reviewer === "google/gemini-2.5-flash", "reviewer role mapped");
+  check(customRoles.roles.validator === "google/gemini-2.5-pro", "validator role mapped");
+  check(customRoles.roles.judge === "qwen-local", "judge role mapped");
+  check(customRoles.judgeModel === "qwen-local", "judgeModel aligned with roles.judge");
+  check(resolveRoleModel(customRoles, "reviewer") === "google/gemini-2.5-flash", "resolveRoleModel reviewer");
+  check(resolveRoleModel(customRoles, "validator") === "google/gemini-2.5-pro", "resolveRoleModel validator");
+  check(resolveRoleModel(customRoles, "judge") === "qwen-local", "resolveRoleModel judge");
+});
+

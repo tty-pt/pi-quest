@@ -19,6 +19,7 @@ import { implementationFingerprint } from "../../src/review/flow.ts";
 import { archiveActiveQuest, archiveTool } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import {
+  ensureValidationFlow,
   handleConfirmInput,
   noteValidationVerdictFailed,
   clearValidationVerdictFails,
@@ -144,4 +145,52 @@ Deno.test("validation consecutive fails track and pause automated loop", () => {
   clearValidationVerdictFails("abc123" as Qid);
   check(getValidationVerdictFails("abc123" as Qid) === 0, "cleared fails");
 });
+
+Deno.test("reviewPolicy off validation auto-archives when tests pass", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  const state = validatingWithStalePlanPass();
+  state.lastTestReceipt = {
+    command: "npm test",
+    exitCode: 0,
+    tailOutput: "ok",
+    executedAt: Date.now(),
+  };
+  replaceState(state);
+  await withDraftFile(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
+  await writeFile(
+    join(cwd, ".pi", "settings.json"),
+    JSON.stringify({ "pi-quest": { reviewPolicy: "off", autoArchive: true } }),
+    "utf8",
+  );
+  await ensureValidationFlow(pi, fakeCtx(cwd));
+  check(getState().phase === "idle", "quest auto-archived under reviewPolicy off");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("reviewPolicy balanced validation auto-archives standard task when tests pass", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  const state = validatingWithStalePlanPass();
+  state.difficulty = "standard";
+  state.lastTestReceipt = {
+    command: "npm test",
+    exitCode: 0,
+    tailOutput: "ok",
+    executedAt: Date.now(),
+  };
+  replaceState(state);
+  await withDraftFile(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
+  await writeFile(
+    join(cwd, ".pi", "settings.json"),
+    JSON.stringify({ "pi-quest": { reviewPolicy: "balanced", autoArchive: true } }),
+    "utf8",
+  );
+  await ensureValidationFlow(pi, fakeCtx(cwd));
+  check(getState().phase === "idle", "quest auto-archived under reviewPolicy balanced");
+  replaceState(IDLE_STATE);
+});
+
 

@@ -27,6 +27,13 @@ export interface InterfaceBindings {
 export type StatusStyle = "icon" | "text";
 export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
 export type JudgeFallback = "heuristic" | "skip";
+export type ReviewPolicy = "strict" | "balanced" | "off";
+
+export interface RoleModels {
+  reviewer?: string;
+  validator?: string;
+  judge?: string;
+}
 
 export const DEFAULT_TRIGGER_PREFIXES: string[] = [
   "quest:",
@@ -50,6 +57,10 @@ export interface QuestConfig {
   bindings: InterfaceBindings;
   statusStyle: StatusStyle;
   autoArchive: boolean;
+  reviewPolicy: ReviewPolicy;
+  reviewerModel?: string;
+  validatorModel?: string;
+  roles: RoleModels;
   reviewInactivityMs: number;
   reviewMaxDurationMs: number;
   planEditor: string | null;
@@ -72,6 +83,10 @@ export const DEFAULT_CONFIG: QuestConfig = {
   bindings: { reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
+  reviewPolicy: "strict",
+  reviewerModel: undefined,
+  validatorModel: undefined,
+  roles: {},
   reviewInactivityMs: 300000,
   reviewMaxDurationMs: 1500000,
   planEditor: null,
@@ -213,11 +228,55 @@ export function loadConfig(raw: unknown): QuestConfig {
     complex: parseTier("complex", DEFAULT_DIFFICULTY_THRESHOLDS.complex),
   };
 
+  const rawPolicy = record["reviewPolicy"] ?? getEnv("PI_QUEST_REVIEW_POLICY");
+  const reviewPolicy: ReviewPolicy =
+    rawPolicy === "strict" || rawPolicy === "balanced" || rawPolicy === "off"
+      ? rawPolicy
+      : DEFAULT_CONFIG.reviewPolicy;
+
+  const rawRoles = (typeof record["roles"] === "object" && record["roles"] !== null)
+    ? (record["roles"] as Record<string, unknown>)
+    : {};
+
+  const reviewerModel =
+    typeof rawRoles["reviewer"] === "string" && rawRoles["reviewer"].trim() !== ""
+      ? rawRoles["reviewer"].trim()
+      : typeof record["reviewerModel"] === "string" && record["reviewerModel"].trim() !== ""
+      ? record["reviewerModel"].trim()
+      : getEnv("PI_QUEST_REVIEWER_MODEL") ?? getEnv("PI_REVIEW_MODEL");
+
+  const validatorModel =
+    typeof rawRoles["validator"] === "string" && rawRoles["validator"].trim() !== ""
+      ? rawRoles["validator"].trim()
+      : typeof record["validatorModel"] === "string" && record["validatorModel"].trim() !== ""
+      ? record["validatorModel"].trim()
+      : getEnv("PI_QUEST_VALIDATOR_MODEL") ?? getEnv("PI_VALIDATOR_MODEL");
+
+  const judgeModelOverride =
+    typeof rawRoles["judge"] === "string" && rawRoles["judge"].trim() !== ""
+      ? rawRoles["judge"].trim()
+      : judge.judgeModel;
+
+  const roles: RoleModels = {
+    reviewer: reviewerModel,
+    validator: validatorModel,
+    judge: judgeModelOverride,
+  };
+
+  // Align judge.judgeModel with roles.judge if set
+  if (roles.judge) {
+    judge.judgeModel = roles.judge;
+  }
+
   return {
     askTimeoutMs: typeof timeout === "number" ? timeout : DEFAULT_CONFIG.askTimeoutMs,
     depthCap: typeof depth === "number" ? depth : DEFAULT_CONFIG.depthCap,
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
     autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
+    reviewPolicy,
+    reviewerModel,
+    validatorModel,
+    roles,
     draftThresholds,
     difficultyMode,
     defaultDifficulty,
@@ -246,6 +305,16 @@ export function getThresholdsForDifficulty(
   difficulty: QuestDifficulty = "standard",
 ): DraftThresholds {
   return cfg.difficultyThresholds?.[difficulty] ?? cfg.draftThresholds ?? DEFAULT_CONFIG.draftThresholds;
+}
+
+export function resolveRoleModel(
+  cfg: QuestConfig,
+  role: "reviewer" | "validator" | "judge",
+): string | undefined {
+  if (role === "reviewer") return cfg.roles.reviewer ?? cfg.reviewerModel;
+  if (role === "validator") return cfg.roles.validator ?? cfg.validatorModel;
+  if (role === "judge") return cfg.roles.judge ?? cfg.judgeModel;
+  return undefined;
 }
 
 export async function readQuestConfig(cwd: string): Promise<QuestConfig> {

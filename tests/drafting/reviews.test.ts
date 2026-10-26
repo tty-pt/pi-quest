@@ -599,3 +599,60 @@ Deno.test("consecutive draft review rejections pause the automated loop", async 
   }
 });
 
+Deno.test("reviewPolicy off bypasses draft review and auto-promotes immediately", async () => {
+  const d = await draftFailureSetup("poloff01" as Qid);
+  const bus = retryBus();
+  try {
+    const offConfig = { ...DEFAULT_CONFIG, reviewPolicy: "off" as const };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, offConfig);
+    check(requests(bus.emitted).length === 0, "zero subagents launched under policy off");
+    const wake = wakes(bus.pi).find((m) => String(m.content).includes("Draft review bypassed under policy 'off'"));
+    check(wake !== undefined, "wake announced policy off bypass");
+    check(getState().phase === "implementing", "auto-promoted to implementing");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy balanced bypasses draft review for standard and trivial tasks", async () => {
+  const d = await draftFailureSetup("polbal01" as Qid);
+  const bus = retryBus();
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(requests(bus.emitted).length === 0, "zero subagents launched for standard task under balanced");
+    const wake = wakes(bus.pi).find((m) => String(m.content).includes("policy 'balanced' (standard task)"));
+    check(wake !== undefined, "wake announced balanced bypass");
+    check(getState().phase === "implementing", "auto-promoted to implementing");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("roles.reviewer model is forwarded to subagent review request", async () => {
+  const d = await draftFailureSetup("role001" as Qid);
+  const bus = retryBus();
+  // Complex difficulty forces review even under balanced
+  updateState((s) => ({ ...s, difficulty: "complex" }));
+  try {
+    const roleConfig = {
+      ...DEFAULT_CONFIG,
+      reviewPolicy: "balanced" as const,
+      roles: { reviewer: "google/gemini-2.5-flash" },
+    };
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, roleConfig);
+    await waitForRequests(bus.emitted, 1);
+    const req = requests(bus.emitted)[0];
+    check(req["model"] === "google/gemini-2.5-flash", "reviewer model dispatched");
+    bus.feed({
+      requestId: req["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\n\nLooks good." },
+    });
+    await booted;
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+

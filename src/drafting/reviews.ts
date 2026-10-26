@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, type QuestConfig } from "../config";
+import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleModel, type QuestConfig } from "../config";
 import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
 import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
@@ -85,6 +85,22 @@ export async function bootDraftReview(
   const thresholds = getThresholdsForDifficulty(config, state.difficulty);
   const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
+
+  // Policy-based bypass:
+  // 1. "off": zero subagent reviews — promote immediately
+  // 2. "balanced": subagent reviews complex tasks; non-complex tasks auto-promote
+  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex")) {
+    clearDraftReviewRetry(qid);
+    clearReviewVerdictFails(qid);
+    const reason = config.reviewPolicy === "off" ? "policy 'off'" : `policy 'balanced' (${state.difficulty} task)`;
+    const message = await promoteAfterPass(pi, ctx, qid, "review");
+    if (message !== null) {
+      sendWake(pi, `${message} Draft review bypassed under ${reason}.`);
+    }
+    return;
+  }
+
+  const reviewerModel = resolveRoleModel(config, "reviewer");
   const outcome = await runIsolatedReview({
     pi,
     ctx,
@@ -92,6 +108,7 @@ export async function bootDraftReview(
     target,
     prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar),
     runnerTool: config.bindings.reviewRunner.tool,
+    ...(reviewerModel ? { model: reviewerModel } : {}),
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
   });

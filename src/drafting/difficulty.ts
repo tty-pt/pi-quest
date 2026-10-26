@@ -2,7 +2,7 @@
 // Determines quest complexity: trivial, standard, or complex.
 // Operates via remote Jev System One judge when available, with a fast,
 // zero-network heuristic analyser fallback, or explicit overrides.
-import type { QuestConfig } from "../config.ts";
+import { type QuestConfig, resolveRoleModel } from "../config.ts";
 import type { QuestDifficulty } from "../domain/quest.ts";
 import { normalizeJevUrl } from "./judge.ts";
 
@@ -123,7 +123,7 @@ export async function callJevDifficultyJudge(prompt: string, cfg: QuestConfig): 
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const payload = {
-    model: cfg.judgeModel || "qwen",
+    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "qwen",
     state: `User: ${prompt}`,
     questions: {
       quest_difficulty: {

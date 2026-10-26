@@ -386,3 +386,21 @@ Deno.test("plan-revision retries cap out and wake without self-approval", async 
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("plan revision under reviewPolicy off auto-adopts without subagent", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  try {
+    const offConfig = { ...DEFAULT_CONFIG, reviewPolicy: "off" as const };
+    await bootPlanRevisionReview(bus.pi, fakeCtx(d.cwd), d.target, offConfig);
+    check(revisionRequests(bus.emitted).length === 0, "zero subagents under policy off");
+    check(getState().draft?.approvedPlanHash === d.target, "plan revision adopted");
+    const sentWakes = revisionWakes(bus.pi);
+    check(sentWakes.length === 1, "wake announced adoption");
+    check(String(sentWakes[0].content).includes("auto-approved under policy 'off'"), "announcement includes policy");
+  } finally {
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});

@@ -23,8 +23,10 @@ straight at a request, it researches, writes a plan, has the plan reviewed, and
 only then touches code — then it validates what it built against the plan
 before calling the task done. State is stamped into the conversation and
 re-read before every reply, so quests survive compactions and restarts without
-any setup. That makes it possible to hand a low-cost model a long, complex
-task and get a supervised, verifiable result.
+any setup.
+
+**Conceived for Token Economy, Built for Every Model Tier:**
+pi-quest was originally conceived with token economy in mind, designed so that fast, low-cost models (such as Gemini Flash) could follow through with disciplined planning, verification, and big tasks without wandering off or hallucinating completion. At the same time, pi-quest natively empowers expensive/frontier model users (e.g. Grok, Claude 3.5 Sonnet) by providing configurable review policies (`strict`, `balanced`, `off`) and role-based model delegation, so operators can use an expensive model for implementation while offloading reviews to fast, economical auditors, or bypass reviews entirely on routine tasks.
 
 ## How a quest goes
 
@@ -172,6 +174,11 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 ```json
 {
   "pi-quest": {
+    "reviewPolicy": "balanced",
+    "roles": {
+      "reviewer": "google/gemini-2.5-flash",
+      "validator": "google/gemini-2.5-flash"
+    },
     "askTimeoutMs": 60000,
     "depthCap": 3,
     "draftThresholds": { "requirements": 2, "evidence": 7 },
@@ -188,6 +195,10 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 
 | Setting | Values | Default | Effect |
 |---------|--------|---------|--------|
+| `reviewPolicy` | `"strict"` / `"balanced"` / `"off"` | `"strict"` | Review intensity: `"strict"` audits every plan and validation; `"balanced"` skips reviews on `trivial` and `standard` tasks when tests pass and audits `complex` tasks; `"off"` runs zero subagent reviews. |
+| `roles.reviewer` | model name / id | `undefined` (inherit) | Model used for plan review subagents (e.g. `"google/gemini-2.5-flash"`). Fallback: `PI_QUEST_REVIEWER_MODEL`. |
+| `roles.validator` | model name / id | `undefined` (inherit) | Model used for completion validation subagents. Fallback: `PI_QUEST_VALIDATOR_MODEL`. |
+| `roles.judge` | model name / id | `"qwen"` | Model identifier sent to Jev System One for intent and difficulty judging. Fallback: `PI_QUEST_JUDGE_MODEL`. |
 | `askTimeoutMs` | number (ms) | `60000` | How long `quest_ask_human` waits before proceeding with its recommended default. |
 | `depthCap` | number | `3` | How deep sub-quests may nest. |
 | `draftThresholds.requirements` | number | `2` | Minimum requirements the draft reviewer demands before passing. |
