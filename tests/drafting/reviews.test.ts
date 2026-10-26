@@ -23,11 +23,13 @@ import {
   draftReviewRetryCount,
   getReviewVerdictFails,
   handleGoInput,
+  maybeBootDraftReview,
   onTurnEndCatchAll,
   setReviewRetryDispatcher,
   watchDraftFileCatchAll,
 } from "../../src/drafting/reviews.ts";
 import { cancelReview, hasInFlight, trackReview } from "../../src/review/tracker.ts";
+import { installDraftGate } from "../../src/drafting/gate.ts";
 import { promoteAfterPass } from "../../src/drafting/promote.ts";
 import {
   bumpReviewCount,
@@ -736,3 +738,26 @@ Deno.test("promoteAfterPass cancels in-flight review unconditionally", async () 
 
 
 
+
+Deno.test("balanced e2e: saving a standard plan promotes without leaving the tool gate locked", async () => {
+  const d = await draftFailureSetup("bale2e01" as Qid);
+  const bus = retryBus();
+  await mkdir(join(d.cwd, ".pi"), { recursive: true });
+  await writeFile(join(d.cwd, ".pi", "settings.json"), JSON.stringify({ "pi-quest": { reviewPolicy: "balanced" } }), "utf8");
+  const hooks: Array<(e: unknown, c: unknown) => unknown> = [];
+  (bus.pi as unknown as { on: unknown }).on = (_n: string, h: (e: unknown, c: unknown) => unknown) => { hooks.push(h); };
+  installDraftGate(bus.pi);
+  try {
+    await maybeBootDraftReview(bus.pi, fakeCtx(d.cwd));
+    // bypass promotion runs inside a detached promise; let it settle
+    for (let i = 0; i < 50 && getState().phase !== "implementing"; i++) await new Promise((r) => setTimeout(r, 10));
+    check(getState().phase === "implementing", "standard quest auto-promotes under balanced");
+    check(requests(bus.emitted).length === 0, "no subagent launched");
+    check(hasInFlight(d.qid) === false, "no in-flight review left behind");
+    const verdict = hooks[0]({ type: "tool_call", toolCallId: "1", toolName: "bash", input: { command: "ls" } }, fakeCtx(d.cwd)) as { block?: boolean; reason?: string } | undefined;
+    check(!(verdict?.block === true && String(verdict.reason).includes("PLAN_REVISION_REVIEW")), "tools not locked by a phantom revision review");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
