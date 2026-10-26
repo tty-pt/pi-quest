@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRol
 import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
 import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
+import { bypassDraftReview, bypassesDraftReview } from "./bypass";
 import { draftPath } from "../domain/paths";
 import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
@@ -23,6 +24,7 @@ import {
   deliverableBody,
   deliverableWord,
   draftProfileText,
+  hasAuthoredText,
   hashContent,
   meetsReviewThresholds,
   parseDraftSections,
@@ -86,21 +88,9 @@ export async function bootDraftReview(
   const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
-  // Policy-based bypass:
-  // 1. "off": zero subagent reviews — promote immediately once plan is authored and meets thresholds
-  // 2. "balanced": subagent reviews complex tasks; non-complex tasks auto-promote once plan is authored and meets thresholds
-  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex")) {
-    cancelReview(qid);
-    if (belowBar || state.draft === null || !state.draft.planAuthored) {
-      return;
-    }
-    clearDraftReviewRetry(qid);
-    clearReviewVerdictFails(qid);
-    const reason = config.reviewPolicy === "off" ? "policy 'off'" : `policy 'balanced' (${state.difficulty} task)`;
-    const message = await promoteAfterPass(pi, ctx, qid, "review");
-    if (message !== null) {
-      sendWake(pi, `${message} Draft review bypassed under ${reason}.`);
-    }
+  // Policy-based bypass (reviewPolicy "off", or "balanced" for non-complex).
+  if (bypassesDraftReview(config, state)) {
+    await bypassDraftReview(pi, ctx, config, { qid, state, sections, thresholds, belowBar });
     return;
   }
 
@@ -192,7 +182,7 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   const content = await readDraftFile(ctx, state);
   if (content === null) return;
   const sections = parseDraftSections(content);
-  if (deliverableBody(sections, state.kind).length > 0 && !state.draft.planAuthored) {
+  if (hasAuthoredText(deliverableBody(sections, state.kind)) && !state.draft.planAuthored) {
     updateState((s) => s.draft === null ? s : {
       ...s,
       draft: { ...s.draft, planAuthored: true },

@@ -10,7 +10,7 @@ import { recordPlanRevision } from "../../domain/plan-revision";
 import { draftPath } from "../../domain/paths";
 import { bootPlanRevisionReview, clearPlanRevisionRetries } from "../../implementing/plan-revision";
 import { clearDraftReviewRetry, maybeBootDraftReview } from "../../drafting/reviews";
-import { hashContent, parseDraftSections, seedReviewCount, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
+import { assertNoSectionHeadings, hashContent, parseDraftSections, seedReviewCount, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { noteDraftUpdated } from "../../durability/status";
 import type { Pi, PiCtx } from "../../hooks/events";
 
@@ -26,6 +26,7 @@ export async function writePlanToDraft(
   if (state.kind !== "standard") {
     throw new Error("plan text is for standard quests — author the ## Analysis via {analysis: ...} instead");
   }
+  assertNoSectionHeadings(planText, "plan");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
   const updated = splicePlanSection(current, seedReviewCount(planText));
@@ -56,6 +57,7 @@ export async function writeAnalysisToDraft(
   if (state.kind !== "analysis") {
     throw new Error("analysis text is for analysis quests — author the ## Implementation Plan via {plan: ...} instead");
   }
+  assertNoSectionHeadings(analysisText, "analysis");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
   const updated = spliceAnalysisSection(current, seedReviewCount(analysisText));
@@ -94,6 +96,7 @@ export async function writePlanRevision(
       throw new Error("plan revision keeps the quest objective — a new goal is a scope change, start a new quest");
     }
   }
+  assertNoSectionHeadings(planText, "plan");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
   const previousPlan = parseDraftSections(current).plan;

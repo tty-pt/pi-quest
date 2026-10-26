@@ -144,6 +144,25 @@ export function extractRtmFromRequirements(requirements: string[]): RtmItem[] {
   return rtm;
 }
 
+// A deliverable is authored only when something other than HTML comments (the
+// review-count marker, template placeholders) is in it.
+export function hasAuthoredText(text: string): boolean {
+  return text.replace(/<!--[\s\S]*?-->/g, "").trim().length > 0;
+}
+
+// The doc is ##-sectioned: a "## " line inside a deliverable body ends its
+// section, silently orphaning everything after it (a plan written with its own
+// ## Requirements / ## Steps parses as an empty plan). Refuse it at the write.
+export function assertNoSectionHeadings(body: string, noun: "plan" | "analysis"): void {
+  const bad = body.split(/\r?\n/).find((line) => /^##\s+\S/.test(line));
+  if (bad !== undefined) {
+    throw new Error(
+      `the ${noun} text contains a section heading (${JSON.stringify(bad.trim())}): "## " lines end the ${noun} section in the quest doc. Use "###" for sub-headings inside the ${noun}; requirements and evidence belong in the doc's own ## Requirements and ## Evidence sections (edit the draft file directly).`,
+    );
+  }
+  if (!hasAuthoredText(body)) throw new Error(`the ${noun} text has no content beyond comments`);
+}
+
 export function meetsReviewThresholds(
   sections: DraftSections,
   thresholds = DEFAULT_CONFIG.draftThresholds,
@@ -152,7 +171,7 @@ export function meetsReviewThresholds(
   const req = sections.requirements.length;
   const ev = sections.evidence.length;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
-  const authored = kind === "analysis" ? sections.analysis !== "" : sections.plan.length > 0;
+  const authored = hasAuthoredText(kind === "analysis" ? sections.analysis : sections.plan);
   if (!counts || !authored) return false;
   if (kind === "standard") {
     const rtm = extractRtmFromRequirements(sections.requirements);
@@ -179,9 +198,11 @@ export function draftProfileText(
   const ev = sections.evidence.length;
   const noun = analysis ? "analysis" : "plan";
   const deliverable = analysis ? sections.analysis : sections.plan;
-  const planPresent = deliverable.trim().length > 0;
+  const planPresent = hasAuthoredText(deliverable);
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
-  const meets = counts && planPresent;
+  const rtm = extractRtmFromRequirements(sections.requirements);
+  const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
+  const meets = counts && planPresent && rtmCoverage.covered;
   const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an ${analysis ? "authored analysis" : "actionable plan"})`;
   const diffTag = difficulty ? ` (difficulty: ${difficulty})` : "";
   const lines = [
@@ -199,8 +220,6 @@ export function draftProfileText(
     } else if (ev < thresholds.evidence) {
       gaps.push(`add ${thresholds.evidence - ev} more evidence items`);
     }
-    const rtm = extractRtmFromRequirements(sections.requirements);
-    const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
     if (!rtmCoverage.covered) {
       gaps.push(`map requirement(s) ${rtmCoverage.missing.join(", ")} into the plan or sub-quest backlog`);
     }

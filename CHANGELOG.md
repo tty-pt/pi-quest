@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Operator guide section "What to Expect: A Quest End to End".
 
 ### Fixed
+- **Quest stuck in drafting forever under `reviewPolicy: "balanced"` / `"off"`**: when a non-complex draft was below the maturity bar the bypass path returned silently — no reviewer, no promotion, no message — so the agent was never woken and the tool gate stayed locked. The bypass now wakes the agent with the draft profile (what is missing), the policy in force, and the live-user `go` override. Logic lives in `drafting/bypass.ts`.
+- **Draft profile no longer says "bar met" when the gate disagrees**: `draftProfileText` now includes requirement→plan (RTM) coverage and ignores comment-only plans (the review-count marker), exactly like `meetsReviewThresholds`.
+- **Plans with their own `## ` headings are refused** (`quest_update_state {plan|analysis|planRevision}`): a nested `## Requirements` / `## Steps` ended the Implementation Plan section and left an empty plan behind. The error says to use `###`.
 - **Phantom `PLAN_REVISION_REVIEW` lockout under `reviewPolicy: "balanced"`**: the draft-review in-flight tracker is now cleared on policy bypass and on promotion, so tools are no longer blocked after an auto-promote. A human `APPROVE` now cancels a stuck in-flight review before the hash check. Covered by an end-to-end test.
 - Natural-language advance phrases now include `go on`.
 
