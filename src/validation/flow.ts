@@ -16,12 +16,13 @@ import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig } from "../config";
-import { hasInFlight } from "../review/tracker";
+import { cancelReview, hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
 import { parseDraftSections } from "../drafting/plan-text";
 import { extractQuestTranscript } from "../durability/transcript";
 import { getLatestTestExecution } from "./evidence-gate";
+import { evaluateSteeringIntent } from "../domain/steering";
 
 export const CONFIRM_PATTERN = /^\s*confirm(?:ed)?\s*[.!]*$/i;
 
@@ -35,6 +36,23 @@ async function approvedPlan(ctx: PiCtx, state: QuestState): Promise<string> {
 }
 
 const announced = new Set<string>();
+
+export const MAX_CONSECUTIVE_VALIDATION_FAILS = 2;
+const consecutiveValidationFails = new Map<string, number>();
+
+export function noteValidationVerdictFailed(qid: string): number {
+  const next = (consecutiveValidationFails.get(qid) ?? 0) + 1;
+  consecutiveValidationFails.set(qid, next);
+  return next;
+}
+
+export function clearValidationVerdictFails(qid: string): void {
+  consecutiveValidationFails.delete(qid);
+}
+
+export function getValidationVerdictFails(qid: string): number {
+  return consecutiveValidationFails.get(qid) ?? 0;
+}
 
 // HIGH_LEVEL: #plan revision — the validator judges every plan move, so the
 // brief carries the append-only revision record: note, superseded hash, and
@@ -214,6 +232,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
+    clearValidationVerdictFails(qid);
     const concluded = await concludeValidationPass(pi, ctx, qid, target, outcome.review, config.autoArchive);
     if (!concluded.archived) {
       const advisories = outcome.review.advisories.trim();
@@ -221,32 +240,54 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     }
     return;
   }
+  const consecutive = noteValidationVerdictFailed(qid);
   if (state.kind === "analysis") {
     updateState((s) => repairAfterFail(s));
     await setDocStatus(ctx, qid, "drafting", false);
     emitNow(pi);
+    if (consecutive >= MAX_CONSECUTIVE_VALIDATION_FAILS) {
+      sendWake(
+        pi,
+        `Validation rejected ${consecutive} consecutive times for ${qid}. Automated validation loop paused.\n` +
+        `Validator findings: ${outcome.review.findings}\n\n` +
+        `Consult the human operator for guidance. The operator may reply "ship it" / "confirm" to accept completion as-is, or provide technical instructions.`,
+      );
+      return;
+    }
     sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings in the analysis, then submit the revised analysis for review again.`);
     return;
   }
   updateState((s) => repairAfterFail(s));
   await setDocStatus(ctx, qid, "implementing", false);
   emitNow(pi);
+  if (consecutive >= MAX_CONSECUTIVE_VALIDATION_FAILS) {
+    sendWake(
+      pi,
+      `Validation rejected ${consecutive} consecutive times for ${qid}. Automated validation loop paused.\n` +
+      `Validator findings: ${outcome.review.findings}\n\n` +
+      `Consult the human operator for guidance. The operator may reply "ship it" / "confirm" to accept completion as-is, or provide technical instructions.`,
+    );
+    return;
+  }
   sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);
 }
 
 export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
-  if (!CONFIRM_PATTERN.test(text)) return false;
+  const config = await readQuestConfig(ctx.cwd);
+  const steering = await evaluateSteeringIntent(text, "validating", config);
+  if (steering.action !== "advance" && !CONFIRM_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "validating" || state.qid === null) return false;
-  if (hasInFlight(state.qid)) return false;
+  if (hasInFlight(state.qid)) {
+    cancelReview(state.qid);
+  }
   const target = implementationFingerprint(state);
   if (state.lastReview?.verdict === "PASS" && state.lastReview.target === target) return false;
-  const config = await readQuestConfig(ctx.cwd);
-  if (isReviewerAvailable(pi, config.bindings.reviewRunner.tool)) return false;
-  // User acceptance stands in for the missing validator verdict: record it
+  // User acceptance stands in for or overrides the validator verdict: record it
   // as the current PASS so the COMPLETED archive gate sees honest state.
-  updateState((s) => recordReviewResult(s, "PASS", target, "Accepted on user confirmation (no validator available)."));
+  updateState((s) => recordReviewResult(s, "PASS", target, "Accepted on user confirmation."));
+  clearValidationVerdictFails(state.qid);
   emitNow(pi);
-  await archiveActiveQuest(pi, ctx, "COMPLETED", "Accepted on user confirmation (no validator available).");
+  await archiveActiveQuest(pi, ctx, "COMPLETED", "Accepted on user confirmation.");
   return true;
 }

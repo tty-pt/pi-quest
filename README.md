@@ -111,6 +111,8 @@ pi install npm:@tty-pt/pi-quest
 
 ## Usage
 
+For an operator overview, see the [Operator Guide](docs/OPERATOR_GUIDE.md).
+
 Engine usage — commands for the user:
 
 | Command | Effect |

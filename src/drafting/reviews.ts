@@ -28,6 +28,7 @@ import {
   parseDraftSections,
   reviewMaterial,
 } from "./plan-text";
+import { evaluateSteeringIntent } from "../domain/steering";
 export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
 
 import {
@@ -37,14 +38,21 @@ import {
   noteReviewLaunchFailed,
   setReviewRetryDispatcher,
   MAX_REVIEW_RETRIES,
+  MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
+  clearReviewVerdictFails,
+  noteReviewVerdictFailed,
+  getReviewVerdictFails,
   type RetryDispatcher,
 } from "./draft-retry";
 export {
   clearDraftReviewRetry,
+  clearReviewVerdictFails,
   draftReviewRetryCount,
+  getReviewVerdictFails,
   setReviewRetryDispatcher,
   MAX_REVIEW_RETRIES,
+  MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
   type RetryDispatcher,
 };
@@ -104,6 +112,7 @@ export async function bootDraftReview(
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
     clearDraftReviewRetry(qid);
+    clearReviewVerdictFails(qid);
     if (!researchRecorded(getState(), sections.evidence.length)) {
       sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or a live user may reply "go".`);
       return;
@@ -119,6 +128,7 @@ export async function bootDraftReview(
   updateState((s) => noteDraftFindings(s));
   clearDraftReviewRetry(qid);
   emitNow(pi);
+  const consecutive = noteReviewVerdictFailed(qid);
   const verbatim = outcome.review.text.trim();
   const reviewExcerpt = verbatim === ""
     ? ""
@@ -126,6 +136,17 @@ export async function bootDraftReview(
   const profile = belowBar
     ? `\n\nDraft profile:\n${draftProfileText(sections, thresholds, "", kind, state.difficulty)}`
     : "";
+
+  if (consecutive >= MAX_CONSECUTIVE_REVIEW_FAILS) {
+    sendWake(
+      pi,
+      `Draft review rejected ${consecutive} consecutive times for ${qid}. Automated review loop paused to prevent thrashing.\n` +
+      `Reviewer findings: ${outcome.review.findings}${reviewExcerpt}\n\n` +
+      `Consult the human operator for guidance, or the operator may reply "go" / "proceed" to bypass review and start coding immediately.`,
+    );
+    return;
+  }
+
   sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the ${deliverableWord(kind).toLowerCase()} and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
 }
 
@@ -191,6 +212,7 @@ export function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): bool
   if (state.phase !== "drafting" || state.qid !== qid) return false;
   cancelReview(qid);
   clearDraftReviewRetry(qid);
+  clearReviewVerdictFails(qid);
   // Kind-aware routing in promoteAfterPass: standard → implementing, analysis
   // → full-on validating once its children are done (D3).
   const message = promoteAfterPass(pi, ctx, qid, by);
@@ -199,11 +221,13 @@ export function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): bool
   return true;
 }
 
-export function handleGoInput(pi: Pi, ctx: PiCtx, text: string): boolean {
-  // "go" here is a LIVE user input event (wired in watchGoInput via
-  // onUserMessage). It is never served from a tool result — a quest_ask_human
-  // default is absence, not approval, and so can never promote a draft.
-  if (!GO_PATTERN.test(text)) return false;
+export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
+  // Natural language steering: advance intent (or GO_PATTERN) promotes a draft.
+  // It is never served from a tool result — a quest_ask_human default is absence,
+  // not approval, and so can never promote a draft.
+  const config = await readQuestConfig(ctx.cwd);
+  const steering = await evaluateSteeringIntent(text, "drafting", config);
+  if (steering.action !== "advance" && !GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;
   return approveDraft(pi, ctx, state.qid, "user");
@@ -288,6 +312,6 @@ export function watchResume(pi: Pi): void {
 
 export function watchGoInput(pi: Pi): void {
   onUserMessage(pi, (text, eventCtx) => {
-    handleGoInput(pi, eventCtx, text);
+    void handleGoInput(pi, eventCtx, text);
   });
 }

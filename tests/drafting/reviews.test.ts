@@ -15,10 +15,13 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import {
   GO_PATTERN,
   MAX_REVIEW_RETRIES,
+  MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
   bootDraftReview,
   clearDraftReviewRetry,
+  clearReviewVerdictFails,
   draftReviewRetryCount,
+  getReviewVerdictFails,
   onTurnEndCatchAll,
   setReviewRetryDispatcher,
   watchDraftFileCatchAll,
@@ -558,3 +561,41 @@ Deno.test("a superseding save cancels the pending retry", async () => {
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("consecutive draft review rejections pause the automated loop", async () => {
+  const d = await draftFailureSetup("loop01" as Qid);
+  const bus = retryBus();
+  try {
+    // Round 1 FAIL
+    const booted1 = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: FAIL\n\nMissing details." },
+    });
+    await booted1;
+    check(getReviewVerdictFails("loop01" as Qid) === 1, "first fail recorded");
+    const wake1 = wakes(bus.pi).find((m) => String(m.content).includes("FAIL"));
+    check(wake1 !== undefined && !String(wake1.content).includes("Automated review loop paused"), "round 1 does not pause");
+
+    // Round 2 FAIL
+    const booted2 = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 2);
+    bus.feed({
+      requestId: requests(bus.emitted)[1]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: FAIL\n\nStill missing details." },
+    });
+    await booted2;
+    check(getReviewVerdictFails("loop01" as Qid) === 2, "second fail recorded");
+    const wake2 = wakes(bus.pi).find((m) => String(m.content).includes("Automated review loop paused"));
+    check(wake2 !== undefined, "round 2 pauses the automated loop");
+    const content2 = String(wake2!.content);
+    check(content2.includes("Consult the human operator") || content2.includes("operator may reply"), "prompts operator");
+  } finally {
+    clearReviewVerdictFails("loop01" as Qid);
+    replaceState(IDLE_STATE);
+  }
+});
+

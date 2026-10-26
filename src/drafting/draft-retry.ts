@@ -11,9 +11,11 @@ import { noteDraftUpdated } from "../durability/status";
 import { bumpReviewCount, hashContent } from "./plan-text";
 
 export const MAX_REVIEW_RETRIES = 3;
+export const MAX_CONSECUTIVE_REVIEW_FAILS = 2;
 export const REVIEW_RETRY_BASE_MS = 4000;
 
 const retryAttempts = new Map<string, number>();
+const consecutiveReviewFails = new Map<string, number>();
 
 export function draftReviewRetryCount(qid: string): number {
   return retryAttempts.get(qid) ?? 0;
@@ -21,6 +23,20 @@ export function draftReviewRetryCount(qid: string): number {
 
 export function clearDraftReviewRetry(qid: string): void {
   retryAttempts.delete(qid);
+}
+
+export function noteReviewVerdictFailed(qid: string): number {
+  const next = (consecutiveReviewFails.get(qid) ?? 0) + 1;
+  consecutiveReviewFails.set(qid, next);
+  return next;
+}
+
+export function clearReviewVerdictFails(qid: string): void {
+  consecutiveReviewFails.delete(qid);
+}
+
+export function getReviewVerdictFails(qid: string): number {
+  return consecutiveReviewFails.get(qid) ?? 0;
 }
 
 export type RetryDispatcher = (delayMs: number, fn: () => void) => void;
