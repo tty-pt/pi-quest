@@ -12,13 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 </p>
 
 ### Added
-- **Configurable Review Policies (`src/config.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`)**:
-  - Added `reviewPolicy`: `"strict" | "balanced" | "off"` (default `"strict"`).
+- **Configurable Review Policies (`src/config.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`, `src/implementing/plan-revision.ts`)**:
+  - Added `reviewPolicy`: `"strict" | "balanced" | "off"` (default `"strict"`), configurable in `.pi/settings.json` or via `PI_QUEST_REVIEW_POLICY`.
   - In `"balanced"` (Frontier Mode): skips plan reviews for `trivial` and `standard` tasks, allowing models like Grok and Claude 3.5 to jump straight to implementation; auto-completes validation when tests pass cleanly (`exitCode 0`), reserving subagents for `complex` tasks or test failures.
-  - In `"off"` (Speedrun Mode): completely bypasses subagent review calls while retaining full quest journal structure, checklists, git tracking, and test receipts.
-- **Role-Based Model Customization (`src/config.ts`, `src/review/flow.ts`, `src/drafting/reviews.ts`)**:
-  - Added `roles`: `{ reviewer?: string; validator?: string; judge?: string; }` with environment overrides (`PI_QUEST_REVIEWER_MODEL`, `PI_QUEST_VALIDATOR_MODEL`, `PI_QUEST_JUDGE_MODEL`).
-  - Enables the Economical Frontier pattern: run expensive reasoning models (e.g. Grok, Claude) as primary implementation workers while delegating review and validation roles to fast, economical auditors (e.g. `google/gemini-2.5-flash`).
+  - In `"off"` (Speedrun Mode): completely bypasses subagent review calls across drafting, validation, and mid-implementation plan revisions while retaining full quest journal structure, checklists, git tracking, and test receipts.
+  - Plan revisions in `src/implementing/plan-revision.ts` now respect `reviewPolicy`, auto-approving under `off` and `balanced` (for non-complex tasks) without spawning subagent reviews.
+  - Policy-bypassed validation runs synthesize honest `PASS` review outcomes in state, cleanly satisfying the `hasValidationPass()` gate and archiving without errors.
+- **Role-Based Model Customization (`src/config.ts`, `src/review/flow.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`, `src/domain/steering.ts`)**:
+  - Added `roles`: `{ reviewer?: string; validator?: string; judge?: string; }` (as well as `reviewerModel` and `validatorModel`) with environment overrides (`PI_QUEST_REVIEWER_MODEL`, `PI_QUEST_VALIDATOR_MODEL`, `PI_QUEST_JUDGE_MODEL`).
+  - Added `resolveRoleModel(cfg, role)` helper unifying model resolution across reviewer, validator, and judge invocations.
+  - Enables the Economical Frontier pattern: run expensive reasoning models (e.g. Grok, Claude) as primary implementation workers while delegating review, validation, and judging roles to fast, economical auditors (e.g. `google/gemini-2.5-flash`).
+  - Consistent judge model application across intent detection (`judge.ts`), difficulty inference (`difficulty.ts`), and natural language steering evaluation (`steering.ts`).
 - **Natural Language Steering & Semantic Circuit Breaking (`src/domain/steering.ts`)**:
   - Implemented `evaluateSteeringIntent()` with fast local heuristic intent classification (<5ms) and optional neural judging via Jev System One.
   - Understands conversational operator approval/advancement phrases (e.g. *"proceed"*, *"ship it"*, *"looks good"*, *"start coding"*, *"wrap it up"*, *"avança"*, *"está feito"*) and abort/cancellation phrases without rigid regex constraints.
