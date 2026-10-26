@@ -9,7 +9,7 @@ import { unfinishedChildren } from "../domain/children";
 import { nextQid, type Qid } from "../domain/qid";
 import { launchValidation } from "../validation/flow";
 import type { Pi, PiCtx } from "../hooks/events";
-import { listKnownQids } from "../files";
+import { ensureChildDraftFile, listKnownQids } from "../files";
 import { advanceForeman } from "../subquests/foreman";
 
 // Shared by the reviewer-PASS auto-promote path (drafting/reviews.ts) and the
@@ -39,13 +39,16 @@ export async function promoteAfterPass(
   }
   updateState((s) => promote(s, by));
   const promoted = getState();
-  const knownQids = await listKnownQids(ctx.cwd);
-  const nextChildQid = nextQid(Date.now() / 1000, knownQids);
-  const advanced = advanceForeman(promoted, nextChildQid);
-  if (advanced) {
-    replaceState(advanced.nextMountedState);
-    emitNow(pi);
-    return `Quest ${stateQid} promoted to implementing (${how}). Foreman: Automatically mounting ${advanced.nextItem.id}: "${advanced.nextItem.goal}". Allowed paths: ${advanced.nextItem.allowedPaths.join(", ") || "(all)"}. Proceeding with sub-quest implementation.`;
+  if (promoted.difficulty === "complex") {
+    const knownQids = await listKnownQids(ctx.cwd);
+    const nextChildQid = nextQid(Date.now() / 1000, knownQids);
+    const advanced = advanceForeman(promoted, nextChildQid);
+    if (advanced) {
+      await ensureChildDraftFile(ctx.cwd, nextChildQid, stateQid, advanced.contract, advanced.nextItem.goal);
+      replaceState(advanced.nextMountedState);
+      emitNow(pi);
+      return `Quest ${stateQid} promoted to implementing (${how}). Foreman: Automatically mounting ${advanced.nextItem.id}: "${advanced.nextItem.goal}". Allowed paths: ${advanced.nextItem.allowedPaths.join(", ") || "(all)"}. Proceeding with sub-quest implementation.`;
+    }
   }
   emitNow(pi);
   return `Quest ${stateQid} promoted to implementing (${how}). Proceed autonomously from the draft plan.`;

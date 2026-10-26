@@ -92,9 +92,17 @@ export async function detectSubstantiveRequest(
   if (kind === "ack" || kind === "confirmation") return false;
   if (kind === "question" && trimmed.length < 250) return false;
 
-  // 2. Intelligent judge intent classification
-  const decision = await evaluateQuestIntent(trimmed, cfg, ctx);
-  if (!decision.isQuest) return false;
+  // 2. High-confidence fast-path heuristic for explicit imperative directives
+  const isDirective = isQuestLikeRequest(trimmed);
+  let isQuest = isDirective;
+
+  // If not immediately recognized as an imperative directive, evaluate with System One judge
+  if (!isDirective) {
+    const decision = await evaluateQuestIntent(trimmed, cfg, ctx);
+    isQuest = decision.isQuest;
+  }
+
+  if (!isQuest) return false;
 
   const diff = await evaluateQuestDifficulty(trimmed, cfg);
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));

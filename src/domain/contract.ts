@@ -32,6 +32,10 @@ export interface HandbackReceipt {
 
 function matchesPattern(pattern: string, path: string): boolean {
   if (pattern === path) return true;
+  // Directory prefix ending with slash: "src/path/" matches "src/path/file.ts"
+  if (pattern.endsWith("/")) {
+    return path.startsWith(pattern) || path === pattern.slice(0, -1);
+  }
   if (pattern.endsWith("/*")) {
     const prefix = pattern.slice(0, -2);
     return path.startsWith(prefix === "" ? "" : `${prefix}/`);
@@ -40,14 +44,25 @@ function matchesPattern(pattern: string, path: string): boolean {
     const prefix = pattern.slice(0, -3);
     return path.startsWith(prefix === "" ? "" : `${prefix}/`);
   }
+  // Directory name without trailing slash: "src/path" matches "src/path/file.ts"
+  if (path.startsWith(`${pattern}/`)) return true;
   return false;
 }
 
-export function isPathAllowedByContract(contract: SubQuestContract, path: string): boolean {
+export function isPathAllowedByContract(contract: SubQuestContract, path: string, cwd?: string): boolean {
   if (!contract.allowedPaths || contract.allowedPaths.length === 0) {
     return true;
   }
-  const norm = path.replace(/^[./]+/, "");
+  let norm = path;
+  if (cwd && norm.startsWith(cwd)) {
+    norm = norm.slice(cwd.length);
+  } else if (norm.startsWith("/") && typeof process !== "undefined" && typeof process.cwd === "function") {
+    const pCwd = process.cwd();
+    if (norm.startsWith(pCwd)) {
+      norm = norm.slice(pCwd.length);
+    }
+  }
+  norm = norm.replace(/^[./]+/, "");
   for (const allowed of contract.allowedPaths) {
     const allowedNorm = allowed.replace(/^[./]+/, "");
     if (matchesPattern(allowedNorm, norm)) return true;

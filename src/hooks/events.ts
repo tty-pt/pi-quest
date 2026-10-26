@@ -69,6 +69,7 @@ export interface PiCtx {
   ui: PiUI;
   childSessionId?: unknown;
   parentSessionId?: unknown;
+  modelRegistry?: unknown;
 }
 
 export interface SessionStartEvent {
@@ -169,6 +170,8 @@ export interface Pi {
   appendEntry(customType: string, data: unknown): void;
   registerTool(tool: PiToolSpec): void;
   registerCommand(name: string, options: PiCommandOptions): void;
+  registerVirtualModel?<TState = unknown>(model: unknown): void;
+  unregisterVirtualModel?(provider: string, id: string): void;
   registerShortcut?(shortcut: string, options: {
     description?: string;
     handler: (ctx: PiCtx) => Promise<void> | void;

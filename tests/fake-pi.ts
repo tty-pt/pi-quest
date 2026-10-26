@@ -22,6 +22,7 @@ export interface FakePi extends Pi {
   commands: CommandReg[];
   shortcuts: ShortcutReg[];
   entryRenderers: Map<string, unknown>;
+  virtualModels: unknown[];
   execCalls: Array<{ command: string; args: string[] }>;
   execCode: number;
   toolNames: string[];
@@ -36,6 +37,7 @@ export function fakePi(): FakePi {
   const commands: CommandReg[] = [];
   const shortcuts: ShortcutReg[] = [];
   const entryRenderers = new Map<string, unknown>();
+  const virtualModels: unknown[] = [];
   const execCalls: Array<{ command: string; args: string[] }> = [];
   const subscriptions: string[] = [];
   const eventHandlers: Record<string, Array<(event: unknown, ctx: PiCtx) => unknown>> = {};
@@ -46,6 +48,7 @@ export function fakePi(): FakePi {
     commands,
     shortcuts,
     entryRenderers,
+    virtualModels,
     execCalls,
     subscriptions,
     eventHandlers,
@@ -67,6 +70,13 @@ export function fakePi(): FakePi {
     },
     registerCommand(name: string, options: CommandReg["options"]): void {
       commands.push({ name, options });
+    },
+    registerVirtualModel(model: unknown): void {
+      virtualModels.push(model);
+    },
+    unregisterVirtualModel(provider: string, id: string): void {
+      const idx = virtualModels.findIndex((m: any) => m && m.provider === provider && m.id === id);
+      if (idx !== -1) virtualModels.splice(idx, 1);
     },
     registerShortcut(shortcut: string, options: ShortcutReg["options"]): void {
       shortcuts.push({ shortcut, options });

@@ -102,14 +102,64 @@ If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your pr
 
 ---
 
+## Mid-Quest Directives & Sub-Quest Control
+
+When you speak to the agent mid-quest, `pi-quest` guarantees your instructions are never forgotten. You do not need to memorize any special commands or syntax — simply speak in plain English:
+
+### Natural Conversational Interaction (Default)
+`pi-quest` understands your intent directly:
+- **Constraints & Rules** (*"Don't touch db.c"*, *"Port must be 8080"*, *"Make sure tests pass"*):
+  Automatically recorded into `## Requirements` and `## Amendments`. The agent adopts the constraint immediately.
+- **Separable Tasks & Sub-Quests** (*"Let's do the migration in a subquest"*, *"Can we spin up a subtask for auth?"*, *"While you're here, add an export feature"*):
+  Automatically routed to the sub-quest engine. The task is queued into the parent plan's `## Sub-Quests` backlog for automated Foreman execution, or mounted immediately if urgent.
+- **Concise Constraints**:
+  Inputs as short as 3 characters are preserved without arbitrary length filtering.
+- **Agent-Directed Triage**:
+  The agent is reminded of active directives on every turn and uses its native tools (`quest_subquest` for separable sub-tasks, plan amendments for constraints) to organize the work.
+
+### Optional Fast-Paths (Power Users & Scripts)
+If you prefer explicit, deterministic 1-step routing without relying on natural language parsing, you can optionally prefix your message:
+- **`!sq <goal>`** or **`subquest: <goal>`**: Immediately pauses the current task and spawns a child sub-quest (`switchNow: true`).
+- **`!later <goal>`** or **`backlog: <goal>`**: Appends a new sub-quest (`- [ ] SQ<next>: ...`) to the parent plan backlog.
+- **`!rule <req>`** or **`must: <req>`**: Immediately amends `## Requirements` (`R<next>`).
+- **`!chat <text>`** or **`? <question>`**: Pure conversation bypass — answers your question without modifying quest documents or plans.
+
+### Anti-Amnesia Engine
+- Every active mid-quest directive is injected into the model's active attention window on **every single turn** via `before_agent_start`.
+- Even after 30 tool calls, lengthy terminal outputs, or automatic conversation compactions, the model **always** sees your pending directives right above its tools.
+- Validation is strictly gated: the completion validator verifies all user directives as acceptance criteria before the quest can be archived as completed.
+
+---
+
 ## Configuration
 ```json
 {
   "pi-quest": {
     "difficultyMode": "auto",
     "defaultDifficulty": "standard",
-    "judgeMode": "auto"
+    "judgeMode": "auto",
+    "midQuest": {
+      "mode": "hybrid",
+      "subquestAction": "queue_backlog",
+      "autoAmendRequirements": true,
+      "turnInjection": true,
+      "promptTimeoutMs": 10000
+    }
   }
 }
 ```
-Set `"judgeMode": "off"` or `"difficultyMode": "heuristic"` to run 100% locally with zero network calls.
+- `midQuest.mode`: `"hybrid"` (default: auto-amends constraints, queues sub-quests), `"autonomous"` (full auto), `"interactive"` (prompts user), or `"off"`.
+- `midQuest.subquestAction`: `"queue_backlog"` (adds to Foreman backlog), `"preempt_now"` (switches immediately), or `"ask_human"`.
+- Set `"judgeMode": "off"` or `"difficultyMode": "heuristic"` to run 100% locally with zero network calls.
+
+---
+
+## Essential Slash Commands & Shortcuts
+
+| Command / Key | Function |
+| :--- | :--- |
+| `Ctrl + Q` | Open the floating plan viewer overlay at any time. |
+| `/quest` | Pick an idle quest, resume a previous quest, or view active status. |
+| `/quest doctor` / `/quest-doctor` | Test live health of decision judge, latency, models, and word families. |
+| `/quests` | Display all active, draft, and archived quests in a widget. |
+| `/quest-del` | Abandon and archive the active quest or pop a child sub-quest. |

@@ -5,6 +5,19 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-10-26
+
+### Added
+- **Mid-Quest Directive Engine & Anti-Amnesia (`src/config.ts`, `src/subquests/triage.ts`, `src/subquests/scope.ts`, `src/subquests/index.ts`, `src/domain/quest-doc.ts`, `src/durability/injection.ts`, `src/validation/flow.ts`, `skills/quest-journal/SKILL.md`)**:
+  - **Conversational Natural Language Priority**: Zero required commands or prefixes. Ordinary English/Portuguese statements are automatically captured and categorized into constraints (auto-amending plan requirements) or separable tasks (queued to Foreman backlog or pre-empted).
+  - **Agent-Directed Triage Protocol in Skill (`skills/quest-journal/SKILL.md`)**: Added authoritative protocol teaching the agent how to evaluate `[Active Mid-Quest Directives]`, proactively spawn sub-quests via `quest_subquest` for separable work, adopt constraints via plan amendments, and satisfy all directives before completion claims.
+  - **Optional Fast-Path Shortcuts (`src/subquests/triage.ts`)**: Retained `!sq`, `!later`, `!rule`, and `!chat` as optional deterministic power-user and scripting shortcuts.
+  - **Lower Ingestion Threshold**: Reduced arbitrary `< 20` length cutoff down to 3 characters, preventing short but critical constraints (`"Use port 8080"`, `"Keep C99"`) from being silently dropped.
+  - **Anti-Amnesia Context Injection with Actionable Cues (`src/durability/injection.ts`)**: `contextLine` in `before_agent_start` now injects active mid-quest user directives with tool cues on every turn, preventing model forgetfulness across tool executions and conversation compactions.
+  - **Single Source of Truth Plan Synchronization (`src/domain/quest-doc.ts`, `src/subquests/index.ts`)**: Implemented `appendRequirementToDoc`, `appendSubQuestBacklogItem`, and `appendAmendmentToDoc` to reliably synchronize disk documents and update content hashes.
+  - **Validation Gating on Acceptance Criteria (`src/validation/flow.ts`)**: Fixed validation brief so user directives/refinements are delivered to the validator under `requirements` (acceptance criteria) rather than passive `evidence`.
+  - **Fine-Grained Configuration (`src/config.ts`)**: Added `midQuest` settings (`mode`, `subquestAction`, `autoAmendRequirements`, `turnInjection`, `promptTimeoutMs`) to `QuestConfig` and `DEFAULT_CONFIG`.
+
 ## [1.3.0] - 2026-10-26
 
 <p align="center">

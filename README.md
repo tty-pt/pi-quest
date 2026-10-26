@@ -90,6 +90,11 @@ to fit what was built.
 - **Natural Language Steering & Human Supremacy** — operators can speak naturally at any
   time (e.g. *"proceed"*, *"looks good"*, *"ship it"*, *"wrap it up"*). Human intent overrides
   subagent reviews in both drafting and validation phases.
+- **Mid-Quest Directive Engine & Anti-Amnesia** — guarantees remarks given to the agent
+  mid-quest in plain conversational English are never forgotten (no special commands required).
+  Injects active directives on every turn via `before_agent_start`, auto-amends `## Requirements`
+  on disk, sequences new tasks into the Foreman's `## Sub-Quests` backlog, and supports optional
+  fast-path shortcuts (`!sq`, `!later`, `!rule`, `!chat`).
 - **Two-Strike Loop Breakers** — caps consecutive review and validation rejections at 2,
   pausing automated thrashing and asking the operator directly how to proceed.
 - **Deterministic Semantic Linters** — zero-token pre-validation linter verifying
@@ -131,7 +136,9 @@ Engine usage — commands for the user:
 |---------|--------|
 | `/quest` | Pick a quest when idle, or show the active quest. No argument resumes the newest / presents known quests for selection. |
 | `/quest <qid\|name>` | Resume a named quest or drafting phase directly. |
-| `/quests` | List all quests with their phases and the active marker. |
+| `/quest doctor` | Check judge endpoint health, network latency, detected models, and active trigger word families. |
+| `/quest-doctor` | Dedicated command alias for `/quest doctor`. |
+| `/quests` | List all quests with their phases and the active marker in an interactive terminal widget. |
 | `/quest-del [qid]` | Archive (kill) the current or named quest. Only you can abandon a quest this way. |
 
 Keyboard — the agent's own shortcuts:
@@ -201,11 +208,17 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | `roles.judge` | model name / id | `"qwen"` | Model identifier sent to Jev System One for intent and difficulty judging. Fallback: `PI_QUEST_JUDGE_MODEL`. |
 | `askTimeoutMs` | number (ms) | `60000` | How long `quest_ask_human` waits before proceeding with its recommended default. |
 | `depthCap` | number | `3` | How deep sub-quests may nest. |
+| `difficultyMode` | `"auto"` / `"judge"` / `"heuristic"` / `"off"` | `"auto"` | Automatic task classification tier (`trivial`, `standard`, `complex`). Fallback: `PI_QUEST_DIFFICULTY_MODE`. |
+| `defaultDifficulty` | `"trivial"` / `"standard"` / `"complex"` | `"standard"` | Fallback difficulty tier when classifier is off or offline. Fallback: `PI_QUEST_DEFAULT_DIFFICULTY`. |
+| `difficultyThresholds` | object | `{ trivial: {1, 2}, standard: {2, 7}, complex: {3, 10} }` | Custom requirements and evidence thresholds per difficulty tier. |
 | `draftThresholds.requirements` | number | `2` | Minimum requirements the draft reviewer demands before passing. |
 | `draftThresholds.evidence` | number | `7` | Minimum evidence items (used when below the requirements bar). |
 | `bindings.reviewRunner.tool` | tool name | `subagent` | Sub-agent tool that runs reviewers/validators isolated (falls back to the user path). |
 | `statusStyle` | `icon` / `text` | `icon` | How the active quest renders in the status bar. |
 | `autoArchive` | `true` / `false` | `true` | Whether a validation PASS concludes and archives the quest automatically; when `false`, the agent archives manually. |
+| `reviewInactivityMs` | number (ms) | `300000` (5 min) | Subagent review watchdog inactivity timeout before aborting. |
+| `reviewMaxDurationMs` | number (ms) | `1500000` (25 min) | Hard upper ceiling for reviewer subagent wall-clock execution. |
+| `planEditor` | string / `null` | `null` | Custom external plan editor command (falls back to `$EDITOR`). |
 | `judgeMode` | `"auto"` / `"systemone"` / `"heuristic"` / `"off"` | `"auto"` | How quest intent is evaluated on new user messages: `"auto"` / `"systemone"` queries Jev System One, `"heuristic"` uses pattern rules, `"off"` disables automatic quest initiation from prompt text. |
 | `judgeUrl` | URL string | `http://127.0.0.1:4242` | Endpoint for Jev System One decisions (falls back to `PI_QUEST_JUDGE_URL` or `PI_MM_JUDGE_URL`). |
 | `judgeModel` | model name | `"qwen"` | Model identifier submitted to the judge service (falls back to `PI_QUEST_JUDGE_MODEL` or `PI_MM_JUDGE_MODEL`). |
@@ -213,6 +226,23 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | `judgeFallback` | `"skip"` / `"heuristic"` | `"skip"` | Fallback policy when the judge is unreachable or times out: `"skip"` fails closed to conversation with trigger prompts, `"heuristic"` falls back to legacy pattern rules. |
 | `judgeTimeoutMs` | number (ms) | `2000` | Network timeout for judge decision evaluations. |
 | `triggerPrefixes` | array of strings | `["quest:", "task:", "fix:", "feat:", "refactor:", "chore:", "test:", "@quest", "!quest"]` | Deterministic word families that immediately start a quest without querying the judge. |
+
+### Environment Variables
+
+| Variable | Corresponds to | Description |
+| :--- | :--- | :--- |
+| `PI_QUEST_REVIEW_POLICY` | `reviewPolicy` | Set review intensity (`strict`, `balanced`, `off`). |
+| `PI_QUEST_REVIEWER_MODEL` / `PI_REVIEW_MODEL` | `roles.reviewer` | Pin specific provider/model for plan reviews. |
+| `PI_QUEST_VALIDATOR_MODEL` / `PI_VALIDATOR_MODEL` | `roles.validator` | Pin specific provider/model for validation audits. |
+| `PI_QUEST_JUDGE_MODEL` / `PI_MM_JUDGE_MODEL` | `roles.judge` | Model for Jev System One intent & difficulty judging. |
+| `PI_QUEST_JUDGE_MODE` / `PI_MM_JUDGE_MODE` | `judgeMode` | Judge strategy (`auto`, `systemone`, `heuristic`, `off`). |
+| `PI_QUEST_JUDGE_URL` / `PI_MM_JUDGE_URL` | `judgeUrl` | HTTP endpoint of the local neural judge daemon. |
+| `PI_QUEST_JUDGE_KEY` / `PI_MM_JUDGE_KEY` | `judgeKey` | Optional Bearer authorization key for remote judge. |
+| `PI_QUEST_JUDGE_FALLBACK` | `judgeFallback` | Fallback policy on judge timeout (`skip`, `heuristic`). |
+| `PI_QUEST_JUDGE_TIMEOUT_MS` | `judgeTimeoutMs` | Abort timeout in ms for intent decisions (default: `2000`). |
+| `PI_QUEST_DIFFICULTY_MODE` | `difficultyMode` | Classifier mode (`auto`, `judge`, `heuristic`, `off`). |
+| `PI_QUEST_DEFAULT_DIFFICULTY` | `defaultDifficulty` | Baseline tier (`trivial`, `standard`, `complex`). |
+| `PI_QUEST_TRIGGERS` | `triggerPrefixes` | Comma-separated list of deterministic trigger words. |
 
 ### Deterministic Trigger Word Families & Intent Detection
 
@@ -251,14 +281,14 @@ views.
 
 Six tools the main agent uses on your behalf:
 
-| Tool | What it does |
-|------|--------------|
-| `quest_update_state` | The write path: records findings, drafts, amendments, next action, completion claims. |
-| `quest_subquest` | Spawns a linked sub-quest for a complex sub-task. |
-| `quest_archive` | Finishes a quest as complete or failed. Abandoning is user-only (`/quest-del`). |
-| `quest_recover` | Rebuilds quest state from the transcript, including earlier sessions. Runs automatically when state is missing. |
-| `quest_rebut` | Answers a review with evidence; a successful rebuttal reopens the question. |
-| `quest_ask_human` | Asks you with a recommended default and a timeout — never blocks. |
+| Tool | Parameters | What it does |
+|------|------------|--------------|
+| `quest_update_state` | `objective`, `draftName`, `difficulty`, `plan`, `analysis`, `refinement`, `amendment`, `exactNextAction`, `checkPlan`, `checkAnalysis`, `planRevision`, `note`, `claimComplete`, `continueWork`, `continuePast` | Primary agent write path: creates quests, authors plans and analyses, records amendments mid-implementation, and claims completion for validation. |
+| `quest_subquest` | `goal`, `brief`, `assignedRequirements`, `allowedPaths`, `requiredTestCommands`, `maxTurns`, `switchNow`, `acceptanceCriteria` | Spawns a bounded, sandboxed child sub-quest up to `depthCap`. Child executes isolated and returns findings to parent on completion. |
+| `quest_archive` | `outcome: "completed" \| "failed"`, `summary` | Concludes active quest: archives run manifest, renders view, and packs slim `.zip`. (`COMPLETED` requires validated PASS; abandoning is user-only via `/quest-del`). |
+| `quest_recover` | `qid` (optional) | Algorithmic state recovery: reconstructs quest state from raw session transcript without loss. Runs automatically if state is ever lost. |
+| `quest_rebut` | `rebuttal` | Answers an adversarial review with file:line citations and evidence, reopening the question for fresh review instead of arguing in circles. |
+| `quest_ask_human` | `question`, `default`, `timeoutMs` | Non-blocking operator question: registers a recommended default, waits for input or timeout, then automatically proceeds with default. |
 
 ## Requirements
 

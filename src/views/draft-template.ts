@@ -12,18 +12,13 @@ export function renderDraftTemplate(
     : "";
 
   const subquestsSection = difficulty === "complex"
-    ? `## Sub-Quests
-
-<!-- COMPLEX TASK DETECTED: Decompose this task into sequential, bounded sub-quests.
+    ? `\n## Sub-Quests\n\n<!-- COMPLEX TASK DETECTED: Decompose this task into sequential, bounded sub-quests.
      Each sub-quest executes in a focused worker lane with explicit allowedPaths,
      required test commands, and assigned requirements: -->
 - [ ] SQ1: Core architecture & contracts [paths: ...] [tests: npm test] [req: R1]
 - [ ] SQ2: Feature implementation & integration [paths: ...] [tests: npm test] [req: R2]
-- [ ] SQ3: End-to-end verification & regression tests [paths: tests/...] [tests: npm test] [req: R3]`
-    : `## Sub-Quests
-
-<!-- For complex tasks, define bounded sub-quests with assigned requirements, allowed paths, and verification commands:
-- [ ] SQ1: Task title [paths: src/path/] [tests: npm test] [req: R1] -->`;
+- [ ] SQ3: End-to-end verification & regression tests [paths: tests/...] [tests: npm test] [req: R3]\n`
+    : "";
 
   return `# ${name}
 
@@ -58,5 +53,52 @@ ${subquestsSection}
 <!-- Purely analytical quests (quest_update_state {kind: "analysis"}) deliver the written analysis here; it is their whole deliverable. Standard quests may leave this section empty or delete it. -->
 
 ## Implementation Plan
+`;
+}
+
+export function renderChildDraftTemplate(
+  childQid: string,
+  parentQid: string,
+  contract: {
+    title: string;
+    assignedRequirements?: string[];
+    allowedPaths?: string[];
+    requiredTestCommands?: string[];
+    acceptanceCriteria?: string[];
+  },
+  goal: string,
+): string {
+  const reqs = contract.assignedRequirements && contract.assignedRequirements.length > 0
+    ? contract.assignedRequirements.map((r) => `- [ ] ${r}`).join("\n")
+    : "- (inherited from parent)";
+  const paths = contract.allowedPaths && contract.allowedPaths.length > 0
+    ? contract.allowedPaths.map((p) => `- ${p}`).join("\n")
+    : "- (all workspace files)";
+  const tests = contract.requiredTestCommands && contract.requiredTestCommands.length > 0
+    ? contract.requiredTestCommands.map((t) => `- ${t}`).join("\n")
+    : "- npm test";
+
+  return `# Quest ${childQid}: ${contract.title}
+
+> Sub-quest of parent ${parentQid}. Active in implementation mode.
+
+## Original request
+
+${goal}
+
+## Parent Quest Link
+- Parent: ${parentQid} (.pi/quest/future/${parentQid}.md)
+
+## Assigned Requirements
+${reqs}
+
+## Primary Focus Paths
+${paths}
+
+## Verification Commands
+${tests}
+
+## Implementation Plan
+Proceed autonomously with the sub-quest contract to implement assigned requirements.
 `;
 }

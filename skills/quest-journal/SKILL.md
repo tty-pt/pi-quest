@@ -81,7 +81,9 @@ quest id (`future/<qid>.md`); there are no slugs.
   happen; nothing blocks. When reality contradicts the plan, record an
   amendment with reasons via `quest_update_state` — amendments adjust the
   plan, never the scope (scope change = new quest). Work from the quest's
-  Exact Next Action. User refinements are recorded and feed the validator.
+  Exact Next Action. User remarks mid-quest are automatically captured as
+  active directives and injected into your turn context; route separable work
+  via `quest_subquest` and constraints via plan amendments.
   When done, claim completion via `quest_update_state` with `claimComplete`
   — an unverified claim that boots the validator immediately. The quest doc
   is locked to direct edits during implementing; all plan changes go through
@@ -112,6 +114,27 @@ quest id (`future/<qid>.md`); there are no slugs.
   Validation PASS archives as usual; FAIL returns the quest to **drafting**
   (not implementing) with findings and resets the doc's `## Status`. The
   conclusion wake reproduces the delivered analysis when it matters most.
+
+## Mid-Quest Operator Directives & Autonomous Triage
+
+The operator may speak to you mid-quest without stopping or restarting the quest.
+`pi-quest` captures these remarks into `state.refinements` and injects active directives
+into your turn context on every turn under `[Active Mid-Quest Directives - Must be satisfied]:`.
+
+When you receive a mid-quest directive, evaluate it using this decision protocol:
+1. **Separable Task or New Feature** (e.g. *"Also build an export command"*, *"Handle the CSS in a subtask"*):
+   - Do NOT try to cram unrelated work into your active single-lane plan.
+   - Proactively spawn a sub-quest via `quest_subquest({ goal, brief, switchNow })`.
+   - Set `switchNow: true` if the task is an immediate prerequisite/blocker, or `switchNow: false` if it can queue into the backlog for the autonomous Foreman.
+2. **Constraint, Rule, or Course Correction** (e.g. *"Port must be 8080"*, *"Don't touch db.c"*, *"Ensure tests pass"*):
+   - Incorporate the constraint into your implementation immediately.
+   - Record an amendment via `quest_update_state { amendment: { change: "...", reasons: "Operator mid-quest directive" } }`.
+3. **Conversational Question** (e.g. *"What does this function do?"*, *"Status?"*):
+   - Answer the question directly in your conversational response. Do not modify the plan or open a sub-quest.
+
+**Validation Invariant:** Every operator directive is part of the acceptance criteria verified
+by the validator at completion. Claiming completion (`claimComplete: true`) while ignoring an
+active user directive will cause validation to FAIL.
 
 ## Tools
 

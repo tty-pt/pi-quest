@@ -10,7 +10,7 @@ import type { SubQuestContract } from "../../domain/contract";
 import { nextQid, type Qid } from "../../domain/qid";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../durability/snapshots";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
-import { ensureDraftFile, listKnownQids } from "../../files";
+import { ensureChildDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
 export interface ChildQuestContractParams {
@@ -51,7 +51,7 @@ export async function createChildQuest(
   if (switchNow) {
     const child = pushStackFrame(parent, contract, childQid);
     pi.appendEntry(SNAPSHOT_TYPE, encodeSnapshot(child));
-    await ensureDraftFile(ctx, childQid, childQid, goal);
+    await ensureChildDraftFile(ctx.cwd, childQid, parent.qid, contract, goal);
     replaceState(child);
     sendSteer(pi, `Switched to sub-quest ${childQid}: ${goal} Parent ${parent.qid} waits and resumes on return.`);
     return { childQid, switched: true };
@@ -61,7 +61,7 @@ export async function createChildQuest(
   emitNow(pi);
   const child = { ...createQuest(goal, childQid, parent.qid), depth, contract };
   pi.appendEntry(SNAPSHOT_TYPE, encodeSnapshot(child));
-  await ensureDraftFile(ctx, childQid, childQid, goal);
+  await ensureChildDraftFile(ctx.cwd, childQid, parent.qid, contract, goal);
   sendSteer(pi, `Sub-quest ${childQid} created under ${parent.qid}. Parent stays active.`);
   return { childQid, switched: false };
 }

@@ -33,6 +33,23 @@ Deno.test("isPathAllowedByContract matches explicit paths and globs", () => {
   check(isPathAllowedByContract(contract, "external/libxylem/load.c"), "wildcard match allowed");
   check(!isPathAllowedByContract(contract, "mods/song/ux/song.c"), "unallowed path rejected");
   check(!isPathAllowedByContract(contract, "src/index.ts"), "root file rejected");
+
+  // Trailing slash directory prefix matches
+  const dirContract: SubQuestContract = {
+    qid: QID,
+    parentQid: PARENT_QID,
+    title: "Child task",
+    assignedRequirements: ["R1"],
+    allowedPaths: ["src/path/"],
+    requiredTestCommands: ["npm test"],
+    acceptanceCriteria: ["safe"],
+  };
+  check(isPathAllowedByContract(dirContract, "src/path/foo.ts"), "file under directory allowed");
+  check(isPathAllowedByContract(dirContract, "src/path/nested/sub.ts"), "nested file under directory allowed");
+  check(!isPathAllowedByContract(dirContract, "src/other/file.ts"), "outside directory rejected");
+
+  // Absolute path with cwd normalization
+  check(isPathAllowedByContract(dirContract, "/workspace/root/src/path/foo.ts", "/workspace/root"), "absolute path normalized against cwd");
 });
 
 Deno.test("child quest in implementing gates writes to allowedPaths", () => {
@@ -52,14 +69,11 @@ Deno.test("child quest in implementing gates writes to allowedPaths", () => {
   const allowedWrite = ref("edit", "write", "mods/song/parser.c");
   check(decide(quest, allowedWrite).allowed, "write to allowedPath allowed");
 
-  // Writing to path outside allowedPaths is blocked with SCOPE_VIOLATION
+  // Writing to path outside allowedPaths is permitted with advisory
   const rogueWrite = ref("edit", "write", "mods/other/file.c");
   const decision = decide(quest, rogueWrite);
-  check(!decision.allowed, "write outside allowedPaths blocked");
-  if (!decision.allowed) {
-    check(decision.code === "CHILD_PATH_LOCKED", "code is CHILD_PATH_LOCKED");
-    check(decision.phaseName === "SCOPE_VIOLATION", "phaseName is SCOPE_VIOLATION");
-  }
+  check(decision.allowed, "write outside allowedPaths is permitted with advisory");
+  check(typeof (decision as any).advisory === "string", "advisory notice is present");
 
   // Reading any path is always allowed
   const readOther = ref("read", "read", "mods/other/file.c");

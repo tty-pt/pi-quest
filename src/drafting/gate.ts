@@ -37,6 +37,14 @@ function holdForRevisionReview(event: ToolCallEvent): { block: true; reason: str
   };
 }
 
+function notifyWarning(ctx: PiCtx, text: string): void {
+  try {
+    ctx.ui?.notify(text, "warning");
+  } catch {
+    // headless or no ui
+  }
+}
+
 export function installDraftGate(pi: Pi): void {
   pi.on("tool_call", (event: ToolCallEvent, ctx: PiCtx) => {
     try {
@@ -46,8 +54,13 @@ export function installDraftGate(pi: Pi): void {
         toolName: event.toolName,
         toolClass: classify(event.toolName, event.input),
         path: pathOf(event.input),
-      }, { isReviewerSession: reviewerCaller(ctx) });
-      if (decision.allowed) return undefined;
+      }, { isReviewerSession: reviewerCaller(ctx), cwd: ctx.cwd });
+      if (decision.allowed) {
+        if ("advisory" in decision && decision.advisory) {
+          notifyWarning(ctx, decision.advisory);
+        }
+        return undefined;
+      }
       const verdict: { block: true; reason: string; terminate?: true } = {
         block: true,
         reason: reasonText(decision),

@@ -179,7 +179,7 @@ Detailed plan instructions.
 
 Deno.test("renderDraftTemplate injects structured SQ items when difficulty is complex", () => {
   const standardDoc = renderDraftTemplate("Standard Quest", "Do something", "", "standard");
-  check(standardDoc.includes("<!-- For complex tasks"), "standard comments out SQ");
+  check(!standardDoc.includes("## Sub-Quests"), "standard omits Sub-Quests completely");
 
   const complexDoc = renderDraftTemplate("Complex Quest", "Overhaul engine", "", "complex");
   check(complexDoc.includes("COMPLEX TASK DETECTED"), "complex banner present");
@@ -224,6 +224,50 @@ Detailed execution.`;
     check(current.contract?.allowedPaths[0] === "src/foundation", "paths bounded");
     check(current.questStack.length === 1, "parent saved in questStack");
     check(current.questStack[0].qid === parentQid, "parent frame matches");
+
+    // Verify child doc was created on disk
+    const childDocExists = Deno.statSync(`${cwd}/.pi/quest/future/${current.qid}.md`).isFile;
+    check(childDocExists, "child doc created on disk");
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("promoteAfterPass stays single-lane for standard difficulty task even if SQ items exist in plan", async () => {
+  const pi = fakePi();
+  const cwd = Deno.makeTempDirSync({ prefix: "pi-quest-promote-standard-" });
+  try {
+    const parentQid = "std001" as Qid;
+    const parent = createQuest("Standard Parent Task", parentQid, null, "standard");
+    parent.phase = "drafting";
+    const plan = `## Sub-Quests
+- [ ] SQ1: Core foundation [paths: src/foundation] [tests: npm test] [req: R1]
+
+## Implementation Plan
+Detailed execution.`;
+
+    parent.draft = {
+      name: "standard-plan",
+      contentHash: "hash456",
+      lastReviewedPlan: plan,
+      planAuthored: true,
+      approvedBy: null,
+      outstandingFindings: false,
+      approvedPlanHash: null,
+      planRevisions: [],
+    };
+    replaceState(parent);
+
+    const message = await promoteAfterPass(pi, fakeCtx(cwd), parentQid, "review");
+    check(message !== null, "promotion succeeded");
+    check(!message!.includes("Foreman: Automatically mounting"), "Foreman is not mounted for standard difficulty");
+    check(message!.includes("Proceed autonomously from the draft plan"), "stays single lane");
+
+    const current = getState();
+    check(current.depth === 0, "stays at root depth 0");
+    check(current.qid === parentQid, "stays on parent quest");
+    check(current.phase === "implementing", "parent in implementing");
   } finally {
     Deno.removeSync(cwd, { recursive: true });
     replaceState(IDLE_STATE);

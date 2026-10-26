@@ -57,10 +57,22 @@ export function parseJevQuestChoice(data: unknown): "quest" | "conversation" {
   }
 
   const normalized = answerVal.trim().toLowerCase();
-  if (normalized === "quest" || normalized.startsWith("quest") || normalized.includes("software task")) {
+  if (
+    normalized === "quest" ||
+    normalized.startsWith("quest") ||
+    normalized.includes("software task") ||
+    normalized.includes("instruction") ||
+    normalized.includes("directive") ||
+    normalized.includes("task")
+  ) {
     return "quest";
   }
-  if (normalized === "conversation" || normalized.startsWith("conversation") || normalized.includes("dialogue")) {
+  if (
+    normalized === "conversation" ||
+    normalized.startsWith("conversation") ||
+    normalized.includes("dialogue") ||
+    normalized.includes("chat")
+  ) {
     return "conversation";
   }
 

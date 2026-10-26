@@ -72,3 +72,36 @@ Deno.test("config parses reviewPolicy and role models", () => {
   check(resolveRoleModel(customRoles, "judge") === "qwen-local", "resolveRoleModel judge");
 });
 
+Deno.test("config parses midQuest settings cleanly", () => {
+  check(DEFAULT_CONFIG.midQuest.mode === "hybrid", "default midQuest mode hybrid");
+  check(DEFAULT_CONFIG.midQuest.subquestAction === "queue_backlog", "default subquest action queue_backlog");
+  check(DEFAULT_CONFIG.midQuest.autoAmendRequirements === true, "default autoAmendRequirements true");
+  check(DEFAULT_CONFIG.midQuest.turnInjection === true, "default turnInjection true");
+  check(DEFAULT_CONFIG.midQuest.promptTimeoutMs === 10000, "default prompt timeout 10s");
+
+  const custom = loadConfig({
+    midQuest: {
+      mode: "autonomous",
+      subquestAction: "preempt_now",
+      autoAmendRequirements: false,
+      turnInjection: false,
+      promptTimeoutMs: 5000,
+    },
+  });
+  check(custom.midQuest.mode === "autonomous", "overridden midQuest mode");
+  check(custom.midQuest.subquestAction === "preempt_now", "overridden subquestAction");
+  check(custom.midQuest.autoAmendRequirements === false, "overridden autoAmendRequirements");
+  check(custom.midQuest.turnInjection === false, "overridden turnInjection");
+  check(custom.midQuest.promptTimeoutMs === 5000, "overridden promptTimeoutMs");
+
+  const invalid = loadConfig({
+    midQuest: {
+      mode: "nonsense",
+      subquestAction: "invalid",
+    },
+  });
+  check(invalid.midQuest.mode === "hybrid", "fallback on invalid mode");
+  check(invalid.midQuest.subquestAction === "queue_backlog", "fallback on invalid subquest action");
+});
+
+

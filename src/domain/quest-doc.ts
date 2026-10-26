@@ -105,3 +105,96 @@ export function reconcileDocContent(text: string, receipt: HandbackReceipt): str
 
   return `${lines.join("\n").trimEnd()}\n\n## Sub-Quests\n\n${receiptLine}\n`;
 }
+
+export function appendRequirementToDoc(text: string, requirementText: string): string {
+  const lines = text.split("\n");
+  const header = lines.findIndex((l) => /^##\s+requirements\b/i.test(l));
+
+  let maxR = 0;
+  for (const line of lines) {
+    const m = line.match(/\bR(\d+)\b/i);
+    if (m) {
+      const num = parseInt(m[1], 10);
+      if (num > maxR) maxR = num;
+    }
+  }
+  const nextR = maxR + 1;
+  const newReq = `- R${nextR}: [User Directive] ${requirementText.trim()}`;
+
+  if (header === -1) {
+    return `${text.trimEnd()}\n\n## Requirements\n\n${newReq}\n`;
+  }
+
+  const end = sectionEnd(lines, header);
+  let insertIdx = end;
+  while (insertIdx > header + 1 && lines[insertIdx - 1].trim() === "") {
+    insertIdx--;
+  }
+
+  lines.splice(insertIdx, 0, newReq);
+  return lines.join("\n");
+}
+
+export function appendSubQuestBacklogItem(
+  text: string,
+  goal: string,
+  options?: { paths?: string[]; tests?: string[] },
+): string {
+  const lines = text.split("\n");
+  let maxSQ = 0;
+  for (const line of lines) {
+    const m = line.match(/\bSQ(\d+)\b/i);
+    if (m) {
+      const num = parseInt(m[1], 10);
+      if (num > maxSQ) maxSQ = num;
+    }
+  }
+  const nextSQ = maxSQ + 1;
+  const pathsTag = options?.paths && options.paths.length > 0 ? ` [paths: ${options.paths.join(", ")}]` : "";
+  const testsTag = options?.tests && options.tests.length > 0
+    ? ` [tests: ${options.tests.join(", ")}]`
+    : " [tests: make test]";
+  const sqLine = `- [ ] SQ${nextSQ}: ${goal.trim()}${pathsTag}${testsTag}`;
+
+  const header = lines.findIndex((l) => /^##\s+sub-quests\b/i.test(l));
+  if (header !== -1) {
+    const end = sectionEnd(lines, header);
+    let insertIdx = end;
+    while (insertIdx > header + 1 && lines[insertIdx - 1].trim() === "") {
+      insertIdx--;
+    }
+    lines.splice(insertIdx, 0, sqLine);
+    return lines.join("\n");
+  }
+
+  const planIdx = lines.findIndex((l) => /^##\s+implementation plan\b/i.test(l));
+  if (planIdx !== -1) {
+    lines.splice(planIdx, 0, `## Sub-Quests\n\n${sqLine}\n`);
+    return lines.join("\n");
+  }
+
+  return `${lines.join("\n").trimEnd()}\n\n## Sub-Quests\n\n${sqLine}\n`;
+}
+
+export function appendAmendmentToDoc(text: string, change: string, reason: string): string {
+  const lines = text.split("\n");
+  const header = lines.findIndex((l) => /^##\s+amendments\b/i.test(l));
+  const bullet = `- ${change.trim()} (${reason.trim()})`;
+
+  if (header === -1) {
+    const reqHeader = lines.findIndex((l) => /^##\s+requirements\b/i.test(l));
+    if (reqHeader !== -1) {
+      lines.splice(reqHeader, 0, `## Amendments\n\n${bullet}\n`);
+      return lines.join("\n");
+    }
+    return `## Amendments\n\n${bullet}\n\n${text}`;
+  }
+
+  const end = sectionEnd(lines, header);
+  let insertIdx = end;
+  while (insertIdx > header + 1 && lines[insertIdx - 1].trim() === "") {
+    insertIdx--;
+  }
+  lines.splice(insertIdx, 0, bullet);
+  return lines.join("\n");
+}

@@ -15,7 +15,7 @@ import { cancelReview } from "../../review/tracker";
 import { archiveQuestFiles } from "../../views/quest-view";
 import { reconcileParentDocOnReturn } from "../../quest-doc";
 import { advanceForeman } from "../../subquests/foreman";
-import { listKnownQids } from "../../files";
+import { ensureChildDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
 export type ArchiveOutcomeParam = "completed" | "failed";
@@ -95,6 +95,7 @@ async function handleParentReturn(
       const nextChildQid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
       const advanced = advanceForeman(restored, nextChildQid);
       if (advanced) {
+        await ensureChildDraftFile(ctx.cwd, nextChildQid, parentQid as Qid, advanced.contract, advanced.nextItem.goal);
         replaceState(advanced.nextMountedState);
         emitNow(pi);
         sendSteer(

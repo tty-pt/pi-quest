@@ -1,5 +1,12 @@
 import { check } from "../check.ts";
-import { parseDocStatus, upsertDocStatus, reconcileDocContent } from "../../src/domain/quest-doc.ts";
+import {
+  parseDocStatus,
+  upsertDocStatus,
+  reconcileDocContent,
+  appendRequirementToDoc,
+  appendSubQuestBacklogItem,
+  appendAmendmentToDoc,
+} from "../../src/domain/quest-doc.ts";
 import { draftPath, stageDir, archivePath, isQuestPath, QUEST_ROOT, FUTURE_DIR, ARCHIVE_DIR, STAGING_DIR } from "../../src/domain/paths.ts";
 import { addChild, settleChild, acknowledgeChild, unfinishedChildren } from "../../src/domain/children.ts";
 import { createQuest, IDLE_STATE, type QuestState } from "../../src/domain/quest.ts";
@@ -156,3 +163,60 @@ Deno.test("children: addChild, settleChild, acknowledgeChild, and unfinishedChil
   }
   check(threw, "acknowledging unknown child throws error");
 });
+
+Deno.test("quest_doc: appendRequirementToDoc cleanly inserts next sequential R<n> requirement", () => {
+  const doc = `# Quest A
+
+## Requirements
+- R1: Initial requirement
+- [x] R2: Checked requirement
+
+## Implementation Plan
+Steps
+`;
+
+  const updated = appendRequirementToDoc(doc, "Port must be 8080");
+  check(updated.includes("- R3: [User Directive] Port must be 8080"), "appended R3 with User Directive tag");
+  check(updated.includes("- [x] R2: Checked requirement"), "preserved R2 checked state");
+
+  // Appending when ## Requirements is missing
+  const noReqsDoc = `# Quest B\n## Implementation Plan\nSteps\n`;
+  const withReqs = appendRequirementToDoc(noReqsDoc, "First requirement");
+  check(withReqs.includes("## Requirements"), "added ## Requirements section");
+  check(withReqs.includes("- R1: [User Directive] First requirement"), "added R1");
+});
+
+Deno.test("quest_doc: appendSubQuestBacklogItem inserts SQ<n> item into backlog", () => {
+  const doc = `# Quest A
+
+## Sub-Quests
+- [x] SQ1: Previous task [tests: make test]
+
+## Implementation Plan
+Steps
+`;
+
+  const updated = appendSubQuestBacklogItem(doc, "Export csv feature", { paths: ["src/export.ts"] });
+  check(updated.includes("- [ ] SQ2: Export csv feature [paths: src/export.ts] [tests: make test]"), "appended SQ2 with options");
+
+  // Appending when ## Sub-Quests is missing
+  const noSQDoc = `# Quest B\n## Implementation Plan\nSteps\n`;
+  const withSQ = appendSubQuestBacklogItem(noSQDoc, "Build auth module");
+  check(withSQ.includes("## Sub-Quests"), "created ## Sub-Quests before Implementation Plan");
+  check(withSQ.includes("- [ ] SQ1: Build auth module [tests: make test]"), "created SQ1");
+});
+
+Deno.test("quest_doc: appendAmendmentToDoc appends change and reason to amendments section", () => {
+  const doc = `# Quest A
+
+## Amendments
+- Initial change (initial reason)
+
+## Requirements
+- R1: Something
+`;
+
+  const updated = appendAmendmentToDoc(doc, "Require port 8080", "User mid-quest directive");
+  check(updated.includes("- Require port 8080 (User mid-quest directive)"), "appended amendment");
+});
+

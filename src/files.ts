@@ -6,7 +6,8 @@ import type { PiCtx } from "./hooks/events";
 import { draftPath, FUTURE_DIR } from "./domain/paths";
 import { isQid, type Qid } from "./domain/qid";
 import type { QuestDifficulty } from "./config";
-import { renderDraftTemplate } from "./views/draft-template";
+import { renderChildDraftTemplate, renderDraftTemplate } from "./views/draft-template";
+import type { SubQuestContract } from "./domain/contract";
 
 export async function listKnownQids(cwd: string): Promise<string[]> {
   const qids = new Set<string>();
@@ -46,6 +47,25 @@ export async function ensureDraftFile(
   await mkdir(join(ctx.cwd, FUTURE_DIR), { recursive: true });
   try {
     await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective, context, difficulty), { flag: "wx" });
+  } catch (err) {
+    if ((err as { code?: string }).code !== "EEXIST") throw err;
+  }
+}
+
+export async function ensureChildDraftFile(
+  cwd: string,
+  childQid: Qid,
+  parentQid: Qid,
+  contract: SubQuestContract,
+  goal: string,
+): Promise<void> {
+  await mkdir(join(cwd, FUTURE_DIR), { recursive: true });
+  try {
+    await writeFile(
+      join(cwd, draftPath(childQid)),
+      renderChildDraftTemplate(childQid, parentQid, contract, goal),
+      { flag: "wx" },
+    );
   } catch (err) {
     if ((err as { code?: string }).code !== "EEXIST") throw err;
   }

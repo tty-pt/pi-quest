@@ -6,6 +6,7 @@ import { viewActivePlan, editActivePlan } from "./plan";
 import { pickQuest } from "./pick";
 import { resumeQuest } from "./quest";
 import { runQuestDoctor, getQuestDoctorLines, createQuestDoctorComponent, type QuestDoctorData } from "./doctor";
+import { getRouterStatusLines } from "./router";
 import { refreshStatus } from "../../durability/status";
 
 function notify(ctx: { ui: { notify: (m: string, t: "info" | "warning" | "error") => void } }, text: string): void {
@@ -79,6 +80,13 @@ export function installCommands(pi: Pi): void {
       const out = await killQuest(pi, ctx, args);
       refreshStatus(ctx);
       notify(ctx, out);
+    },
+  });
+  pi.registerCommand("quest-router", {
+    description: "Inspect phase×difficulty virtual model router status, matrix, and cooldowns.",
+    handler: async (_args, ctx) => {
+      const lines = await getRouterStatusLines(ctx);
+      notify(ctx, lines.join("\n"));
     },
   });
 }

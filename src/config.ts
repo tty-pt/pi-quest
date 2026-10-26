@@ -3,7 +3,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { QuestDifficulty } from "./domain/quest.ts";
-export type { QuestDifficulty };
+import type { RouterConfig, ModelSpec } from "./router/types.ts";
+export type { QuestDifficulty, RouterConfig, ModelSpec };
 
 export interface DraftThresholds {
   requirements: number;
@@ -28,6 +29,25 @@ export type StatusStyle = "icon" | "text";
 export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
 export type JudgeFallback = "heuristic" | "skip";
 export type ReviewPolicy = "strict" | "balanced" | "off";
+
+export type MidQuestMode = "hybrid" | "autonomous" | "interactive" | "off";
+export type SubQuestAction = "queue_backlog" | "preempt_now" | "ask_human";
+
+export interface MidQuestConfig {
+  mode: MidQuestMode;
+  subquestAction: SubQuestAction;
+  autoAmendRequirements: boolean;
+  turnInjection: boolean;
+  promptTimeoutMs: number;
+}
+
+export const DEFAULT_MID_QUEST_CONFIG: MidQuestConfig = {
+  mode: "hybrid",
+  subquestAction: "queue_backlog",
+  autoAmendRequirements: true,
+  turnInjection: true,
+  promptTimeoutMs: 10000,
+};
 
 export interface RoleModels {
   reviewer?: string;
@@ -71,7 +91,20 @@ export interface QuestConfig {
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
   triggerPrefixes: string[];
+  midQuest: MidQuestConfig;
+  router: RouterConfig;
 }
+
+export const DEFAULT_ROUTER_CONFIG: RouterConfig = {
+  enabled: false,
+  provider: "quest",
+  id: "auto",
+  name: "Quest Auto Router",
+  default: "antigravity/gemini-3.8-flash",
+  direct: "antigravity/gemini-3.8-flash",
+  cooldownMs: 900000,
+  matrix: {},
+};
 
 export const DEFAULT_CONFIG: QuestConfig = {
   askTimeoutMs: 60000,
@@ -94,9 +127,11 @@ export const DEFAULT_CONFIG: QuestConfig = {
   judgeUrl: undefined,
   judgeModel: "qwen",
   judgeKey: undefined,
-  judgeFallback: "skip",
+  judgeFallback: "heuristic",
   judgeTimeoutMs: 2000,
   triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
+  midQuest: DEFAULT_MID_QUEST_CONFIG,
+  router: DEFAULT_ROUTER_CONFIG,
 };
 
 function getEnv(key: string): string | undefined {
@@ -176,6 +211,61 @@ function loadJudgeConfig(record: Record<string, unknown>): {
     judgeFallback,
     judgeTimeoutMs,
     triggerPrefixes,
+  };
+}
+
+export function loadRouterConfig(raw: Record<string, unknown>): RouterConfig {
+  const rawRouter = (typeof raw["router"] === "object" && raw["router"] !== null)
+    ? (raw["router"] as Record<string, unknown>)
+    : {};
+
+  const envEnabled = getEnv("PI_QUEST_ROUTER_ENABLED");
+  const enabled = typeof rawRouter["enabled"] === "boolean"
+    ? rawRouter["enabled"]
+    : envEnabled !== undefined
+    ? envEnabled === "true" || envEnabled === "1"
+    : rawRouter["matrix"] !== undefined && typeof rawRouter["matrix"] === "object" && rawRouter["matrix"] !== null && Object.keys(rawRouter["matrix"]).length > 0;
+
+  const provider = typeof rawRouter["provider"] === "string" && rawRouter["provider"].trim() !== ""
+    ? rawRouter["provider"].trim()
+    : getEnv("PI_QUEST_ROUTER_PROVIDER") ?? DEFAULT_ROUTER_CONFIG.provider;
+
+  const id = typeof rawRouter["id"] === "string" && rawRouter["id"].trim() !== ""
+    ? rawRouter["id"].trim()
+    : getEnv("PI_QUEST_ROUTER_ID") ?? DEFAULT_ROUTER_CONFIG.id;
+
+  const name = typeof rawRouter["name"] === "string" && rawRouter["name"].trim() !== ""
+    ? rawRouter["name"].trim()
+    : DEFAULT_ROUTER_CONFIG.name;
+
+  const defaultModel = rawRouter["default"] !== undefined
+    ? (rawRouter["default"] as ModelSpec)
+    : getEnv("PI_QUEST_ROUTER_DEFAULT") ?? DEFAULT_ROUTER_CONFIG.default;
+
+  const direct = typeof rawRouter["direct"] === "string" && rawRouter["direct"].trim() !== ""
+    ? rawRouter["direct"].trim()
+    : getEnv("PI_QUEST_ROUTER_DIRECT") ?? DEFAULT_ROUTER_CONFIG.direct;
+
+  const rawCooldown = rawRouter["cooldownMs"] ?? getEnv("PI_QUEST_ROUTER_COOLDOWN_MS");
+  const cooldownMs = typeof rawCooldown === "number" && rawCooldown > 0
+    ? rawCooldown
+    : typeof rawCooldown === "string" && !isNaN(Number(rawCooldown)) && Number(rawCooldown) > 0
+    ? Number(rawCooldown)
+    : DEFAULT_ROUTER_CONFIG.cooldownMs;
+
+  const matrix = (typeof rawRouter["matrix"] === "object" && rawRouter["matrix"] !== null)
+    ? (rawRouter["matrix"] as Record<string, string | string[] | Record<string, string | string[]>>)
+    : {};
+
+  return {
+    enabled,
+    provider,
+    id,
+    name,
+    default: defaultModel,
+    direct,
+    cooldownMs,
+    matrix,
   };
 }
 
@@ -268,6 +358,35 @@ export function loadConfig(raw: unknown): QuestConfig {
     judge.judgeModel = roles.judge;
   }
 
+  const rawMidQuest = (typeof record["midQuest"] === "object" && record["midQuest"] !== null)
+    ? (record["midQuest"] as Record<string, unknown>)
+    : {};
+  const rawMidQuestMode = rawMidQuest["mode"] ?? getEnv("PI_QUEST_MID_QUEST_MODE");
+  const midQuestMode: MidQuestMode =
+    rawMidQuestMode === "hybrid" || rawMidQuestMode === "autonomous" || rawMidQuestMode === "interactive" || rawMidQuestMode === "off"
+      ? rawMidQuestMode
+      : DEFAULT_MID_QUEST_CONFIG.mode;
+
+  const rawSubquestAction = rawMidQuest["subquestAction"] ?? getEnv("PI_QUEST_MID_QUEST_SUBQUEST_ACTION");
+  const subquestAction: SubQuestAction =
+    rawSubquestAction === "queue_backlog" || rawSubquestAction === "preempt_now" || rawSubquestAction === "ask_human"
+      ? rawSubquestAction
+      : DEFAULT_MID_QUEST_CONFIG.subquestAction;
+
+  const midQuest: MidQuestConfig = {
+    mode: midQuestMode,
+    subquestAction,
+    autoAmendRequirements: typeof rawMidQuest["autoAmendRequirements"] === "boolean"
+      ? rawMidQuest["autoAmendRequirements"]
+      : DEFAULT_MID_QUEST_CONFIG.autoAmendRequirements,
+    turnInjection: typeof rawMidQuest["turnInjection"] === "boolean"
+      ? rawMidQuest["turnInjection"]
+      : DEFAULT_MID_QUEST_CONFIG.turnInjection,
+    promptTimeoutMs: typeof rawMidQuest["promptTimeoutMs"] === "number" && rawMidQuest["promptTimeoutMs"] > 0
+      ? rawMidQuest["promptTimeoutMs"]
+      : DEFAULT_MID_QUEST_CONFIG.promptTimeoutMs,
+  };
+
   return {
     askTimeoutMs: typeof timeout === "number" ? timeout : DEFAULT_CONFIG.askTimeoutMs,
     depthCap: typeof depth === "number" ? depth : DEFAULT_CONFIG.depthCap,
@@ -296,6 +415,8 @@ export function loadConfig(raw: unknown): QuestConfig {
       ? reviewMaxDuration
       : DEFAULT_CONFIG.reviewMaxDurationMs,
     planEditor: typeof record["planEditor"] === "string" ? record["planEditor"] : DEFAULT_CONFIG.planEditor,
+    midQuest,
+    router: loadRouterConfig(record),
     ...judge,
   };
 }

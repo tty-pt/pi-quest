@@ -110,16 +110,22 @@ const DELIVERED_ANALYSIS_CHARS = 900;
 
 export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<ReviewMaterial> {
   const plan = await approvedPlan(ctx, state);
+  const sections = parseDraftSections(plan);
+  const allRequirements = [
+    ...sections.requirements,
+    ...state.refinements.map((r) => r.startsWith("- ") ? r : `- ${r}`),
+  ];
+
   if (state.kind === "analysis" && state.qid !== null) {
     return {
       objective: state.pendingRootRequest ?? state.objective,
-      plan: parseDraftSections(plan).analysis,
+      plan: sections.analysis,
       kind: "analysis",
       evidence: [
-        ...state.refinements,
         ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
         ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
       ],
+      requirements: allRequirements,
       amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
       planRevisionHistory: formatRevisionHistory(state),
       implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
@@ -140,11 +146,11 @@ export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<Re
     plan,
     kind: state.kind,
     evidence: [
-      ...state.refinements,
       ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
       ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
       ...(state.handbackReceipts ?? []).map((h) => `child ${h.childQid} (${h.status}): ${h.findings} [test: ${h.testCommand}, passed: ${h.testPassed}]`),
     ],
+    requirements: allRequirements,
     amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
     planRevisionHistory: formatRevisionHistory(state),
     implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
