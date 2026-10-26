@@ -228,9 +228,11 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
   if (!APPROVE_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return false;
-  if (state.draft.contentHash === null || state.draft.contentHash === state.draft.approvedPlanHash) return false;
   if (hasInFlight(state.qid)) {
     cancelReview(state.qid);
+  }
+  if (state.draft.contentHash === null || state.draft.contentHash === state.draft.approvedPlanHash) {
+    return true;
   }
   const content = await readPlanFile(ctx, state);
   if (content === null) return false;

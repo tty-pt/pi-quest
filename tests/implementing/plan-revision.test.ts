@@ -425,3 +425,21 @@ Deno.test("handleApproveInput adopts staged plan revision and cancels in-flight 
   replaceState(IDLE_STATE);
 });
 
+Deno.test("handleApproveInput cancels in-flight review even when contentHash equals approvedPlanHash", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  // Plan hash equals approved hash (no staged revision)
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: d.target, approvedPlanHash: d.target } });
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review is in-flight");
+
+  const unblocked = await handleApproveInput(bus.pi, fakeCtx(d.cwd), "APPROVE");
+  check(unblocked === true, "handleApproveInput handled approval to unblock stuck in-flight");
+  check(hasInFlight(d.qid) === false, "in-flight review was cancelled");
+
+  cancelReview(d.qid);
+  clearPlanRevisionRetries(d.qid);
+  replaceState(IDLE_STATE);
+});
+
+

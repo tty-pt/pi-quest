@@ -27,6 +27,8 @@ import {
   setReviewRetryDispatcher,
   watchDraftFileCatchAll,
 } from "../../src/drafting/reviews.ts";
+import { cancelReview, hasInFlight, trackReview } from "../../src/review/tracker.ts";
+import { promoteAfterPass } from "../../src/drafting/promote.ts";
 import {
   bumpReviewCount,
   hashContent,
@@ -683,6 +685,54 @@ Deno.test("handleGoInput does not throw or promote when planAuthored is false", 
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("reviewPolicy balanced clears inFlight review on auto-promotion", async () => {
+  const d = await draftFailureSetup("balclr01" as Qid);
+  const bus = retryBus();
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review initially tracked");
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(getState().phase === "implementing", "promotes to implementing under balanced");
+    check(hasInFlight(d.qid) === false, "inFlight is cleared after bypass promotion");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy balanced clears inFlight review when planAuthored is false", async () => {
+  const d = await draftFailureSetup("balclr02" as Qid);
+  const bus = retryBus();
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review initially tracked");
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(hasInFlight(d.qid) === false, "inFlight is cleared on early return");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("promoteAfterPass cancels in-flight review unconditionally", async () => {
+  const d = await draftFailureSetup("promclr1" as Qid);
+  const bus = retryBus();
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review initially tracked");
+  try {
+    const res = await promoteAfterPass(bus.pi, fakeCtx(d.cwd), d.qid, "user");
+    check(res !== null, "promotion succeeded");
+    check(hasInFlight(d.qid) === false, "inFlight cancelled by promoteAfterPass");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
 
 
 

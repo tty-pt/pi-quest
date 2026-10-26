@@ -11,6 +11,7 @@ import { launchValidation } from "../validation/flow";
 import type { Pi, PiCtx } from "../hooks/events";
 import { ensureChildDraftFile, listKnownQids } from "../files";
 import { advanceForeman } from "../subquests/foreman";
+import { cancelReview } from "../review/tracker";
 
 // Shared by the reviewer-PASS auto-promote path (drafting/reviews.ts) and the
 // live-user "go" path. Returns the promotion message to steer/wake — the
@@ -24,6 +25,7 @@ export async function promoteAfterPass(
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return null;
   if (state.draft === null || !state.draft.planAuthored) return null;
+  cancelReview(qid);
   const stateQid = state.qid;
   const how = by === "user" ? 'user "go"' : "reviewer PASS";
   if (state.kind === "analysis") {

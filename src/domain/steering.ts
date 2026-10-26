@@ -16,14 +16,14 @@ const ADVANCE_PHRASES = [
   // English
   "go", "proceed", "advance", "approve", "approved", "lgtm", "looks good",
   "ship it", "ship", "confirm", "confirmed", "accept", "accepted", "done",
-  "wrap it up", "finish", "start coding", "go ahead", "let's go", "looks good to me",
+  "wrap it up", "finish", "start coding", "go ahead", "let's go", "go on", "looks good to me",
   "all good", "fine by me", "do it", "make it so", "yes proceed", "yes go",
   // Portuguese (input comprehension)
   "avança", "avanca", "força", "forca", "vai", "segue", "está bom", "esta bom",
   "está feito", "esta feito", "aprovo", "aprovado", "pode ser", "pode avançar",
   "pode avancar", "pode ir", "pode fechar", "fecha a quest", "conclui", "concluído",
   "concluido", "dá por concluído", "da por concluido", "tudo bem", "parece-me bem",
-  "segue em frente", "continua", "podes avançar", "podes avancar",
+  "segue em frente", "vai em frente", "continua", "continua assim", "podes avançar", "podes avancar",
 ];
 
 const ABORT_PHRASES = [

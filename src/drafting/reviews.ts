@@ -90,6 +90,7 @@ export async function bootDraftReview(
   // 1. "off": zero subagent reviews — promote immediately once plan is authored and meets thresholds
   // 2. "balanced": subagent reviews complex tasks; non-complex tasks auto-promote once plan is authored and meets thresholds
   if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex")) {
+    cancelReview(qid);
     if (belowBar || state.draft === null || !state.draft.planAuthored) {
       return;
     }

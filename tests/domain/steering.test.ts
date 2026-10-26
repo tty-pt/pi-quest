@@ -3,13 +3,13 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { check } from "../check.ts";
 
 Deno.test("steering heuristic: recognizes advance phrases in EN and PT", () => {
-  const enMatches = ["go", "proceed", "approve", "lgtm", "looks good", "ship it", "confirm", "done", "wrap it up"];
+  const enMatches = ["go", "proceed", "approve", "lgtm", "looks good", "ship it", "confirm", "done", "wrap it up", "go on", "Go on"];
   for (const phrase of enMatches) {
     const res = evaluateSteeringHeuristic(phrase);
     check(res.action === "advance", `expected advance for "${phrase}", got ${res.action}`);
   }
 
-  const ptMatches = ["avança", "avanca", "força nisso", "está bom", "esta feito", "pode fechar", "conclui a quest"];
+  const ptMatches = ["avança", "avanca", "força nisso", "está bom", "esta feito", "pode fechar", "conclui a quest", "vai em frente", "continua assim"];
   for (const phrase of ptMatches) {
     const res = evaluateSteeringHeuristic(phrase);
     check(res.action === "advance", `expected advance for "${phrase}", got ${res.action}`);
