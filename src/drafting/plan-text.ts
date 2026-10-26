@@ -286,6 +286,7 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
     objective: state.pendingRootRequest ?? state.objective,
     plan: deliverable,
     kind: state.kind,
+    requirements: sections.requirements,
     evidence: sections.evidence,
     amendments: allAmendments,
     rebuttal: openRebuttal?.implementerRebuttal,

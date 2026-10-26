@@ -31,6 +31,8 @@ export interface ReviewMaterial {
   codeDiff?: string;
   testReceipt?: string;
   rtmChecklist?: string;
+  // Draft requirements (## Requirements bullets) so the reviewer can judge the maturity bar.
+  requirements?: string[];
 }
 
 const READ_ONLY_RULES = `MANDATORY INVARIANTS:
@@ -104,11 +106,14 @@ function contextBlock(material: ReviewMaterial): string {
   const testReceipt = material.testReceipt
     ? `\nTEST VERIFICATION RECEIPT:\n${material.testReceipt}\n`
     : "";
+  const requirements = material.requirements !== undefined
+    ? `\nREQUIREMENTS (${material.requirements.length} recorded in the draft file's ## Requirements section):\n${material.requirements.length > 0 ? material.requirements.map((r) => r.startsWith("- ") ? r : `- ${r}`).join("\n") : "(no requirements recorded in the draft file)"}\n`
+    : "";
   const deliverableLabel = material.kind === "analysis" ? "APPROVED ANALYSIS" : "APPROVED PLAN";
   return `--- QUEST MATERIAL ---
 ORIGINAL REQUEST (primary acceptance criterion):
 ${material.objective || "(none)"}
-${rtm}
+${rtm}${requirements}
 ${deliverableLabel}:
 ${material.plan || "(none)"}
 ${diff}

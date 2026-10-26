@@ -78,35 +78,19 @@ async function claimForValidation(
   const hasGit = existsSync(join(ctx.cwd, ".git"));
 
   if (hasGit) {
+    const runGitDiff = async (...args: string[]) => {
+      for (const ref of ["HEAD", "HEAD~1"]) {
+        try {
+          const res: any = await pi.exec("git", ["diff", ...args, ref], { cwd: ctx.cwd });
+          const out = res?.stdout ?? res?.output ?? "";
+          if ((res?.code ?? res?.exitCode) === 0 && out.trim().length > 0) return out;
+        } catch { /* continue */ }
+      }
+      return "";
+    };
     await assertCompletionEligibility(state, {
-      getDiffStat: async () => {
-        try {
-          const res = await pi.exec("git", ["diff", "--stat", "HEAD"], { cwd: ctx.cwd });
-          const code = (res as any).code ?? (res as any).exitCode;
-          const out = (res as any).stdout ?? (res as any).output ?? "";
-          if (code === 0 && out.trim().length > 0) return out;
-          const headRes = await pi.exec("git", ["diff", "--stat", "HEAD~1"], { cwd: ctx.cwd });
-          const headCode = (headRes as any).code ?? (headRes as any).exitCode;
-          const headOut = (headRes as any).stdout ?? (headRes as any).output ?? "";
-          return headCode === 0 ? headOut : "";
-        } catch {
-          return "";
-        }
-      },
-      getDiffPatch: async () => {
-        try {
-          const res = await pi.exec("git", ["diff", "HEAD"], { cwd: ctx.cwd });
-          const code = (res as any).code ?? (res as any).exitCode;
-          const out = (res as any).stdout ?? (res as any).output ?? "";
-          if (code === 0 && out.trim().length > 0) return out;
-          const headRes = await pi.exec("git", ["diff", "HEAD~1"], { cwd: ctx.cwd });
-          const headCode = (headRes as any).code ?? (headRes as any).exitCode;
-          const headOut = (headRes as any).stdout ?? (headRes as any).output ?? "";
-          return headCode === 0 ? headOut : "";
-        } catch {
-          return "";
-        }
-      },
+      getDiffStat: () => runGitDiff("--stat"),
+      getDiffPatch: () => runGitDiff(),
       getLatestTest: () => state.lastTestReceipt ?? getLatestTestExecution(),
     });
   }
@@ -231,17 +215,10 @@ async function applyContinueWorkParam(
   if (params["continueWork"] !== true || !state.qid) return { state };
   try {
     const qid = state.qid;
-    if (state.kind === "analysis") {
-      // An analysis quest cannot implement: it has no implementation plan, so
-      // returning to work means revising the analysis deliverable (D1/D3).
-      const next = updateState((s) => demoteToDrafting(s));
-      await setDocStatus(ctx, qid, "drafting", false);
-      applied.push("returned to drafting to revise the delivered analysis");
-      return { state: next };
-    }
-    const next = updateState((s) => demoteToImplementing(s));
-    await setDocStatus(ctx, qid, "implementing", false);
-    applied.push("returned to implementing to continue the work");
+    const isAnalysis = state.kind === "analysis";
+    const next = updateState((s) => isAnalysis ? demoteToDrafting(s) : demoteToImplementing(s));
+    await setDocStatus(ctx, qid, isAnalysis ? "drafting" : "implementing", false);
+    applied.push(isAnalysis ? "returned to drafting to revise the delivered analysis" : "returned to implementing to continue the work");
     return { state: next };
   } catch (err) {
     return { state, error: err instanceof Error ? err.message : String(err) };
@@ -278,13 +255,13 @@ export async function applyUpdate(
     state = updateState((s) => recordRefinement(s, refinement.trim()));
     applied.push("refinement recorded");
   }
-  const amendment = params["amendment"];
-  const change = typeof amendment === "string" ? amendment : (amendment as Record<string, unknown> | undefined)?.["change"];
-  const reasons = ((amendment as Record<string, unknown> | undefined)?.["reasons"] as string | undefined) ?? "";
+  const a = params["amendment"] as any;
+  const change = typeof a === "string" ? a : a?.change;
+  const reasons = (typeof a?.reasons === "string" ? a.reasons : "") ?? "";
   if (typeof change === "string" && change.trim() !== "" && state.qid) {
     try {
       const qid = state.qid;
-      state = updateState((s) => recordAmendment(s, change.trim(), typeof reasons === "string" ? reasons : ""));
+      state = updateState((s) => recordAmendment(s, change.trim(), reasons));
       applied.push("amendment recorded");
       await syncAmendmentsToDraft(ctx, qid, state.amendments);
     } catch (err) {
@@ -305,11 +282,11 @@ export async function applyUpdate(
   const revised = await applyPlanRevisionParam(pi, ctx, state, params, applied);
   if (revised.error !== undefined) return { applied, error: revised.error };
   state = revised.state;
-  const continuePast = params["continuePast"];
-  if (typeof continuePast === "string" && continuePast.trim() !== "" && state.qid) {
+  const continuePast = typeof params["continuePast"] === "string" ? params["continuePast"].trim() : "";
+  if (continuePast && state.qid) {
     try {
-      state = updateState((s) => acknowledgeChild(s, continuePast.trim() as Qid));
-      applied.push(`continued past child ${continuePast.trim()}`);
+      state = updateState((s) => acknowledgeChild(s, continuePast as Qid));
+      applied.push(`continued past child ${continuePast}`);
     } catch (err) {
       return { applied, error: err instanceof Error ? err.message : String(err) };
     }
@@ -348,10 +325,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
         checkAnalysis: { type: "string", description: "Preview the draft profile for a would-be analysis body — read-only, no save, no review boot (drafting only, analysis quests)." },
         planRevision: { type: "string", description: "Revised Implementation Plan body, staged from implementing (boots a re-review; objective unchanged)." },
         note: { type: "string", description: "Why the plan revision was needed; kept in the append-only history." },
-        amendment: {
-          type: "object",
-          properties: { change: { type: "string" }, reasons: { type: "string" } },
-        },
+        amendment: { type: "object", properties: { change: { type: "string" }, reasons: { type: "string" } } },
         exactNextAction: { type: "string" },
         claimComplete: { type: "boolean" },
         continueWork: { type: "boolean", description: "Return a validating quest to implementing to continue the work." },

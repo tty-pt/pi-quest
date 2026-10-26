@@ -506,6 +506,9 @@ Deno.test("an above-bar draft boots the unbounded review brief", async () => {
     await waitForRequests(bus.emitted, 1);
     const task = String(requests(bus.emitted)[0]["task"] ?? "");
     check(!task.includes("FAST-FAIL"), "above-bar brief stays a full adversarial audit");
+    check(task.includes("REQUIREMENTS (2 recorded in the draft file's ## Requirements section):"), "requirements header present in reviewer task");
+    check(task.includes("- one"), "requirement bullet 'one' present in reviewer task");
+    check(task.includes("- two"), "requirement bullet 'two' present in reviewer task");
     bus.feed({
       requestId: requests(bus.emitted)[0]["requestId"],
       status: "error",
@@ -527,6 +530,7 @@ Deno.test("pre-draft findings travel as evidence into the review material", () =
     );
     const material = reviewMaterial(getState(), sections);
     check(material.evidence.includes("registry found"), "findings carry into the review brief");
+    check(material.requirements !== undefined && material.requirements.includes("one"), "requirements carry into the review material");
   } finally {
     replaceState(IDLE_STATE);
   }
