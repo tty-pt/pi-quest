@@ -41,7 +41,9 @@ One quest is active at a time. Every quest runs through three modes:
    of scope is a new quest.
 3. **Validation** — a validator checks the implementation against the plan and
    its amendments. A PASS archives the quest (a slim `archive/<qid>.zip`);
-   a FAIL sends it back to implementing with findings.
+   a FAIL sends it back to implementing with findings. You can reply `ship it`
+   or `confirm` at any moment to accept completion and archive immediately —
+   human judgment is supreme.
 
 Some quests ask for a **verdict, not a change**: open them with
 `quest_update_state { "kind": "analysis" }` and the deliverable is the quest's
@@ -80,6 +82,14 @@ to fit what was built.
 - **Autonomous Foreman Sub-Quest Dispatcher** — parses markdown backlog items
   from the plan and sequences sub-quests automatically, mounting each child onto
   the stack and resuming the coordinator when all tasks complete (or halting on failure).
+- **Adaptive Difficulty Tiers** — automatically classifies incoming tasks as `trivial`,
+  `standard`, or `complex`, dynamically adjusting required requirements and evidence counts
+  so simple fixes are not burdened with unnecessary process.
+- **Natural Language Steering & Human Supremacy** — operators can speak naturally at any
+  time (e.g. *"proceed"*, *"looks good"*, *"ship it"*, *"wrap it up"*). Human intent overrides
+  subagent reviews in both drafting and validation phases.
+- **Two-Strike Loop Breakers** — caps consecutive review and validation rejections at 2,
+  pausing automated thrashing and asking the operator directly how to proceed.
 - **Deterministic Semantic Linters** — zero-token pre-validation linter verifying
   codebase constraints (pure-C UX `#ifdef` prevention, cross-module `#include "*.c"`
   barriers, git conflict markers) before expensive LLM review passes.

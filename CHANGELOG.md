@@ -5,11 +5,39 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - 2026-10-24
+## [1.3.0] - 2026-10-26
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tty-pt/pi-quest/main/cover.png" alt="pi-quest cover banner" width="100%">
 </p>
+
+### Added
+- **Natural Language Steering & Semantic Circuit Breaking (`src/domain/steering.ts`)**:
+  - Implemented `evaluateSteeringIntent()` with fast local heuristic intent classification (<5ms) and optional neural judging via Jev System One.
+  - Understands conversational operator approval/advancement phrases (e.g. *"proceed"*, *"ship it"*, *"looks good"*, *"start coding"*, *"wrap it up"*, *"avança"*, *"está feito"*) and abort/cancellation phrases without rigid regex constraints.
+  - Allows human operators to advance drafting to code or archive completed validation work using natural speech.
+- **Symmetric Human Supremacy in Validation (`src/validation/flow.ts`)**:
+  - Removed the blocker (`isReviewerAvailable`) that previously prevented human operators from confirming completion when an automated validator subagent was configured.
+  - The operator can now approve and archive completed quests at any point, cleanly canceling any in-flight background validator runs.
+- **Two-Strike Review & Validation Loop Breakers (`src/drafting/draft-retry.ts`, `src/validation/flow.ts`)**:
+  - Automatically tracks consecutive review rejections (`MAX_CONSECUTIVE_REVIEW_FAILS = 2`, `MAX_CONSECUTIVE_VALIDATION_FAILS = 2`).
+  - Upon 2 consecutive rejections, the automated re-review loop is paused and the agent stops thrashing, prompting the human operator directly for guidance or approval.
+- **Adaptive Difficulty Tiers (`src/config.ts`, `src/drafting/difficulty.ts`)**:
+  - Added `QuestDifficulty = "trivial" | "standard" | "complex"` with adaptive maturity thresholds:
+    - `trivial`: 1 requirement, 2 evidence items.
+    - `standard`: 2 requirements, 7 evidence items.
+    - `complex`: 3 requirements, 10 evidence items.
+  - Added dual heuristic and Jev System One difficulty classifier (`evaluateQuestDifficulty`).
+- **Operator Documentation & Contextual Guidance (`docs/OPERATOR_GUIDE.md`, `src/drafting/detect.ts`)**:
+  - Added comprehensive 1-page English operator guide covering quest phases, natural steering, shortcuts, and circuit breakers.
+  - Added contextual hints to quest opening announcements reminding operators how to skip reviews or fast-track execution.
+
+### Fixed
+- **Missing Authored Requirements in Review Packets (`src/drafting/plan-text.ts`, `src/review/prompts.ts`)**:
+  - Fixed regression where `sections.requirements` was collected but omitted from `ReviewMaterial`, causing draft reviewers in FAST-FAIL mode to reject valid plans for missing requirement bullets.
+  - Authored requirements bullets and counts are now cleanly rendered in draft review briefs.
+
+## [1.2.0] - 2026-10-24
 
 ### Added
 - **Autonomous Foreman Sub-Quest Dispatcher (`src/subquests/foreman.ts`)**:
