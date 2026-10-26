@@ -234,3 +234,28 @@ Deno.test("non-model failures do not retry", async () => {
   await new Promise((r) => setTimeout(r, 20));
   check(requests(emitted).length === 1, "no retry on non-model failure");
 });
+
+Deno.test("configured fallback model takes over after a rate-limited reviewer", async () => {
+  clearReviewEnv();
+  resetNoticedReviews();
+  const qid = "fb0007" as Qid;
+  replaceState(createDraft(createQuest("req", qid), "mat"));
+  const { pi, emitted, feed } = flowBus();
+  const pending = runIsolatedReview({
+    pi,
+    ctx: fakeCtx("/tmp"),
+    qid,
+    target: "t7",
+    prompt: "review this",
+    model: "anthropic/claude-sonnet-4-5",
+    fallbackModels: ["antigravity/gemini-3.8-flash"],
+  });
+  await waitForRequests(emitted, 1);
+  feed({ requestId: requests(emitted)[0]["requestId"], status: "error", error: "429 rate limit exceeded" });
+  await waitForRequests(emitted, 2);
+  const second = requests(emitted)[1];
+  check(second["model"] === "antigravity/gemini-3.8-flash", "fallback model launched");
+  feed({ requestId: second["requestId"], status: "completed", result: { kind: "text", text: "VERDICT: PASS" } });
+  const outcome = await pending;
+  check(outcome.status === "verdict", "verdict from the fallback reviewer");
+});

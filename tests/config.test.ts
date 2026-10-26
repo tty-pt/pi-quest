@@ -1,5 +1,5 @@
 import { check } from "./check.ts";
-import { DEFAULT_CONFIG, loadConfig, readQuestConfig, resolveRoleModel } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../src/config.ts";
 
 Deno.test("config defaults match the spec", () => {
   check(DEFAULT_CONFIG.askTimeoutMs === 60000, "one minute default");
@@ -105,3 +105,12 @@ Deno.test("config parses midQuest settings cleanly", () => {
 });
 
 
+
+Deno.test("config parses role fallbacks as string or list", () => {
+  const cfg = loadConfig({
+    roles: { reviewer: "a/x", reviewerFallback: ["b/y", " ", 3, "c/z"], validatorFallback: "d/w" },
+  });
+  check(JSON.stringify(cfg.roles.reviewerFallback) === JSON.stringify(["b/y", "c/z"]), "reviewer list sanitized");
+  check(JSON.stringify(cfg.roles.validatorFallback) === JSON.stringify(["d/w"]), "single string becomes list");
+  check(resolveRoleFallbacks(DEFAULT_CONFIG, "reviewer").length === 0, "absent means none");
+});

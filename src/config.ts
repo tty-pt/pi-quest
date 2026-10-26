@@ -53,6 +53,10 @@ export interface RoleModels {
   reviewer?: string;
   validator?: string;
   judge?: string;
+  // Ordered fallback models tried after the primary role model when a launch
+  // fails with a provider/model/rate-limit error.
+  reviewerFallback?: string[];
+  validatorFallback?: string[];
 }
 
 export const DEFAULT_TRIGGER_PREFIXES: string[] = [
@@ -355,6 +359,8 @@ export function loadConfig(raw: unknown): QuestConfig {
     reviewer: reviewerModel,
     validator: validatorModel,
     judge: judgeModelOverride,
+    reviewerFallback: parseModelList(rawRoles["reviewerFallback"]),
+    validatorFallback: parseModelList(rawRoles["validatorFallback"]),
   };
 
   // Align judge.judgeModel with roles.judge if set
@@ -436,6 +442,19 @@ export function getThresholdsForDifficulty(
   difficulty: QuestDifficulty = "standard",
 ): DraftThresholds {
   return cfg.difficultyThresholds?.[difficulty] ?? cfg.draftThresholds ?? DEFAULT_CONFIG.draftThresholds;
+}
+
+// Accepts a single model string or an array of them; blanks are dropped.
+function parseModelList(raw: unknown): string[] {
+  const items = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  return items
+    .filter((m): m is string => typeof m === "string")
+    .map((m) => m.trim())
+    .filter((m) => m !== "");
+}
+
+export function resolveRoleFallbacks(cfg: QuestConfig, role: "reviewer" | "validator"): string[] {
+  return (role === "reviewer" ? cfg.roles.reviewerFallback : cfg.roles.validatorFallback) ?? [];
 }
 
 export function resolveRoleModel(

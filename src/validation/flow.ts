@@ -15,7 +15,7 @@ import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
 import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
-import { readQuestConfig, resolveRoleModel } from "../config";
+import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../config";
 import { cancelReview, hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
@@ -256,6 +256,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     target,
     runnerTool: config.bindings.reviewRunner.tool,
     ...(validatorModel ? { model: validatorModel } : {}),
+    fallbackModels: resolveRoleFallbacks(config, "validator"),
     prompt: buildReviewPrompt("validation", qid, target, brief),
   });
   if (outcome.status === "no-runner") {

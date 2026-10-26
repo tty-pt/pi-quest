@@ -204,6 +204,8 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 |---------|--------|---------|--------|
 | `reviewPolicy` | `"strict"` / `"balanced"` / `"off"` | `"strict"` | Review intensity: `"strict"` audits every plan and validation; `"balanced"` skips reviews on `trivial` and `standard` tasks when tests pass and audits `complex` tasks; `"off"` runs zero subagent reviews. |
 | `roles.reviewer` | model name / id | `undefined` (inherit) | Model used for plan review subagents (e.g. `"google/gemini-2.5-flash"`). Fallback: `PI_QUEST_REVIEWER_MODEL`. |
+| `roles.reviewerFallback` | model id or list | `[]` | Ordered fallback models for plan review when the reviewer model fails with a provider/model/rate-limit error. |
+| `roles.validatorFallback` | model id or list | `[]` | Same, for validation subagents. |
 | `roles.validator` | model name / id | `undefined` (inherit) | Model used for completion validation subagents. Fallback: `PI_QUEST_VALIDATOR_MODEL`. |
 | `roles.judge` | model name / id | `"qwen"` | Model identifier sent to Jev System One for intent and difficulty judging. Fallback: `PI_QUEST_JUDGE_MODEL`. |
 | `askTimeoutMs` | number (ms) | `60000` | How long `quest_ask_human` waits before proceeding with its recommended default. |

@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleModel, type QuestConfig } from "../config";
+import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
 import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
 import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
@@ -113,6 +113,7 @@ export async function bootDraftReview(
     prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar),
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
+    fallbackModels: resolveRoleFallbacks(config, "reviewer"),
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
   });

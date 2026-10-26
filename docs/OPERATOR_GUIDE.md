@@ -100,6 +100,24 @@ If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your pr
 }
 ```
 
+#### Reviewer / validator fallback chains
+`roles.reviewerFallback` and `roles.validatorFallback` (a string or an ordered list) name models to try when the primary role model fails to launch with a provider/model error: model not found, unknown provider, rate limit / `429`, quota, `503` / `504` / `529`, `overloaded`, or `capacity`. The chain is tried in order:
+
+1. the primary role model (verbatim, e.g. with a `:high` suffix);
+2. its suffix-stripped variant;
+3. each configured fallback (verbatim, then suffix-stripped);
+4. the `PI_CRITICAL_REVIEW_MODEL_FALLBACK` env model, if set.
+
+Non-provider failures (a malformed verdict, a timeout with no provider error) do not advance the chain; they use the normal draft-review retry/backoff. The chain applies to draft review, plan-revision review and validation.
+
+```json
+"roles": {
+  "reviewer": "anthropic/claude-sonnet-4-5",
+  "reviewerFallback": ["antigravity/gemini-3.8-flash"],
+  "validator": "antigravity/gemini-3.8-flash"
+}
+```
+
 ---
 
 ## Phase × Difficulty Model Router (`quest/auto`)
@@ -122,7 +140,7 @@ Configure the routing matrix in `.pi/settings.json` under `pi-quest.router`:
       "matrix": {
         "drafting": {
           "complex": [
-            "anthropic/claude-sonnet-4-5:high",
+            "anthropic/claude-sonnet-5-5:high",
             "antigravity/gemini-3.8-flash"
           ],
           "*": "antigravity/gemini-3.8-flash"
@@ -206,3 +224,37 @@ If you prefer explicit, deterministic 1-step routing without relying on natural 
 | `/quest doctor` / `/quest-doctor` | Test live health of decision judge, latency, models, and word families. |
 | `/quests` | Display all active, draft, and archived quests in a widget. |
 | `/quest-del` | Abandon and archive the active quest or pop a child sub-quest. |
+
+
+---
+
+## What to Expect: A Quest End to End (balanced policy)
+
+This section describes the behaviour with `reviewPolicy: "balanced"`, the router matrix above, and `roles.reviewer` set to a stronger model than the implementer.
+
+### 1. Classification decides the path
+At detection time the request text is classified. With no `judgeUrl` configured (and `judgeFallback: "heuristic"`) this is a regex heuristic:
+- **complex**: words such as architecture, migration, rewrite, redesign, overhaul, cross-module, breaking change, concurrency, protocol change; or four or more distinct file paths in the request.
+- **trivial**: a short request (< 500 chars, at most 2 paths) about a typo, rename, docs/readme, lint, version bump, etc.
+- **standard**: everything else, which includes most feature requests.
+
+The heuristic is crude: a complex task worded plainly is treated as standard and gets neither the strong planner nor a review. Put a trigger word in the request, or have the agent call `quest_update_state` with `difficulty: "complex"`.
+
+### 2. Drafting
+Research, reads and test runs are never blocked; the only writable file is the draft (`.pi/quest/future/<qid>.md`). Writing the plan before recording findings is refused with `RESEARCH_REQUIRED`. The plan must meet the thresholds for its difficulty (default standard: 2 requirements, 7 evidence items). The router picks the planning model per turn from the phase × difficulty matrix: `drafting.complex` uses the first available model in its chain (e.g. Sonnet 5.5 with `:high` thinking, then Flash); other difficulties use `drafting.*`. Multi-tool continuation turns keep the model they started on, so a difficulty change takes effect on the next turn.
+
+### 3. Review
+- **standard / trivial**: review is bypassed. Once the plan is authored and meets the bar, the quest promotes to implementing and the agent is told "Draft review bypassed under policy 'balanced'". No subagent runs.
+- **complex**: a reviewer subagent runs on `roles.reviewer` (with `reviewerFallback` as above). PASS promotes. FAIL returns findings; saving the revised plan boots a fresh review. A launch failure retries up to 3 times with exponential backoff (4s base); two consecutive FAIL verdicts pause the loop and ask the operator, who may reply `go`.
+- `go` (or `go on`, `proceed`, ...) promotes at any time.
+
+### 4. Implementing
+Tools are unrestricted and the router uses the `implementing` cell (Flash in the sample config, for every difficulty). Repository rules (TDD, `make`, boundary scripts) come from `AGENTS.md`; pi-quest does not enforce them. A plan revision mid-way is re-reviewed and holds tools (`AWAITING_REVIEW: PLAN_REVISION_REVIEW`) until the verdict arrives. If that hold is ever stuck, `/quest-cancel-review` or a plain `APPROVE` clears it.
+
+### 5. Validation
+The validator (`roles.validator`, falling back through `validatorFallback`) checks the work against the plan. Under `balanced`, a standard quest whose tests pass auto-archives to `.pi/quest/archive/<qid>.zip`. A FAIL returns to implementing with findings. `ship it` / `confirm` archives immediately.
+
+### Known limits
+- Only the drafting phase uses the strong model by default; implementation and validation stay on the cheap model unless the matrix says otherwise.
+- If the planner and the reviewer are the same model the review is not independent; prefer a different model for `roles.reviewer`.
+- Provider auth and quota are not checked at config time; a bad key surfaces as a launch failure and walks the fallback chain.
