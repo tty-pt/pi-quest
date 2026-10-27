@@ -70,6 +70,7 @@ export interface PiCtx {
   childSessionId?: unknown;
   parentSessionId?: unknown;
   modelRegistry?: unknown;
+  model?: unknown;
 }
 
 export interface SessionStartEvent {

@@ -6,6 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
+import { withEffectivePolicy } from "../policy/effective";
 import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
 import type { QuestState } from "../domain/quest";
 import { approvePlanRevision, recordPlanRevision, revertPlanRevision } from "../domain/plan-revision";
@@ -62,8 +63,9 @@ export async function bootPlanRevisionReview(
   pi: Pi,
   ctx: PiCtx,
   target: string,
-  config: QuestConfig = DEFAULT_CONFIG,
+  baseConfig: QuestConfig = DEFAULT_CONFIG,
 ): Promise<void> {
+  const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
   if (isCurrentReview(state.qid, target)) return;

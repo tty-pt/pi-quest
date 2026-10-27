@@ -10,6 +10,8 @@ import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type 
 import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
 import { bypassDraftReview, bypassesDraftReview } from "./bypass";
+import { assessDraftQuality } from "./quality";
+import { withEffectivePolicy } from "../policy/effective";
 import { draftPath } from "../domain/paths";
 import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
@@ -74,8 +76,9 @@ export async function bootDraftReview(
   pi: Pi,
   ctx: PiCtx,
   target: string,
-  config: QuestConfig = DEFAULT_CONFIG,
+  baseConfig: QuestConfig = DEFAULT_CONFIG,
 ): Promise<void> {
+  const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
@@ -85,12 +88,13 @@ export async function bootDraftReview(
   const sections = parseDraftSections(content);
   const material = reviewMaterial(getState(), sections);
   const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
   const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
   // Policy-based bypass (reviewPolicy "off", or "balanced" for non-complex).
   if (bypassesDraftReview(config, state)) {
-    await bypassDraftReview(pi, ctx, config, { qid, state, sections, thresholds, belowBar });
+    await bypassDraftReview(pi, ctx, config, { qid, state, sections, thresholds, belowBar: belowBar || quality.blocks, quality });
     return;
   }
 
@@ -100,7 +104,8 @@ export async function bootDraftReview(
     ctx,
     qid,
     target,
-    prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar),
+    prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar) +
+      (quality.summary !== "" ? `\n\nDeterministic quality findings (advisory): ${quality.summary}` : ""),
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "reviewer"),

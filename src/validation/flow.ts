@@ -16,6 +16,7 @@ import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../config";
+import { withEffectivePolicy } from "../policy/effective";
 import { cancelReview, hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
@@ -215,7 +216,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   if (hasInFlight(qid)) return;
-  const config = await readQuestConfig(ctx.cwd);
+  const config = withEffectivePolicy(await readQuestConfig(ctx.cwd), ctx);
 
   // Policy-based bypass in validation:
   // 1. "off": skip subagent review entirely when tests pass (or analysis)

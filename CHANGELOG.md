@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`policyByModel`** (`src/policy/effective.ts`): ordered glob rules map the active `provider/id` to `strict` / `balanced` / `off`. The model is read live from `ctx.model` (env fallback); under `quest/auto` the physical model last routed to (`src/router/last-route.ts`) is matched. Applied in draft review, plan-revision review and validation; wake messages and the draft profile name the rule.
+- **`draftQuality`** (`src/drafting/quality.ts`, `quality-config.ts`, `citations.ts`): configurable per-difficulty depth bar — resolvable `file:line` citations, discrete plan steps, a verification step. `mode` `enforce` (default) holds bypassed drafts below the bar, `warn` promotes with an advisory, `off` disables; under `strict` it is advisory reviewer context. Shown in every draft profile.
+- Citation detection recognises more file types (js, json, py, mk, yml, toml, rs, go, css, html, cc/cpp/hpp).
+- README and operator guide document the `quest/auto` router and how to select it.
 - **Reviewer / validator fallback chains** (`roles.reviewerFallback`, `roles.validatorFallback`): ordered fallback models tried when the primary review model fails with a provider/model/rate-limit error. Provider-error detection now also covers `503`, `529`, `overloaded`, and `capacity`.
 - Operator guide section "What to Expect: A Quest End to End".
 

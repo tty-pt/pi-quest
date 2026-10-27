@@ -95,6 +95,20 @@ to fit what was built.
   Injects active directives on every turn via `before_agent_start`, auto-amends `## Requirements`
   on disk, sequences new tasks into the Foreman's `## Sub-Quests` backlog, and supports optional
   fast-path shortcuts (`!sq`, `!later`, `!rule`, `!chat`).
+- **Phase × Difficulty model router (`quest/auto`)** — pi-quest registers a
+  virtual model, `quest/auto`, that routes every request to a physical model
+  chosen by quest phase and difficulty (cheap model for implementing, a strong
+  one for complex drafting, quota-aware fallbacks). Select it with
+  `/model quest/auto` (or `"defaultModel": "quest/auto"`); inspect with
+  `/quest-router`. Selecting a concrete model bypasses the router. See the
+  operator guide.
+- **Model-aware review policy (`policyByModel`)** — strict review for weaker
+  models, balanced for frontier ones, chosen automatically from the model in
+  use (the routed model when on `quest/auto`).
+- **Draft quality bar (`draftQuality`)** — beyond requirement/evidence counts, a
+  bypassed (balanced/off) draft must cite file:line locations that actually
+  resolve, break into discrete steps and name a verification step — with
+  per-difficulty defaults you can tune.
 - **Two-Strike Loop Breakers** — caps consecutive review and validation rejections at 2,
   pausing automated thrashing and asking the operator directly how to proceed.
 - **Deterministic Semantic Linters** — zero-token pre-validation linter verifying
@@ -182,6 +196,8 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 {
   "pi-quest": {
     "reviewPolicy": "balanced",
+    "policyByModel": { "anthropic/claude-sonnet-5*": "balanced", "*flash*": "strict" },
+    "draftQuality": { "mode": "enforce", "tiers": { "standard": { "citations": 2, "steps": 3 } } },
     "roles": {
       "reviewer": "google/gemini-2.5-flash",
       "validator": "google/gemini-2.5-flash"
@@ -203,6 +219,8 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | Setting | Values | Default | Effect |
 |---------|--------|---------|--------|
 | `reviewPolicy` | `"strict"` / `"balanced"` / `"off"` | `"strict"` | Review intensity: `"strict"` audits every plan and validation; `"balanced"` skips reviews on `trivial` and `standard` tasks when tests pass and audits `complex` tasks; `"off"` runs zero subagent reviews. |
+| `policyByModel` | object: glob → policy | `{}` | Pick `reviewPolicy` from the model doing the work. Ordered rules matched against `provider/id` (`*` wildcard, case-insensitive, first match wins); no match keeps `reviewPolicy`. Under `quest/auto` the physical model it routed to is matched. See the operator guide. |
+| `draftQuality` | object | `{ mode: "enforce", tiers: {…} }` | Deterministic depth bar for drafts: resolvable `file:line` citations, discrete plan steps, a verification step — per difficulty tier. `mode`: `"enforce"` holds bypassed (balanced/off) drafts below the bar, `"warn"` only reports, `"off"` disables. Defaults: standard 2 citations / 3 steps / verification, complex 4 / 5 / verification, trivial 0 / 1 / —. |
 | `roles.reviewer` | model name / id | `undefined` (inherit) | Model used for plan review subagents (e.g. `"google/gemini-2.5-flash"`). Fallback: `PI_QUEST_REVIEWER_MODEL`. |
 | `roles.reviewerFallback` | model id or list | `[]` | Ordered fallback models for plan review when the reviewer model fails with a provider/model/rate-limit error. |
 | `roles.validatorFallback` | model id or list | `[]` | Same, for validation subagents. |

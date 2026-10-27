@@ -327,6 +327,10 @@ function wakes(pi: FakePi): Array<SentMessage["message"]> {
 
 // Each retry test gets its own qid: the retry counter is module-level
 // (per-session in production) and must not leak between tests.
+// These tests exercise policy mechanics on a deliberately minimal fixture plan;
+// the draft quality bar has its own coverage in quality.test.ts.
+const NO_QUALITY = { ...DEFAULT_CONFIG.draftQuality, mode: "off" as const };
+
 async function draftFailureSetup(qid: Qid): Promise<{ cwd: string; qid: Qid; file: string; doc: string; target: string }> {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-retry-"));
   replaceState(createDraft(createQuest("req", qid), "mat"));
@@ -608,7 +612,7 @@ Deno.test("reviewPolicy off bypasses draft review and auto-promotes immediately"
   const d = await draftFailureSetup("poloff01" as Qid);
   const bus = retryBus();
   try {
-    const offConfig = { ...DEFAULT_CONFIG, reviewPolicy: "off" as const };
+    const offConfig = { ...DEFAULT_CONFIG, reviewPolicy: "off" as const, draftQuality: NO_QUALITY };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, offConfig);
     check(requests(bus.emitted).length === 0, "zero subagents launched under policy off");
     const wake = wakes(bus.pi).find((m) => String(m.content).includes("Draft review bypassed under policy 'off'"));
@@ -623,7 +627,7 @@ Deno.test("reviewPolicy balanced bypasses draft review for standard and trivial 
   const d = await draftFailureSetup("polbal01" as Qid);
   const bus = retryBus();
   try {
-    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
     check(requests(bus.emitted).length === 0, "zero subagents launched for standard task under balanced");
     const wake = wakes(bus.pi).find((m) => String(m.content).includes("policy 'balanced' (standard task)"));
@@ -666,7 +670,7 @@ Deno.test("reviewPolicy balanced does not auto-promote when planAuthored is fals
   // Mark planAuthored = false
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
   try {
-    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
     check(getState().phase === "drafting", "stays in drafting when plan is not authored");
   } finally {
@@ -694,7 +698,7 @@ Deno.test("reviewPolicy balanced clears inFlight review on auto-promotion", asyn
   trackReview(d.qid, d.target, () => {});
   check(hasInFlight(d.qid) === true, "review initially tracked");
   try {
-    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
     check(getState().phase === "implementing", "promotes to implementing under balanced");
     check(hasInFlight(d.qid) === false, "inFlight is cleared after bypass promotion");
@@ -711,7 +715,7 @@ Deno.test("reviewPolicy balanced clears inFlight review when planAuthored is fal
   trackReview(d.qid, d.target, () => {});
   check(hasInFlight(d.qid) === true, "review initially tracked");
   try {
-    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const };
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
     check(hasInFlight(d.qid) === false, "inFlight is cleared on early return");
   } finally {
@@ -743,7 +747,7 @@ Deno.test("balanced e2e: saving a standard plan promotes without leaving the too
   const d = await draftFailureSetup("bale2e01" as Qid);
   const bus = retryBus();
   await mkdir(join(d.cwd, ".pi"), { recursive: true });
-  await writeFile(join(d.cwd, ".pi", "settings.json"), JSON.stringify({ "pi-quest": { reviewPolicy: "balanced" } }), "utf8");
+  await writeFile(join(d.cwd, ".pi", "settings.json"), JSON.stringify({ "pi-quest": { reviewPolicy: "balanced", draftQuality: { mode: "off" } } }), "utf8");
   const hooks: Array<(e: unknown, c: unknown) => unknown> = [];
   (bus.pi as unknown as { on: unknown }).on = (_n: string, h: (e: unknown, c: unknown) => unknown) => { hooks.push(h); };
   installDraftGate(bus.pi);

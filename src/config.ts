@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { QuestDifficulty } from "./domain/quest.ts";
 import type { RouterConfig, ModelSpec } from "./router/types.ts";
+import { parsePolicyRules, type PolicyRule } from "./policy/effective.ts";
+import { DEFAULT_DRAFT_QUALITY, parseDraftQuality, type DraftQualityConfig } from "./drafting/quality-config.ts";
 export type { QuestDifficulty, RouterConfig, ModelSpec };
 
 export interface DraftThresholds {
@@ -82,6 +84,11 @@ export interface QuestConfig {
   statusStyle: StatusStyle;
   autoArchive: boolean;
   reviewPolicy: ReviewPolicy;
+  /** Ordered glob rules mapping the active "provider/id" to a policy. */
+  policyByModel: PolicyRule[];
+  /** Set by withEffectivePolicy: why reviewPolicy has its current value. */
+  policyNote?: string;
+  draftQuality: DraftQualityConfig;
   reviewerModel?: string;
   validatorModel?: string;
   roles: RoleModels;
@@ -123,6 +130,8 @@ export const DEFAULT_CONFIG: QuestConfig = {
   statusStyle: "icon",
   autoArchive: true,
   reviewPolicy: "strict",
+  policyByModel: [],
+  draftQuality: DEFAULT_DRAFT_QUALITY,
   reviewerModel: undefined,
   validatorModel: undefined,
   roles: {},
@@ -403,6 +412,8 @@ export function loadConfig(raw: unknown): QuestConfig {
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
     autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
     reviewPolicy,
+    policyByModel: parsePolicyRules(record["policyByModel"]),
+    draftQuality: parseDraftQuality(record["draftQuality"]),
     reviewerModel,
     validatorModel,
     roles,

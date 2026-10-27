@@ -84,6 +84,44 @@ When a task is classified as `complex`:
 - **`off` (Speedrun Mode)**:
   - Zero subagent review calls. You retain full quest journal benefits (checklists, git tracking, test receipts, status overlay) without subagent latency or cost.
 
+### Model-aware policy (`policyByModel`)
+Instead of one global `reviewPolicy`, map the model that is actually working to a policy. Rules are ordered; the first glob matching `provider/id` wins (`*` wildcard, case-insensitive, anchored; thinking suffixes like `:high` are ignored). No match falls back to `reviewPolicy`.
+
+```json
+"reviewPolicy": "strict",
+"policyByModel": {
+  "anthropic/claude-sonnet-5*": "balanced",
+  "*flash*": "strict"
+}
+```
+
+- The model is read live from pi (`ctx.model`), so a `/model` switch takes effect at the next review decision; the launch env (`PI_PROVIDER`/`PI_MODEL`) is only a fallback.
+- On the `quest/auto` router the physical model it last routed to is matched, not the virtual `quest/auto` id. Before the first routed request, `router.default` is used.
+- Applies to draft review, plan-revision review and validation. The draft profile and bypass wake messages say which rule applied (`review policy: balanced (… matched policyByModel "…")`).
+- Unlisted models use `reviewPolicy` (default `strict`), so an unfamiliar model is never silently trusted.
+
+### Draft quality bar (`draftQuality`)
+Under `balanced`/`off` no reviewer reads the plan, so a deterministic depth bar stands in. In addition to the requirement/evidence counts, a draft needs, per difficulty tier:
+
+| Tier | `citations` (resolve on disk) | `steps` (list items) | `requireVerification` |
+|------|------|------|------|
+| trivial | 0 | 1 | no |
+| standard | 2 | 3 | yes |
+| complex | 4 | 5 | yes |
+
+- A *citation* is a `file:line` or `file:start-end` reference (in evidence or the plan) whose file exists and whose line is in range; invented or out-of-range ones do not count.
+- A *step* is a numbered/bulleted/checkbox list item in the plan. A *verification step* is any mention of testing/verifying/validating/linting.
+- Analysis quests only need the citation count.
+- `mode`: `"enforce"` (default) holds a bypassed draft in drafting and wakes the agent with exactly what is missing; `"warn"` promotes but attaches an advisory; `"off"` disables the check. Under `strict` the findings are passed to the reviewer as advisory context and never block.
+- The draft profile (`checkPlan` / on every save) always shows the quality line, so the agent can build up to the bar before saving.
+
+```json
+"draftQuality": {
+  "mode": "enforce",
+  "tiers": { "standard": { "citations": 3, "steps": 4 }, "complex": { "requireVerification": true } }
+}
+```
+
 ### Role-Based Model Customization (`roles`)
 If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your primary agent, you don't need to burn expensive tokens on reviewing. Delegate review and validation roles to fast, economical models:
 
@@ -123,6 +161,8 @@ Non-provider failures (a malformed verdict, a timeout with no provider error) do
 ## Phase × Difficulty Model Router (`quest/auto`)
 
 When using a subscription with rolling rate limits (such as Anthropic Claude Pro), coding loops (reading files, `make`, compiler iterations) can quickly deplete quotas. `pi-quest` registers a virtual model (`quest/auto`) that routes each request to an optimal physical model based on the current quest **phase** (`idle`, `provisional`, `drafting`, `implementing`, `validating`) and **difficulty** (`trivial`, `standard`, `complex`).
+
+> **Selecting the router:** `quest/auto` is a normal model entry in pi. Pick it with `/model quest/auto` or set `"defaultModel": "quest/auto"`. If you select a concrete model (e.g. `anthropic/claude-sonnet-5-5`) the router never runs, even with `router.enabled: true`.
 
 ### Matrix Configuration (`router`)
 Configure the routing matrix in `.pi/settings.json` under `pi-quest.router`:

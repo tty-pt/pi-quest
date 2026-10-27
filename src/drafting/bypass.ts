@@ -12,6 +12,7 @@ import type { Pi, PiCtx } from "../hooks/events";
 import { cancelReview } from "../review/tracker";
 import { clearDraftReviewRetry, clearReviewVerdictFails } from "./draft-retry";
 import { promoteAfterPass } from "./promote";
+import type { QualityResult } from "./quality";
 import { deliverableBody, deliverableWord, draftProfileText, hasAuthoredText, type DraftSections } from "./plan-text";
 
 export function bypassesDraftReview(config: QuestConfig, state: QuestState): boolean {
@@ -24,21 +25,24 @@ export interface BypassArgs {
   sections: DraftSections;
   thresholds: DraftThresholds;
   belowBar: boolean;
+  quality: QualityResult;
 }
 
 export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig, args: BypassArgs): Promise<void> {
-  const { qid, state, sections, thresholds, belowBar } = args;
+  const { qid, state, sections, thresholds, belowBar, quality } = args;
   cancelReview(qid);
-  const reason = config.reviewPolicy === "off" ? "policy 'off'" : `policy 'balanced' (${state.difficulty} task)`;
+  const base = config.reviewPolicy === "off" ? "policy 'off'" : `policy 'balanced' (${state.difficulty} task)`;
+  const reason = config.policyNote !== undefined ? `${base} — ${config.policyNote}` : base;
   if (belowBar || state.draft === null || !state.draft.planAuthored) {
     const kind = state.kind;
     const profile = draftProfileText(sections, thresholds, "", kind, state.difficulty);
     const nested = hasAuthoredText(deliverableBody(sections, kind))
       ? ""
       : ` Keep every "## " heading out of the ${deliverableWord(kind)} body (use "###"): a nested "## " heading ends the section.`;
+    const depth = quality.summary !== "" ? `\n${quality.summary}` : "";
     sendWake(
       pi,
-      `Draft review bypassed under ${reason}, but ${qid} cannot promote yet — the maturity bar still applies.\n${profile}${nested}\n` +
+      `Draft review bypassed under ${reason}, but ${qid} cannot promote yet — the maturity bar still applies.\n${profile}${depth}${nested}\n` +
         `Revise ${draftPath(qid)} and save; saving re-checks promotion. A live user "go" also promotes.`,
     );
     return;
@@ -46,5 +50,6 @@ export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig,
   clearDraftReviewRetry(qid);
   clearReviewVerdictFails(qid);
   const message = await promoteAfterPass(pi, ctx, qid, "review");
-  if (message !== null) sendWake(pi, `${message} Draft review bypassed under ${reason}.`);
+  const advisory = quality.gaps.length > 0 ? ` Draft quality advisory (mode ${config.draftQuality.mode}): ${quality.gaps.join("; ")}.` : "";
+  if (message !== null) sendWake(pi, `${message} Draft review bypassed under ${reason}.${advisory}`);
 }

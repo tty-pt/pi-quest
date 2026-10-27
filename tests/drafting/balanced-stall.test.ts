@@ -16,6 +16,7 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { bootDraftReview } from "../../src/drafting/reviews.ts";
 import { draftProfileText, hashContent, meetsReviewThresholds, parseDraftSections } from "../../src/drafting/plan-text.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
+import { parsePolicyRules } from "../../src/policy/effective.ts";
 
 async function setup(qid: Qid, doc: string) {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-stall-"));
@@ -128,6 +129,73 @@ Deno.test("a plan carrying its own ## headings is refused with an actionable err
     check(!bad.applied.includes("plan recorded in the draft file"), "nothing recorded");
     const good = await applyUpdate(pi, ctx, { plan: "### Steps\n1. do R1" });
     check(good.error === undefined, `### headings are fine, got ${good.error}`);
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+// --- draftQuality + policyByModel integration -------------------------------
+
+const SHALLOW = "## Requirements\n- R1: a\n- R2: b\n\n## Evidence\n- one\n\n## Implementation Plan\nR1: do it. R2: do it too.\n";
+
+Deno.test("balanced: a count-bar-clearing but shallow draft is held with the quality gaps", async () => {
+  const d = await setup("qual01" as Qid, SHALLOW);
+  try {
+    await bootDraftReview(d.pi, fakeCtx(d.cwd), d.target, BAL);
+    check(getState().phase === "drafting", "shallow plan does not promote under balanced");
+    const wakes = wakeTexts(d.pi);
+    check(wakes.length === 1, `one wake, got ${wakes.length}`);
+    check(wakes[0].includes("draft quality"), "wake carries the quality summary");
+    check(wakes[0].includes("citations"), "wake names the citation gap");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("balanced + draftQuality warn: shallow draft promotes with an advisory", async () => {
+  const d = await setup("qual02" as Qid, SHALLOW);
+  try {
+    const cfg = { ...BAL, draftQuality: { ...DEFAULT_CONFIG.draftQuality, mode: "warn" as const } };
+    await bootDraftReview(d.pi, fakeCtx(d.cwd), d.target, cfg);
+    check(getState().phase === "implementing", "warn mode does not block");
+    check(wakeTexts(d.pi).some((t) => t.includes("quality advisory")), "advisory attached");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("policyByModel: strict base policy becomes balanced for a matching model", async () => {
+  const d = await setup("qual03" as Qid, SHALLOW);
+  try {
+    const cfg = {
+      ...DEFAULT_CONFIG,
+      reviewPolicy: "strict" as const,
+      draftQuality: { ...DEFAULT_CONFIG.draftQuality, mode: "off" as const },
+      policyByModel: parsePolicyRules({ "anthropic/claude-sonnet-5*": "balanced" }),
+    };
+    const ctx = Object.assign(fakeCtx(d.cwd), { model: { provider: "anthropic", id: "claude-sonnet-5-5" } });
+    await bootDraftReview(d.pi, ctx, d.target, cfg);
+    check(getState().phase === "implementing", "bypass promoted: policy followed the model");
+    const text = wakeTexts(d.pi).join("\n");
+    check(text.includes("policyByModel"), "wake explains which rule applied");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("policyByModel: non-matching model keeps strict (no bypass, reviewer path)", async () => {
+  const d = await setup("qual04" as Qid, SHALLOW);
+  try {
+    const cfg = {
+      ...DEFAULT_CONFIG,
+      reviewPolicy: "strict" as const,
+      policyByModel: parsePolicyRules({ "anthropic/*": "balanced" }),
+    };
+    const ctx = Object.assign(fakeCtx(d.cwd), { model: { provider: "antigravity", id: "gemini-3.8-flash" } });
+    d.pi.toolNames = [];
+    await bootDraftReview(d.pi, ctx, d.target, cfg);
+    check(getState().phase === "drafting", "strict: not promoted without a reviewer");
+    check(!wakeTexts(d.pi).some((t) => t.includes("bypassed")), "no bypass wake");
   } finally {
     replaceState(IDLE_STATE);
   }
