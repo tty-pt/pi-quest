@@ -16,6 +16,7 @@ import { installCommands } from "../../src/surface/commands/index.ts";
 import { checkJudgeHealth } from "../../src/drafting/judge.ts";
 import { readQuestConfig } from "../../src/config.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
+import { hasInFlight, trackReview, cancelReview } from "../../src/review/tracker.ts";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "pi-quest-cmd-"));
@@ -206,3 +207,38 @@ Deno.test("installCommands registers quest-doctor EntryRenderer and dispatches v
     await server.shutdown();
   }
 });
+
+Deno.test("quest-cancel-review command cancels in-flight review", async () => {
+  const pi = fakePi();
+  installCommands(pi);
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  replaceState({ ...createQuest("req", "rev123"), phase: "implementing" });
+
+  const cancelCmd = pi.commands.find((c) => c.name === "quest-cancel-review");
+  check(Boolean(cancelCmd), "must register 'quest-cancel-review' command");
+
+  // No review in-flight
+  await cancelCmd!.options.handler("", ctx);
+  check(ctx.notifications.calls.some((n) => n.message.includes("No review currently in-flight")), "reports no review");
+
+  // Track an in-flight review
+  trackReview("rev123", "target1", () => {});
+  check(hasInFlight("rev123") === true, "review is in-flight");
+
+  // Cancel via command
+  await cancelCmd!.options.handler("", ctx);
+  check(hasInFlight("rev123") === false, "review cancelled");
+  check(ctx.notifications.calls.some((n) => n.message.includes("Cancelled in-flight review")), "reports cancelled");
+
+  // Test /quest cancel-review alias
+  trackReview("rev123", "target2", () => {});
+  check(hasInFlight("rev123") === true, "review is in-flight again");
+  const questCmd = pi.commands.find((c) => c.name === "quest");
+  await questCmd!.options.handler("cancel-review", ctx);
+  check(hasInFlight("rev123") === false, "review cancelled via alias");
+
+  cancelReview("rev123");
+  replaceState(IDLE_STATE);
+});
+

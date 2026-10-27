@@ -32,7 +32,7 @@ export interface ToolRef {
 }
 
 export type Decision =
-  | { allowed: true }
+  | { allowed: true; advisory?: string }
   | { allowed: false; phaseName: string; code: string; action: string };
 
 export type BlockedDecision = Extract<Decision, { allowed: false }>;
@@ -47,6 +47,7 @@ function blocked(phaseName: string, code: string, action: string): Decision {
 
 export interface GateOptions {
   isReviewerSession?: boolean;
+  cwd?: string;
 }
 
 function draftDecision(state: QuestState, draftName: string): Decision {
@@ -136,13 +137,12 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return { allowed: true };
   }
   if (state.phase === "implementing" && state.contract && ref.path) {
-    if (!isPathAllowedByContract(state.contract, ref.path)) {
+    if (!isPathAllowedByContract(state.contract, ref.path, options.cwd)) {
       const allowedList = state.contract.allowedPaths?.join(", ") ?? "";
-      return blocked(
-        "SCOPE_VIOLATION",
-        "CHILD_PATH_LOCKED",
-        `Sub-quest ${state.qid} is restricted to allowedPaths: [${allowedList}]. Editing ${ref.path} is blocked. Amend parent contract or resolve via parent.`,
-      );
+      return {
+        allowed: true,
+        advisory: `Sub-quest ${state.qid} focus scope is [${allowedList}]. Modification to ${ref.path} recorded as out-of-scope advisory.`,
+      };
     }
   }
   if (state.phase === "drafting") {

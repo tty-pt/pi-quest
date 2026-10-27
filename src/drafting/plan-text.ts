@@ -4,7 +4,7 @@
 // re-review by slightly altering the plan.
 import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
-import type { QuestKind, QuestState } from "../domain/quest";
+import type { QuestDifficulty, QuestKind, QuestState } from "../domain/quest";
 import type { ReviewMaterial } from "../review/prompts";
 import { checkRtmCoverage, type RtmItem } from "../domain/contract";
 import { diffPlans } from "./plan-diff";
@@ -15,6 +15,7 @@ export interface DraftSections {
   plan: string;
   // Analysis quests deliver the quest doc's ## Analysis body here (D1).
   analysis: string;
+  subquests?: string;
   amendments?: string[];
 }
 
@@ -53,6 +54,10 @@ export function spliceAnalysisSection(text: string, analysis: string): string {
   return spliceSection(text, "analysis", "Analysis", analysis);
 }
 
+export function spliceSubquestsSection(text: string, subquests: string): string {
+  return spliceSection(text, "sub-quest", "Sub-Quests", subquests);
+}
+
 export function spliceAmendmentsSection(text: string, amendments: string[]): string {
   const body = amendments.length > 0
     ? amendments.map((a) => `- ${a}`).join("\n")
@@ -65,8 +70,9 @@ export function parseDraftSections(text: string): DraftSections {
   const evidence: string[] = [];
   const planLines: string[] = [];
   const analysisLines: string[] = [];
+  const subquestLines: string[] = [];
   const amendments: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | "analysis" | "amendments" | null = null;
+  let section: "requirements" | "evidence" | "plan" | "analysis" | "subquests" | "amendments" | null = null;
   let inComment = false;
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
@@ -75,6 +81,7 @@ export function parseDraftSections(text: string): DraftSections {
       if (name.includes("requirement")) section = "requirements";
       else if (name.includes("evidence")) section = "evidence";
       else if (name.includes("analysis")) section = "analysis";
+      else if (name.includes("sub-quest") || name.includes("subquest")) section = "subquests";
       else if (name.includes("implementation plan")) section = "plan";
       else if (name.includes("amendment")) section = "amendments";
       // Pre-draft investigation recorded via recordRefinement is research:
@@ -89,6 +96,10 @@ export function parseDraftSections(text: string): DraftSections {
     }
     if (section === "analysis") {
       analysisLines.push(line);
+      continue;
+    }
+    if (section === "subquests") {
+      subquestLines.push(line);
       continue;
     }
     const trimmed = line.trim();
@@ -112,6 +123,7 @@ export function parseDraftSections(text: string): DraftSections {
     evidence,
     plan: planLines.join("\n").trim(),
     analysis: analysisLines.join("\n").trim(),
+    subquests: subquestLines.join("\n").trim(),
     amendments,
   };
 }
@@ -132,6 +144,25 @@ export function extractRtmFromRequirements(requirements: string[]): RtmItem[] {
   return rtm;
 }
 
+// A deliverable is authored only when something other than HTML comments (the
+// review-count marker, template placeholders) is in it.
+export function hasAuthoredText(text: string): boolean {
+  return text.replace(/<!--[\s\S]*?-->/g, "").trim().length > 0;
+}
+
+// The doc is ##-sectioned: a "## " line inside a deliverable body ends its
+// section, silently orphaning everything after it (a plan written with its own
+// ## Requirements / ## Steps parses as an empty plan). Refuse it at the write.
+export function assertNoSectionHeadings(body: string, noun: "plan" | "analysis"): void {
+  const bad = body.split(/\r?\n/).find((line) => /^##\s+\S/.test(line));
+  if (bad !== undefined) {
+    throw new Error(
+      `the ${noun} text contains a section heading (${JSON.stringify(bad.trim())}): "## " lines end the ${noun} section in the quest doc. Use "###" for sub-headings inside the ${noun}; requirements and evidence belong in the doc's own ## Requirements and ## Evidence sections (edit the draft file directly).`,
+    );
+  }
+  if (!hasAuthoredText(body)) throw new Error(`the ${noun} text has no content beyond comments`);
+}
+
 export function meetsReviewThresholds(
   sections: DraftSections,
   thresholds = DEFAULT_CONFIG.draftThresholds,
@@ -140,7 +171,7 @@ export function meetsReviewThresholds(
   const req = sections.requirements.length;
   const ev = sections.evidence.length;
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
-  const authored = kind === "analysis" ? sections.analysis !== "" : sections.plan.length > 0;
+  const authored = hasAuthoredText(kind === "analysis" ? sections.analysis : sections.plan);
   if (!counts || !authored) return false;
   if (kind === "standard") {
     const rtm = extractRtmFromRequirements(sections.requirements);
@@ -160,18 +191,22 @@ export function draftProfileText(
   thresholds: DraftThresholds,
   citationSummary = "",
   kind: QuestKind = "standard",
+  difficulty?: QuestDifficulty,
 ): string {
   const analysis = kind === "analysis";
   const req = sections.requirements.length;
   const ev = sections.evidence.length;
   const noun = analysis ? "analysis" : "plan";
   const deliverable = analysis ? sections.analysis : sections.plan;
-  const planPresent = deliverable.trim().length > 0;
+  const planPresent = hasAuthoredText(deliverable);
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
-  const meets = counts && planPresent;
+  const rtm = extractRtmFromRequirements(sections.requirements);
+  const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
+  const meets = counts && planPresent && rtmCoverage.covered;
   const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an ${analysis ? "authored analysis" : "actionable plan"})`;
+  const diffTag = difficulty ? ` (difficulty: ${difficulty})` : "";
   const lines = [
-    `draft profile: requirements ${req}, evidence ${ev}, ${noun} ${planPresent ? "present" : "missing"}`,
+    `draft profile${diffTag}: requirements ${req}, evidence ${ev}, ${noun} ${planPresent ? "present" : "missing"}`,
   ];
   if (meets) {
     lines.push(`reviewability: maturity bar: met${gapLeg}`);
@@ -185,8 +220,6 @@ export function draftProfileText(
     } else if (ev < thresholds.evidence) {
       gaps.push(`add ${thresholds.evidence - ev} more evidence items`);
     }
-    const rtm = extractRtmFromRequirements(sections.requirements);
-    const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
     if (!rtmCoverage.covered) {
       gaps.push(`map requirement(s) ${rtmCoverage.missing.join(", ")} into the plan or sub-quest backlog`);
     }
@@ -206,7 +239,8 @@ export interface PlanCitation {
   lineEnd: number | undefined;
 }
 
-const CITATION_RE = /([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:c|h|ts|md|sh))[:](\d+)(?:-(\d+))?/g;
+const CITATION_RE =
+  /((?:\.{1,2}\/|\.)?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:c|h|ts|md|sh|js|mjs|json|py|mk|yml|yaml|toml|rs|go|css|html|cc|cpp|hpp))[:](\d+)(?:-(\d+))?/g;
 
 // URLs like http://host/y.c:5 look like citations but are not local refs.
 export function citeLocations(text: string): PlanCitation[] {
@@ -267,7 +301,13 @@ export function bumpReviewCount(text: string, count: number, kind: QuestKind = "
 // analysis quests the Analysis itself (D1). Every section-target site keys on
 // this single selector.
 export function deliverableBody(sections: DraftSections, kind: QuestKind): string {
-  return kind === "analysis" ? sections.analysis : sections.plan;
+  if (kind === "analysis") return sections.analysis;
+  if (sections.subquests && sections.subquests.length > 0) {
+    return sections.plan
+      ? `## Sub-Quests\n${sections.subquests}\n\n${sections.plan}`
+      : `## Sub-Quests\n${sections.subquests}`;
+  }
+  return sections.plan;
 }
 
 export function deliverableWord(kind: QuestKind): string {
@@ -286,6 +326,8 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
     objective: state.pendingRootRequest ?? state.objective,
     plan: deliverable,
     kind: state.kind,
+    difficulty: state.difficulty,
+    requirements: sections.requirements,
     evidence: sections.evidence,
     amendments: allAmendments,
     rebuttal: openRebuttal?.implementerRebuttal,

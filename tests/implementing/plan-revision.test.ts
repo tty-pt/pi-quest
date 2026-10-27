@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getState, replaceState } from "../../src/app/store.ts";
+import { getState, replaceState, updateState } from "../../src/app/store.ts";
 import {
   createQuest,
   IDLE_STATE,
@@ -24,7 +24,7 @@ import { implementationFingerprint } from "../../src/review/flow.ts";
 import { formatRevisionHistory } from "../../src/validation/flow.ts";
 import { buildReviewPrompt } from "../../src/review/prompts.ts";
 import { installDraftGate } from "../../src/drafting/gate.ts";
-import { cancelReview, trackReview } from "../../src/review/tracker.ts";
+import { cancelReview, hasInFlight, trackReview } from "../../src/review/tracker.ts";
 import { hashContent } from "../../src/drafting/plan-text.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
@@ -37,6 +37,7 @@ import {
   REVISION_RETRY_BASE_MS,
   bootPlanRevisionReview,
   clearPlanRevisionRetries,
+  handleApproveInput,
   planRevisionRetryCount,
   setRevisionRetryDispatcher,
 } from "../../src/implementing/plan-revision.ts";
@@ -386,3 +387,59 @@ Deno.test("plan-revision retries cap out and wake without self-approval", async 
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("plan revision under reviewPolicy off auto-adopts without subagent", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  try {
+    const offConfig = { ...DEFAULT_CONFIG, reviewPolicy: "off" as const };
+    await bootPlanRevisionReview(bus.pi, fakeCtx(d.cwd), d.target, offConfig);
+    check(revisionRequests(bus.emitted).length === 0, "zero subagents under policy off");
+    check(getState().draft?.approvedPlanHash === d.target, "plan revision adopted");
+    const sentWakes = revisionWakes(bus.pi);
+    check(sentWakes.length === 1, "wake announced adoption");
+    check(String(sentWakes[0].content).includes("auto-approved under policy 'off'"), "announcement includes policy");
+  } finally {
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("handleApproveInput adopts staged plan revision and cancels in-flight review", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  // Stage the revision in state
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: d.target } });
+  // Simulate an in-flight review
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review is in-flight");
+
+  const adopted = await handleApproveInput(bus.pi, fakeCtx(d.cwd), "APPROVE");
+  check(adopted === true, "handleApproveInput adopted staged revision");
+  check(hasInFlight(d.qid) === false, "in-flight review was cancelled");
+  check(getState().draft?.approvedPlanHash === d.target, "approved plan hash updated");
+
+  cancelReview(d.qid);
+  clearPlanRevisionRetries(d.qid);
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("handleApproveInput cancels in-flight review even when contentHash equals approvedPlanHash", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  // Plan hash equals approved hash (no staged revision)
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: d.target, approvedPlanHash: d.target } });
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review is in-flight");
+
+  const unblocked = await handleApproveInput(bus.pi, fakeCtx(d.cwd), "APPROVE");
+  check(unblocked === true, "handleApproveInput handled approval to unblock stuck in-flight");
+  check(hasInFlight(d.qid) === false, "in-flight review was cancelled");
+
+  cancelReview(d.qid);
+  clearPlanRevisionRetries(d.qid);
+  replaceState(IDLE_STATE);
+});
+
+

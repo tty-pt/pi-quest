@@ -102,6 +102,10 @@ export function isModelResolutionOrProviderError(errMessage: string): boolean {
     msg.includes("rate limit") ||
     msg.includes("429") ||
     msg.includes("504") ||
+    msg.includes("503") ||
+    msg.includes("529") ||
+    msg.includes("overloaded") ||
+    msg.includes("capacity") ||
     msg.includes("quota")
   );
 }
@@ -116,7 +120,7 @@ export interface ReviewModelCandidate {
 // suffix-stripped variant, then the operator fallback. An empty target yields
 // a single inherit attempt (no `model` field is sent), plus the fallback when
 // one is configured.
-export function reviewModelCandidates(targetModel: string): ReviewModelCandidate[] {
+export function reviewModelCandidates(targetModel: string, fallbackModels: readonly string[] = []): ReviewModelCandidate[] {
   const target = targetModel.trim();
   const candidates: ReviewModelCandidate[] = target === ""
     ? [{ label: "inherit" }]
@@ -125,6 +129,17 @@ export function reviewModelCandidates(targetModel: string): ReviewModelCandidate
     const stripped = stripThinkingSuffix(target);
     if (stripped !== "" && stripped !== target) {
       candidates.push({ model: stripped, label: stripped });
+    }
+  }
+  // Configured fallbacks (roles.*Fallback) come before the env operator
+  // fallback; each is tried verbatim, then its suffix-stripped variant.
+  for (const raw of fallbackModels) {
+    const fb = raw.trim();
+    if (fb === "") continue;
+    if (!candidates.some((c) => c.model === fb)) candidates.push({ model: fb, label: fb });
+    const fbStripped = stripThinkingSuffix(fb);
+    if (fbStripped !== "" && fbStripped !== fb && !candidates.some((c) => c.model === fbStripped)) {
+      candidates.push({ model: fbStripped, label: fbStripped });
     }
   }
   const envFallback = readEnv("PI_CRITICAL_REVIEW_MODEL_FALLBACK");

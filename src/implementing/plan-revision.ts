@@ -6,7 +6,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import { DEFAULT_CONFIG, readQuestConfig, type QuestConfig } from "../config";
+import { withEffectivePolicy } from "../policy/effective";
+import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
 import type { QuestState } from "../domain/quest";
 import { approvePlanRevision, recordPlanRevision, revertPlanRevision } from "../domain/plan-revision";
 import { draftPath } from "../domain/paths";
@@ -62,8 +63,9 @@ export async function bootPlanRevisionReview(
   pi: Pi,
   ctx: PiCtx,
   target: string,
-  config: QuestConfig = DEFAULT_CONFIG,
+  baseConfig: QuestConfig = DEFAULT_CONFIG,
 ): Promise<void> {
+  const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
   if (isCurrentReview(state.qid, target)) return;
@@ -76,15 +78,32 @@ export async function bootPlanRevisionReview(
     ...reviewMaterial(getState(), sections),
     revisionNote: REVISION_NOTE,
   };
+
+  // Policy-based bypass in plan revision:
+  // "off" or ("balanced" and non-complex): auto-approve without subagent
+  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex")) {
+    clearPlanRevisionRetries(qid);
+    updateState((s) => approvePlanRevision(s, target, sections.plan));
+    emitNow(pi);
+    const reason = config.reviewPolicy === "off"
+      ? "policy 'off'"
+      : `policy 'balanced' (${state.difficulty} task)`;
+    sendWake(pi, `Plan revision adopted for ${qid} (auto-approved under ${reason}). Proceed against the revised plan; validation re-binds to it.`);
+    return;
+  }
+
+  const reviewerModel = resolveRoleModel(config, "reviewer");
   const outcome = await runIsolatedReview({
     pi,
     ctx,
     qid,
     target,
-    prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds),
+    prompt: buildReviewPrompt("draft", qid, target, material, getThresholdsForDifficulty(config, state.difficulty)),
     runnerTool: config.bindings.reviewRunner.tool,
-    maxDurationMs: config.reviewMaxDurationMs,
-    inactivityLimitMs: config.reviewInactivityMs,
+    ...(reviewerModel ? { model: reviewerModel } : {}),
+    fallbackModels: resolveRoleFallbacks(config, "reviewer"),
+    maxDurationMs: Math.min(config.reviewMaxDurationMs, 300000),
+    inactivityLimitMs: Math.min(config.reviewInactivityMs, 60000),
   });
   if (outcome.status === "no-runner") {
     if (shouldNoticeReview(qid, target)) {
@@ -212,8 +231,12 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
   if (!APPROVE_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return false;
-  if (state.draft.contentHash === null || state.draft.contentHash === state.draft.approvedPlanHash) return false;
-  if (hasInFlight(state.qid)) return false;
+  if (hasInFlight(state.qid)) {
+    cancelReview(state.qid);
+  }
+  if (state.draft.contentHash === null || state.draft.contentHash === state.draft.approvedPlanHash) {
+    return true;
+  }
   const content = await readPlanFile(ctx, state);
   if (content === null) return false;
   const sections = parseDraftSections(content);
@@ -227,7 +250,7 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
 
 export function watchApproveInput(pi: Pi): void {
   onUserMessage(pi, (text, eventCtx) => {
-    void handleApproveInput(pi, eventCtx, text);
+    void handleApproveInput(pi, eventCtx, text).catch(() => {});
   });
 }
 

@@ -21,11 +21,13 @@ function parseBracketList(text: string, tag: string): string[] {
 }
 
 export function parseSubQuestBacklog(planText: string): BacklogItem[] {
+  // Strip HTML comments so commented examples are never parsed as backlog items
+  const clean = planText.replace(/<!--[\s\S]*?-->/g, "");
   const items: BacklogItem[] = [];
-  const lines = planText.split("\n");
+  const lines = clean.split("\n");
 
   for (const line of lines) {
-    const match = line.match(/^\s*-\s*\[([ xX!])\]\s*(?:\*\*)?([A-Za-z0-9_-]+)(?:\*\*)?:\s*([^\[]+)(.*)$/);
+    const match = line.match(/^\s*-\s*\[([ xX!])\]\s*(?:\*\*)?([A-Za-z0-9_-]+)(?:\*\*)?[:\-]?\s*([^\[]+)(.*)$/);
     if (!match) continue;
 
     const mark = match[1].toLowerCase();
@@ -103,8 +105,9 @@ export function createContractForBacklogItem(
 export function advanceForeman(
   parentState: QuestState,
   nextChildQid: Qid,
-): { nextMountedState: QuestState; nextItem: BacklogItem } | null {
-  const plan = parentState.draft?.lastReviewedPlan ?? parentState.objective;
+  docText?: string,
+): { nextMountedState: QuestState; nextItem: BacklogItem; contract: SubQuestContract } | null {
+  const plan = docText ?? parentState.draft?.lastReviewedPlan ?? parentState.objective;
   if (!plan) return null;
 
   const items = parseSubQuestBacklog(plan);
@@ -116,5 +119,5 @@ export function advanceForeman(
   const contract = createContractForBacklogItem(nextItem, parentState.qid as Qid, nextChildQid);
   const nextMountedState = pushStackFrame(parentState, contract, nextChildQid);
 
-  return { nextMountedState, nextItem };
+  return { nextMountedState, nextItem, contract };
 }

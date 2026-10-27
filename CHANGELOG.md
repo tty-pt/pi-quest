@@ -5,11 +5,109 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - 2026-10-24
+## [1.5.0] - 2026-10-27
+
+### Added
+- **Zero-Configuration `axil-auren` Inference Server Bring-Up (`src/auren-bootstrap.ts`)**:
+  - Automatically provisions local inference configuration at `~/.config/auren/config.json` if absent, mapping detected models and capabilities without requiring manual setup.
+  - Automatically manages background daemon startup on port 4242 with socket/HTTP readiness polling and process lifecycle management.
+- **Intelligent Model Provisioning & Tiered Consent (`~/.models/`)**:
+  - Supports automatic discovery and downloading of local models (`qwen2.5-0.5b`, `bge-base`, `bge-small`, `olmoe`) with cryptographic `sha256` verification, resumable range downloads, and atomic file swaps.
+  - Tiered consent: light models download seamlessly, while large MoE models (`olmoe`, 3.3 GB) prompt interactively via `ctx.ui.confirm()` to respect user bandwidth and disk budget.
+- **Proactive C Engine Dependency Tracking on `session_start` (`src/versions.ts`, `src/index.ts`)**:
+  - Pure TypeScript SemVer parser and engine detector inspecting system packages (`pkgconfig`), source repositories (`external/`), and git tags for `axil`, `libcorm`, `libsepal`, `liblemma`, `libjoint`, and `axil-auren`.
+  - Automatically alerts users on `session_start` with concise TUI remediation toasts if any required engine is missing or outdated, eliminating the need to manually invoke `/quest doctor`.
+- **Integrated C Engine Diagnostics in `/quest doctor` (`src/surface/commands/doctor.ts`)**:
+  - Displays full matrix of core C engines, installed versions, required thresholds, and exact copy-paste remediation commands for package managers and source compilation.
+- **`policyByModel`** (`src/policy/effective.ts`): ordered glob rules map the active `provider/id` to `strict` / `balanced` / `off`. The model is read live from `ctx.model` (env fallback); under `quest/auto` the physical model last routed to (`src/router/last-route.ts`) is matched. Applied in draft review, plan-revision review and validation; wake messages and the draft profile name the rule.
+- **`draftQuality`** (`src/drafting/quality.ts`, `quality-config.ts`, `citations.ts`): configurable per-difficulty depth bar — resolvable `file:line` citations, discrete plan steps, a verification step. `mode` `enforce` (default) holds bypassed drafts below the bar, `warn` promotes with an advisory, `off` disables; under `strict` it is advisory reviewer context. Shown in every draft profile.
+- **`/quest-policy`** command: active model, configured vs effective policy, matching rule, quality tiers, and config warnings (`src/surface/commands/policy.ts`, `src/policy/warnings.ts`). Invalid or shadowed `policyByModel` / `draftQuality` settings are reported instead of silently dropped.
+- Friendly forms: `"draftQuality": "warn"` / `false`; env fallbacks `PI_QUEST_POLICY_BY_MODEL` (`glob=policy,…`) and `PI_QUEST_DRAFT_QUALITY`; policy and mode values are case/space tolerant.
+- Citation detection recognises more file types (js, json, py, mk, yml, toml, rs, go, css, html, cc/cpp/hpp).
+- README and operator guide document the `quest/auto` router and how to select it.
+- **Reviewer / validator fallback chains** (`roles.reviewerFallback`, `roles.validatorFallback`): ordered fallback models tried when the primary review model fails with a provider/model/rate-limit error. Provider-error detection now also covers `503`, `529`, `overloaded`, and `capacity`.
+- Operator guide section "What to Expect: A Quest End to End".
+
+### Fixed
+- **Quest stuck in drafting forever under `reviewPolicy: "balanced"` / `"off"`**: when a non-complex draft was below the maturity bar the bypass path returned silently — no reviewer, no promotion, no message — so the agent was never woken and the tool gate stayed locked. The bypass now wakes the agent with the draft profile (what is missing), the policy in force, and the live-user `go` override. Logic lives in `drafting/bypass.ts`.
+- **Draft profile no longer says "bar met" when the gate disagrees**: `draftProfileText` now includes requirement→plan (RTM) coverage and ignores comment-only plans (the review-count marker), exactly like `meetsReviewThresholds`.
+- **Plans with their own `## ` headings are refused** (`quest_update_state {plan|analysis|planRevision}`): a nested `## Requirements` / `## Steps` ended the Implementation Plan section and left an empty plan behind. The error says to use `###`.
+- **Phantom `PLAN_REVISION_REVIEW` lockout under `reviewPolicy: "balanced"`**: the draft-review in-flight tracker is now cleared on policy bypass and on promotion, so tools are no longer blocked after an auto-promote. A human `APPROVE` now cancels a stuck in-flight review before the hash check. Covered by an end-to-end test.
+- Natural-language advance phrases now include `go on`.
+
+## [1.4.0] - 2026-10-26
+
+### Added
+- **Configurable Phase × Difficulty Virtual Model Router (`quest/auto`) (`src/router/`, `src/config.ts`, `src/surface/commands/router.ts`)**:
+  - **Dynamic Phase × Difficulty Matrix**: Registers virtual model `quest/auto` routing each request to physical models based on active quest phase (`idle`, `provisional`, `drafting`, `implementing`, `validating`) and difficulty tier (`trivial`, `standard`, `complex`).
+  - **Wildcard Cascades & Fallback Chains**: Full support for wildcard `*` matching across phases and difficulties, single string or array fallback chains, and automatic fallback to `router.default`.
+  - **Subscription Quota & Rate-Limit Cooldown**: Automatically detects `429`, quota exceeded, and capacity exhaustion errors on retry turns, placing affected models on a configurable cooldown (`cooldownMs`, default 15m) and switching requests to secondary fallback models.
+  - **Prompt-Cache Optimization**: Multi-tool continuation turns remain sticky on the active model to preserve prompt prefix caching, and direct tasks (such as compaction summaries) route to an economical `direct` model.
+  - **Status Inspection Command (`/quest-router`)**: Adds `/quest-router` displaying live registration state, active quest cell, resolved candidate models, cooldown timers, and matrix configuration validation warnings.
+  - **Structural Interface Compatibility (`src/hooks/events.ts`)**: Extends pi-quest's internal structural `Pi` and `PiCtx` interfaces with optional `registerVirtualModel` and `modelRegistry` support without coupling to external `@earendil-works` dependencies.
+
+## [1.3.1] - 2026-10-26
+
+### Added
+- **Mid-Quest Directive Engine & Anti-Amnesia (`src/config.ts`, `src/subquests/triage.ts`, `src/subquests/scope.ts`, `src/subquests/index.ts`, `src/domain/quest-doc.ts`, `src/durability/injection.ts`, `src/validation/flow.ts`, `skills/quest-journal/SKILL.md`)**:
+  - **Conversational Natural Language Priority**: Zero required commands or prefixes. Ordinary English/Portuguese statements are automatically captured and categorized into constraints (auto-amending plan requirements) or separable tasks (queued to Foreman backlog or pre-empted).
+  - **Agent-Directed Triage Protocol in Skill (`skills/quest-journal/SKILL.md`)**: Added authoritative protocol teaching the agent how to evaluate `[Active Mid-Quest Directives]`, proactively spawn sub-quests via `quest_subquest` for separable work, adopt constraints via plan amendments, and satisfy all directives before completion claims.
+  - **Optional Fast-Path Shortcuts (`src/subquests/triage.ts`)**: Retained `!sq`, `!later`, `!rule`, and `!chat` as optional deterministic power-user and scripting shortcuts.
+  - **Lower Ingestion Threshold**: Reduced arbitrary `< 20` length cutoff down to 3 characters, preventing short but critical constraints (`"Use port 8080"`, `"Keep C99"`) from being silently dropped.
+  - **Anti-Amnesia Context Injection with Actionable Cues (`src/durability/injection.ts`)**: `contextLine` in `before_agent_start` now injects active mid-quest user directives with tool cues on every turn, preventing model forgetfulness across tool executions and conversation compactions.
+  - **Single Source of Truth Plan Synchronization (`src/domain/quest-doc.ts`, `src/subquests/index.ts`)**: Implemented `appendRequirementToDoc`, `appendSubQuestBacklogItem`, and `appendAmendmentToDoc` to reliably synchronize disk documents and update content hashes.
+  - **Validation Gating on Acceptance Criteria (`src/validation/flow.ts`)**: Fixed validation brief so user directives/refinements are delivered to the validator under `requirements` (acceptance criteria) rather than passive `evidence`.
+  - **Fine-Grained Configuration (`src/config.ts`)**: Added `midQuest` settings (`mode`, `subquestAction`, `autoAmendRequirements`, `turnInjection`, `promptTimeoutMs`) to `QuestConfig` and `DEFAULT_CONFIG`.
+
+## [1.3.0] - 2026-10-26
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tty-pt/pi-quest/main/cover.png" alt="pi-quest cover banner" width="100%">
 </p>
+
+### Added
+- **Configurable Review Policies (`src/config.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`, `src/implementing/plan-revision.ts`)**:
+  - Added `reviewPolicy`: `"strict" | "balanced" | "off"` (default `"strict"`), configurable in `.pi/settings.json` or via `PI_QUEST_REVIEW_POLICY`.
+  - In `"balanced"` (Frontier Mode): skips plan reviews for `trivial` and `standard` tasks, allowing models like Grok and Claude 3.5 to jump straight to implementation; auto-completes validation when tests pass cleanly (`exitCode 0`), reserving subagents for `complex` tasks or test failures.
+  - In `"off"` (Speedrun Mode): completely bypasses subagent review calls across drafting, validation, and mid-implementation plan revisions while retaining full quest journal structure, checklists, git tracking, and test receipts.
+  - Plan revisions in `src/implementing/plan-revision.ts` now respect `reviewPolicy`, auto-approving under `off` and `balanced` (for non-complex tasks) without spawning subagent reviews.
+  - Policy-bypassed validation runs synthesize honest `PASS` review outcomes in state, cleanly satisfying the `hasValidationPass()` gate and archiving without errors.
+- **Role-Based Model Customization (`src/config.ts`, `src/review/flow.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`, `src/domain/steering.ts`)**:
+  - Added `roles`: `{ reviewer?: string; validator?: string; judge?: string; }` (as well as `reviewerModel` and `validatorModel`) with environment overrides (`PI_QUEST_REVIEWER_MODEL`, `PI_QUEST_VALIDATOR_MODEL`, `PI_QUEST_JUDGE_MODEL`).
+  - Added `resolveRoleModel(cfg, role)` helper unifying model resolution across reviewer, validator, and judge invocations.
+  - Enables the Economical Frontier pattern: run expensive reasoning models (e.g. Grok, Claude) as primary implementation workers while delegating review, validation, and judging roles to fast, economical auditors (e.g. `google/gemini-2.5-flash`).
+  - Consistent judge model application across intent detection (`judge.ts`), difficulty inference (`difficulty.ts`), and natural language steering evaluation (`steering.ts`).
+- **Natural Language Steering & Semantic Circuit Breaking (`src/domain/steering.ts`)**:
+  - Implemented `evaluateSteeringIntent()` with fast local heuristic intent classification (<5ms) and optional neural judging via Jev System One.
+  - Understands conversational operator approval/advancement phrases (e.g. *"proceed"*, *"ship it"*, *"looks good"*, *"start coding"*, *"wrap it up"*, *"avança"*, *"está feito"*) and abort/cancellation phrases without rigid regex constraints.
+  - Allows human operators to advance drafting to code or archive completed validation work using natural speech.
+- **Symmetric Human Supremacy in Validation (`src/validation/flow.ts`)**:
+  - Removed the blocker (`isReviewerAvailable`) that previously prevented human operators from confirming completion when an automated validator subagent was configured.
+  - The operator can now approve and archive completed quests at any point, cleanly canceling any in-flight background validator runs.
+- **Two-Strike Review & Validation Loop Breakers (`src/drafting/draft-retry.ts`, `src/validation/flow.ts`)**:
+  - Automatically tracks consecutive review rejections (`MAX_CONSECUTIVE_REVIEW_FAILS = 2`, `MAX_CONSECUTIVE_VALIDATION_FAILS = 2`).
+  - Upon 2 consecutive rejections, the automated re-review loop is paused and the agent stops thrashing, prompting the human operator directly for guidance or approval.
+- **Autonomous Foreman Auto-Kickoff on Plan Approval (`src/drafting/promote.ts`, `src/subquests/foreman.ts`)**:
+  - `promoteAfterPass` now inspects the approved plan for sub-quest backlog items (`- [ ] SQ1: ...`).
+  - When sub-quests are defined, Foreman automatically mounts `SQ1` onto `questStack` immediately upon promotion to `implementing`, setting bounded `allowedPaths` and assigned requirements.
+  - Updated `parseDraftSections` to capture `## Sub-Quests` and fold backlog items into `deliverableBody`, ensuring reviewers inspect sub-quest plans.
+  - Updated `renderDraftTemplate` to inject structured `SQ1`, `SQ2`, `SQ3` active backlog templates when difficulty is `complex`.
+- **Adaptive Difficulty Tiers (`src/config.ts`, `src/drafting/difficulty.ts`)**:
+  - Added `QuestDifficulty = "trivial" | "standard" | "complex"` with adaptive maturity thresholds:
+    - `trivial`: 1 requirement, 2 evidence items.
+    - `standard`: 2 requirements, 7 evidence items.
+    - `complex`: 3 requirements, 10 evidence items.
+  - Added dual heuristic and Jev System One difficulty classifier (`evaluateQuestDifficulty`).
+- **Operator Documentation & Contextual Guidance (`docs/OPERATOR_GUIDE.md`, `src/drafting/detect.ts`)**:
+  - Added comprehensive 1-page English operator guide covering quest phases, natural steering, shortcuts, and circuit breakers.
+  - Added contextual hints to quest opening announcements reminding operators how to skip reviews or fast-track execution.
+
+### Fixed
+- **Missing Authored Requirements in Review Packets (`src/drafting/plan-text.ts`, `src/review/prompts.ts`)**:
+  - Fixed regression where `sections.requirements` was collected but omitted from `ReviewMaterial`, causing draft reviewers in FAST-FAIL mode to reject valid plans for missing requirement bullets.
+  - Authored requirements bullets and counts are now cleanly rendered in draft review briefs.
+
+## [1.2.0] - 2026-10-24
 
 ### Added
 - **Autonomous Foreman Sub-Quest Dispatcher (`src/subquests/foreman.ts`)**:

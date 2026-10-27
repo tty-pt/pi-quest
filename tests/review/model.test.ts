@@ -146,3 +146,24 @@ Deno.test("candidates degrade to a single inherit when no target", () => {
   check(cands.length === 1, "one inherit attempt");
   check(cands[0].model === undefined && cands[0].label === "inherit", "no model field sent");
 });
+
+Deno.test("configured fallbacks follow the target, deduped, before the env fallback", () => {
+  clearReviewEnv();
+  Deno.env.set("PI_CRITICAL_REVIEW_MODEL_FALLBACK", "env/model");
+  try {
+    const cands = reviewModelCandidates("a/primary:high", ["b/second:low", "a/primary", " "]);
+    const models = cands.map((c) => c.model);
+    check(
+      JSON.stringify(models) === JSON.stringify(["a/primary:high", "a/primary", "b/second:low", "b/second", "env/model"]),
+      `ordered chain, got ${JSON.stringify(models)}`,
+    );
+  } finally {
+    clearReviewEnv();
+  }
+});
+
+Deno.test("overload and capacity errors are retryable provider failures", () => {
+  check(isModelResolutionOrProviderError("API overloaded_error 529"), "overloaded retryable");
+  check(isModelResolutionOrProviderError("503 no capacity"), "capacity retryable");
+  check(!isModelResolutionOrProviderError("reviewer wrote garbage"), "garbage not retryable");
+});

@@ -1,8 +1,10 @@
 import { strictEqual, ok, rejects } from "node:assert";
 import {
   normalizeJevUrl,
+  normalizeSystemZeroUrl,
   parseJevQuestChoice,
   callJevQuestJudge,
+  callSystemZeroQuestJudge,
   evaluateQuestIntent,
 } from "../../src/drafting/judge.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
@@ -11,7 +13,9 @@ Deno.test("jev quest judge: normalizeJevUrl formats endpoint correctly", () => {
   strictEqual(normalizeJevUrl("http://127.0.0.1:4242"), "http://127.0.0.1:4242/api/v1/systemone/");
   strictEqual(normalizeJevUrl("http://127.0.0.1:4242/"), "http://127.0.0.1:4242/api/v1/systemone/");
   strictEqual(normalizeJevUrl("http://localhost:8000/systemone"), "http://localhost:8000/systemone/");
-  strictEqual(normalizeJevUrl("http://localhost:8000/systemone/"), "http://localhost:8000/systemone/");
+  strictEqual(normalizeSystemZeroUrl("http://127.0.0.1:4242"), "http://127.0.0.1:4242/api/v1/systemzero/");
+  strictEqual(normalizeSystemZeroUrl("http://127.0.0.1:4242/api/v1/systemone/"), "http://127.0.0.1:4242/api/v1/systemzero/");
+  strictEqual(normalizeSystemZeroUrl("http://localhost:8000/systemzero"), "http://localhost:8000/systemzero/");
 });
 
 Deno.test("jev quest judge: parseJevQuestChoice parses documented and fallback structures", () => {

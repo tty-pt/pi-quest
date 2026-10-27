@@ -1,6 +1,6 @@
 // HIGH_LEVEL: #drafting — intelligent Jev System One classification
 // for determining whether incoming user input constitutes genuine quest material.
-import type { QuestConfig } from "../config.ts";
+import { type QuestConfig, resolveRoleModel } from "../config.ts";
 import { isQuestLikeRequest } from "./detect.ts";
 
 export function normalizeJevUrl(baseUrlOrUrl: string): string {
@@ -57,14 +57,81 @@ export function parseJevQuestChoice(data: unknown): "quest" | "conversation" {
   }
 
   const normalized = answerVal.trim().toLowerCase();
-  if (normalized === "quest" || normalized.startsWith("quest") || normalized.includes("software task")) {
+  if (
+    normalized === "quest" ||
+    normalized.startsWith("quest") ||
+    normalized.includes("software task") ||
+    normalized.includes("instruction") ||
+    normalized.includes("directive") ||
+    normalized.includes("task")
+  ) {
     return "quest";
   }
-  if (normalized === "conversation" || normalized.startsWith("conversation") || normalized.includes("dialogue")) {
+  if (
+    normalized === "conversation" ||
+    normalized.startsWith("conversation") ||
+    normalized.includes("dialogue") ||
+    normalized.includes("chat")
+  ) {
     return "conversation";
   }
 
   throw new Error(`Invalid Jev quest choice answer: '${answerVal}' (expected 'quest' or 'conversation')`);
+}
+
+export function normalizeSystemZeroUrl(baseUrlOrUrl: string): string {
+  const trimmed = baseUrlOrUrl.trim();
+  if (trimmed.includes("/systemzero")) {
+    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+  }
+  return `${trimmed.replace(/\/+$/, "").replace(/\/api\/v1\/systemone$/, "").replace(/\/v1$/, "")}/api/v1/systemzero/`;
+}
+
+export async function callSystemZeroQuestJudge(prompt: string, cfg: QuestConfig): Promise<"quest" | "conversation"> {
+  if (!cfg.judgeUrl) {
+    throw new Error("Judge URL not configured");
+  }
+  const endpoint = normalizeSystemZeroUrl(cfg.judgeUrl);
+  const controller = new AbortController();
+  const timeoutMs = cfg.judgeTimeoutMs || 2000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const payload = {
+    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "default",
+    prompt: `Determine whether the following user message is an instruction or directive to start a software engineering task or quest (such as fixing a bug, adding a feature, implementing code, building, refactoring, or auditing), versus conversational chat, questions, or greetings.\nUser Message: ${prompt}\nAnswer [y/n]:`,
+    threshold: 0.5,
+  };
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (cfg.judgeKey && cfg.judgeKey.trim() !== "") {
+    headers["Authorization"] = `Bearer ${cfg.judgeKey.trim()}`;
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`SystemZero HTTP error ${res.status}: ${res.statusText}${errText ? ` - ${errText.slice(0, 100)}` : ""}`);
+    }
+
+    const data = await res.json() as Record<string, unknown>;
+    const decision = data["decision"];
+    if (typeof decision === "boolean") {
+      return decision ? "quest" : "conversation";
+    }
+    const choice = String(data["choice"] || "").trim().toLowerCase();
+    return (choice === "y" || choice === "yes" || choice === "quest") ? "quest" : "conversation";
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function callJevQuestJudge(prompt: string, cfg: QuestConfig): Promise<"quest" | "conversation"> {
@@ -77,7 +144,7 @@ export async function callJevQuestJudge(prompt: string, cfg: QuestConfig): Promi
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const payload = {
-    model: cfg.judgeModel || "qwen",
+    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "qwen",
     state: `User: ${prompt}`,
     questions: {
       quest_intent: {
@@ -173,7 +240,7 @@ export interface QuestIntentResult {
 export async function evaluateQuestIntent(
   prompt: string,
   cfg: QuestConfig,
-  ctx?: PiCtx,
+  _ctx?: PiCtx,
 ): Promise<QuestIntentResult> {
   // 1. Off mode
   if (cfg.judgeMode === "off") {
@@ -195,16 +262,41 @@ export async function evaluateQuestIntent(
     return { isQuest: false, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=skip" };
   }
 
-  // 4. Call Jev System One judge
+  // 4. Call judge via configured protocol (auto | systemzero | systemone)
   try {
-    const choice = await callJevQuestJudge(prompt, cfg);
+    let choice: "quest" | "conversation";
+    let usedProtocol = cfg.judgeProtocol;
+    const url = cfg.judgeUrl || "";
+
+    if (cfg.judgeProtocol === "systemzero" || url.includes("/systemzero")) {
+      choice = await callSystemZeroQuestJudge(prompt, cfg);
+      usedProtocol = "systemzero";
+    } else if (cfg.judgeProtocol === "systemone" || url.includes("/systemone")) {
+      choice = await callJevQuestJudge(prompt, cfg);
+      usedProtocol = "systemone";
+    } else {
+      // "auto": Try systemzero first, fall back to systemone on error
+      try {
+        choice = await callSystemZeroQuestJudge(prompt, cfg);
+        usedProtocol = "systemzero";
+      } catch {
+        choice = await callJevQuestJudge(prompt, cfg);
+        usedProtocol = "systemone";
+      }
+    }
+
+    const isQuest = choice === "quest";
+
     return {
-      isQuest: choice === "quest",
+      isQuest,
       source: "llm",
-      reason: choice === "quest" ? "Classified as quest by Jev System One" : "Classified as conversation by Jev System One",
+      reason: isQuest
+        ? `Classified as quest by ${usedProtocol}`
+        : `Classified as conversation by ${usedProtocol}`,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+
     if (cfg.judgeFallback === "heuristic") {
       const isQuest = isQuestLikeRequest(prompt);
       return {

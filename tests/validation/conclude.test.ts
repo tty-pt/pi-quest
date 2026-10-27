@@ -139,6 +139,20 @@ Deno.test("analysis validator material carries the analysis body and transcript 
   check(brief.transcriptExtract!.includes("[assistant] Buffer grows unbounded."), "extract carries the thread");
 });
 
+Deno.test("validationBrief maps user refinements to requirements instead of passive evidence", async () => {
+  const cwd = tmp();
+  analysisDoc(cwd);
+  const state = {
+    ...analysisValidating(),
+    refinements: ["User directive: port must be 8080"],
+  };
+  const ctx = fakeCtx(cwd);
+  const brief = await validationBrief(ctx, state);
+  check(Array.isArray(brief.requirements), "requirements array populated");
+  check(brief.requirements!.some((r) => r.includes("User directive: port must be 8080")), "refinement in requirements");
+  check(!brief.evidence.some((e) => e.includes("User directive: port must be 8080")), "refinement omitted from passive evidence");
+});
+
 Deno.test("repairAfterFail returns analysis quests to drafting, standard to implementing", () => {
   const analysis = repairAfterFail(analysisValidating());
   check(analysis.phase === "drafting", "analysis repairs to drafting");

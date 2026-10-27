@@ -15,14 +15,22 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import {
   GO_PATTERN,
   MAX_REVIEW_RETRIES,
+  MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
   bootDraftReview,
   clearDraftReviewRetry,
+  clearReviewVerdictFails,
   draftReviewRetryCount,
+  getReviewVerdictFails,
+  handleGoInput,
+  maybeBootDraftReview,
   onTurnEndCatchAll,
   setReviewRetryDispatcher,
   watchDraftFileCatchAll,
 } from "../../src/drafting/reviews.ts";
+import { cancelReview, hasInFlight, trackReview } from "../../src/review/tracker.ts";
+import { installDraftGate } from "../../src/drafting/gate.ts";
+import { promoteAfterPass } from "../../src/drafting/promote.ts";
 import {
   bumpReviewCount,
   hashContent,
@@ -319,6 +327,10 @@ function wakes(pi: FakePi): Array<SentMessage["message"]> {
 
 // Each retry test gets its own qid: the retry counter is module-level
 // (per-session in production) and must not leak between tests.
+// These tests exercise policy mechanics on a deliberately minimal fixture plan;
+// the draft quality bar has its own coverage in quality.test.ts.
+const NO_QUALITY = { ...DEFAULT_CONFIG.draftQuality, mode: "off" as const };
+
 async function draftFailureSetup(qid: Qid): Promise<{ cwd: string; qid: Qid; file: string; doc: string; target: string }> {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-retry-"));
   replaceState(createDraft(createQuest("req", qid), "mat"));
@@ -506,6 +518,9 @@ Deno.test("an above-bar draft boots the unbounded review brief", async () => {
     await waitForRequests(bus.emitted, 1);
     const task = String(requests(bus.emitted)[0]["task"] ?? "");
     check(!task.includes("FAST-FAIL"), "above-bar brief stays a full adversarial audit");
+    check(task.includes("REQUIREMENTS (2 recorded in the draft file's ## Requirements section):"), "requirements header present in reviewer task");
+    check(task.includes("- one"), "requirement bullet 'one' present in reviewer task");
+    check(task.includes("- two"), "requirement bullet 'two' present in reviewer task");
     bus.feed({
       requestId: requests(bus.emitted)[0]["requestId"],
       status: "error",
@@ -527,6 +542,7 @@ Deno.test("pre-draft findings travel as evidence into the review material", () =
     );
     const material = reviewMaterial(getState(), sections);
     check(material.evidence.includes("registry found"), "findings carry into the review brief");
+    check(material.requirements !== undefined && material.requirements.includes("one"), "requirements carry into the review material");
   } finally {
     replaceState(IDLE_STATE);
   }
@@ -551,6 +567,201 @@ Deno.test("a superseding save cancels the pending retry", async () => {
   } finally {
     setReviewRetryDispatcher(prior);
     clearDraftReviewRetry("ret004" as Qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("consecutive draft review rejections pause the automated loop", async () => {
+  const d = await draftFailureSetup("loop01" as Qid);
+  const bus = retryBus();
+  try {
+    // Round 1 FAIL
+    const booted1 = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: FAIL\n\nMissing details." },
+    });
+    await booted1;
+    check(getReviewVerdictFails("loop01" as Qid) === 1, "first fail recorded");
+    const wake1 = wakes(bus.pi).find((m) => String(m.content).includes("FAIL"));
+    check(wake1 !== undefined && !String(wake1.content).includes("Automated review loop paused"), "round 1 does not pause");
+
+    // Round 2 FAIL
+    const booted2 = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 2);
+    bus.feed({
+      requestId: requests(bus.emitted)[1]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: FAIL\n\nStill missing details." },
+    });
+    await booted2;
+    check(getReviewVerdictFails("loop01" as Qid) === 2, "second fail recorded");
+    const wake2 = wakes(bus.pi).find((m) => String(m.content).includes("Automated review loop paused"));
+    check(wake2 !== undefined, "round 2 pauses the automated loop");
+    const content2 = String(wake2!.content);
+    check(content2.includes("Consult the human operator") || content2.includes("operator may reply"), "prompts operator");
+  } finally {
+    clearReviewVerdictFails("loop01" as Qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy off bypasses draft review and auto-promotes immediately", async () => {
+  const d = await draftFailureSetup("poloff01" as Qid);
+  const bus = retryBus();
+  try {
+    const offConfig = { ...DEFAULT_CONFIG, reviewPolicy: "off" as const, draftQuality: NO_QUALITY };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, offConfig);
+    check(requests(bus.emitted).length === 0, "zero subagents launched under policy off");
+    const wake = wakes(bus.pi).find((m) => String(m.content).includes("Draft review bypassed under policy 'off'"));
+    check(wake !== undefined, "wake announced policy off bypass");
+    check(getState().phase === "implementing", "auto-promoted to implementing");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy balanced bypasses draft review for standard and trivial tasks", async () => {
+  const d = await draftFailureSetup("polbal01" as Qid);
+  const bus = retryBus();
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(requests(bus.emitted).length === 0, "zero subagents launched for standard task under balanced");
+    const wake = wakes(bus.pi).find((m) => String(m.content).includes("policy 'balanced' (standard task)"));
+    check(wake !== undefined, "wake announced balanced bypass");
+    check(getState().phase === "implementing", "auto-promoted to implementing");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("roles.reviewer model is forwarded to subagent review request", async () => {
+  const d = await draftFailureSetup("role001" as Qid);
+  const bus = retryBus();
+  // Complex difficulty forces review even under balanced
+  updateState((s) => ({ ...s, difficulty: "complex" }));
+  try {
+    const roleConfig = {
+      ...DEFAULT_CONFIG,
+      reviewPolicy: "balanced" as const,
+      roles: { reviewer: "google/gemini-2.5-flash" },
+    };
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, roleConfig);
+    await waitForRequests(bus.emitted, 1);
+    const req = requests(bus.emitted)[0];
+    check(req["model"] === "google/gemini-2.5-flash", "reviewer model dispatched");
+    bus.feed({
+      requestId: req["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\n\nLooks good." },
+    });
+    await booted;
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy balanced does not auto-promote when planAuthored is false", async () => {
+  const d = await draftFailureSetup("unauth01" as Qid);
+  const bus = retryBus();
+  // Mark planAuthored = false
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(getState().phase === "drafting", "stays in drafting when plan is not authored");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("handleGoInput does not throw or promote when planAuthored is false", async () => {
+  const d = await draftFailureSetup("unauth02" as Qid);
+  const bus = retryBus();
+  // Mark planAuthored = false
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
+  try {
+    const res = await handleGoInput(bus.pi, fakeCtx(d.cwd), "go");
+    check(res === false, "go input rejected when plan is not authored");
+    check(getState().phase === "drafting", "stays in drafting");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy balanced clears inFlight review on auto-promotion", async () => {
+  const d = await draftFailureSetup("balclr01" as Qid);
+  const bus = retryBus();
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review initially tracked");
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(getState().phase === "implementing", "promotes to implementing under balanced");
+    check(hasInFlight(d.qid) === false, "inFlight is cleared after bypass promotion");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("reviewPolicy balanced clears inFlight review when planAuthored is false", async () => {
+  const d = await draftFailureSetup("balclr02" as Qid);
+  const bus = retryBus();
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, planAuthored: false } });
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review initially tracked");
+  try {
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
+    check(hasInFlight(d.qid) === false, "inFlight is cleared on early return");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("promoteAfterPass cancels in-flight review unconditionally", async () => {
+  const d = await draftFailureSetup("promclr1" as Qid);
+  const bus = retryBus();
+  trackReview(d.qid, d.target, () => {});
+  check(hasInFlight(d.qid) === true, "review initially tracked");
+  try {
+    const res = await promoteAfterPass(bus.pi, fakeCtx(d.cwd), d.qid, "user");
+    check(res !== null, "promotion succeeded");
+    check(hasInFlight(d.qid) === false, "inFlight cancelled by promoteAfterPass");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+
+
+
+
+Deno.test("balanced e2e: saving a standard plan promotes without leaving the tool gate locked", async () => {
+  const d = await draftFailureSetup("bale2e01" as Qid);
+  const bus = retryBus();
+  await mkdir(join(d.cwd, ".pi"), { recursive: true });
+  await writeFile(join(d.cwd, ".pi", "settings.json"), JSON.stringify({ "pi-quest": { reviewPolicy: "balanced", draftQuality: { mode: "off" } } }), "utf8");
+  const hooks: Array<(e: unknown, c: unknown) => unknown> = [];
+  (bus.pi as unknown as { on: unknown }).on = (_n: string, h: (e: unknown, c: unknown) => unknown) => { hooks.push(h); };
+  installDraftGate(bus.pi);
+  try {
+    await maybeBootDraftReview(bus.pi, fakeCtx(d.cwd));
+    // bypass promotion runs inside a detached promise; let it settle
+    for (let i = 0; i < 50 && getState().phase !== "implementing"; i++) await new Promise((r) => setTimeout(r, 10));
+    check(getState().phase === "implementing", "standard quest auto-promotes under balanced");
+    check(requests(bus.emitted).length === 0, "no subagent launched");
+    check(hasInFlight(d.qid) === false, "no in-flight review left behind");
+    const verdict = hooks[0]({ type: "tool_call", toolCallId: "1", toolName: "bash", input: { command: "ls" } }, fakeCtx(d.cwd)) as { block?: boolean; reason?: string } | undefined;
+    check(!(verdict?.block === true && String(verdict.reason).includes("PLAN_REVISION_REVIEW")), "tools not locked by a phantom revision review");
+  } finally {
+    cancelReview(d.qid);
     replaceState(IDLE_STATE);
   }
 });

@@ -17,6 +17,20 @@ function contextLine(state: QuestState): string {
     ? ` Draft file: ${draftPath(state.qid)}.`
     : "";
   let line = `Quest ${id} — phase ${state.phase}${pending}.${review}${draft} ${state.exactNextAction}`;
+
+  // Anti-Amnesia: Inject active mid-quest user directives (compact, budget-bounded)
+  if (state.refinements.length > 0 && (state.phase === "drafting" || state.phase === "implementing")) {
+    const recent = state.refinements.slice(-4);
+    const directiveLines = recent.map((r, i) => `  • [D${state.refinements.length - recent.length + i + 1}] "${r}" (Constraint: adopt via amendment; Separable: spawn via quest_subquest)`).join("\n");
+    line += `\n[Active Mid-Quest Directives - Must be satisfied]:\n${directiveLines}`;
+  }
+
+  // Inject active sub-quests status if any
+  const runningChildren = state.children.filter((c) => c.status === "running");
+  if (runningChildren.length > 0) {
+    line += `\n[Active Sub-Quests]: ${runningChildren.map((c) => `${c.qid} (${c.brief})`).join(", ")}`;
+  }
+
   if (state.phase === "drafting" || state.phase === "implementing") {
     const criteria = getReviewCriteriaSummary(state.phase, state.kind);
     line += `\n[Compliance Criteria]\n${criteria}`;

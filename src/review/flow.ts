@@ -40,6 +40,7 @@ export interface FlowArgs {
   prompt: string;
   runnerTool?: string;
   model?: string;
+  fallbackModels?: readonly string[];
   thinking?: string;
   maxDurationMs?: number;
   inactivityLimitMs?: number;
@@ -97,7 +98,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
   // unless resolved — omission means inherit.
   const targetModel = args.model ?? resolveDefaultReviewModel(ctx);
   const thinking = args.thinking ?? resolveReviewThinking();
-  const candidates = reviewModelCandidates(targetModel);
+  const candidates = reviewModelCandidates(targetModel, args.fallbackModels ?? []);
   const controller = new AbortController();
   trackReview(qid, target, () => controller.abort());
   if (shouldNoticeReview(qid, target)) sendSteer(pi, reviewRunningNotice(qid));

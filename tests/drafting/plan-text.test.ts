@@ -32,6 +32,12 @@ Deno.test("citeLocations handles deep paths and header extensions", () => {
   check(cites.some((c) => c.file === "common.h"), "header parsed");
 });
 
+Deno.test("citeLocations handles hidden directories and relative path prefixes", () => {
+  const cites = citeLocations("Check .pi/extensions/pi-quest/src/index.ts:42 and ./mods/song/song.c:10-20.");
+  check(cites.some((c) => c.file === ".pi/extensions/pi-quest/src/index.ts" && c.lineStart === 42), "hidden dir parsed");
+  check(cites.some((c) => c.file === "./mods/song/song.c" && c.lineStart === 10 && c.lineEnd === 20), "relative dot-slash parsed");
+});
+
 const SECTIONS: DraftSections = {
   requirements: ["reduce consumer boilerplate"],
   evidence: ["site_ui_respond_with_state is dead (site_page.c:214)"],

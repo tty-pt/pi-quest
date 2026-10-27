@@ -15,7 +15,7 @@ import { cancelReview } from "../../review/tracker";
 import { archiveQuestFiles } from "../../views/quest-view";
 import { reconcileParentDocOnReturn } from "../../quest-doc";
 import { advanceForeman } from "../../subquests/foreman";
-import { listKnownQids } from "../../files";
+import { ensureChildDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
 
 export type ArchiveOutcomeParam = "completed" | "failed";
@@ -69,15 +69,15 @@ async function handleParentReturn(
   ctx: PiCtx,
   state: QuestState,
   archived: QuestState,
-  qid: string,
-  parentQid: string,
+  qid: Qid,
+  parentQid: Qid,
   outcome: ArchivedOutcome,
   summary: string | null,
   zipPath: string,
 ): Promise<{ archivedQid: string; zipPath: string; returnedToParent: string | null }> {
   const findings = summary ?? `Child ${qid} archived as ${outcome}.`;
   const receipt: HandbackReceipt = {
-    childQid: qid as any,
+    childQid: qid,
     status: outcome === "COMPLETED" ? "COMPLETED" : "FAILED",
     assignedRequirements: state.contract?.assignedRequirements ?? [],
     filesModified: [],
@@ -87,7 +87,7 @@ async function handleParentReturn(
     findings,
   };
 
-  await reconcileParentDocOnReturn(ctx.cwd, parentQid as Qid, receipt);
+  await reconcileParentDocOnReturn(ctx.cwd, parentQid, receipt);
 
   if (state.questStack && state.questStack.length > 0) {
     const restored = popStackFrame(state, receipt);
@@ -95,6 +95,7 @@ async function handleParentReturn(
       const nextChildQid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
       const advanced = advanceForeman(restored, nextChildQid);
       if (advanced) {
+        await ensureChildDraftFile(ctx.cwd, nextChildQid, parentQid, advanced.contract, advanced.nextItem.goal);
         replaceState(advanced.nextMountedState);
         emitNow(pi);
         sendSteer(
@@ -120,7 +121,7 @@ async function handleParentReturn(
     return { archivedQid: qid, zipPath, returnedToParent: null };
   }
   replaceState({ ...parent, snapshotPending: true });
-  updateState((s) => settleChild(s, qid as any, outcome === "COMPLETED" ? "returned" : "failed", findings));
+  updateState((s) => settleChild(s, qid, outcome === "COMPLETED" ? "returned" : "failed", findings));
   emitNow(pi);
   sendSteer(pi, `Child quest ${qid} archived as ${outcome} (${zipPath}). Returned to parent ${parentQid} with findings: ${findings}`);
   return { archivedQid: qid, zipPath, returnedToParent: parentQid };

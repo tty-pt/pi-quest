@@ -25,14 +25,27 @@ export async function viewActivePlan(ctx: PiCtx): Promise<void> {
     notify(ctx, "No active quest.");
     return;
   }
-  const qid = state.qid;
-  const file = draftPath(qid);
+  let qid = state.qid;
+  let file = draftPath(qid);
   let content: string;
   try {
     content = await readFile(join(ctx.cwd, file), "utf8");
   } catch {
-    notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
-    return;
+    // If this is a child sub-quest mounted in memory, fall back to the parent quest plan
+    if (state.parentQid) {
+      try {
+        const parentFile = draftPath(state.parentQid);
+        content = await readFile(join(ctx.cwd, parentFile), "utf8");
+        qid = state.parentQid;
+        file = parentFile;
+      } catch {
+        notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
+        return;
+      }
+    } else {
+      notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
+      return;
+    }
   }
   const title = `Quest ${qid} — plan (${file})`;
   if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") {

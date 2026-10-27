@@ -5,10 +5,13 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import { DEFAULT_CONFIG, readQuestConfig, type QuestConfig } from "../config";
+import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
 import { childDeviated, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
 import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
+import { bypassDraftReview, bypassesDraftReview } from "./bypass";
+import { assessDraftQuality } from "./quality";
+import { withEffectivePolicy } from "../policy/effective";
 import { draftPath } from "../domain/paths";
 import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
@@ -23,11 +26,13 @@ import {
   deliverableBody,
   deliverableWord,
   draftProfileText,
+  hasAuthoredText,
   hashContent,
   meetsReviewThresholds,
   parseDraftSections,
   reviewMaterial,
 } from "./plan-text";
+import { evaluateSteeringIntent } from "../domain/steering";
 export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
 
 import {
@@ -37,14 +42,21 @@ import {
   noteReviewLaunchFailed,
   setReviewRetryDispatcher,
   MAX_REVIEW_RETRIES,
+  MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
+  clearReviewVerdictFails,
+  noteReviewVerdictFailed,
+  getReviewVerdictFails,
   type RetryDispatcher,
 } from "./draft-retry";
 export {
   clearDraftReviewRetry,
+  clearReviewVerdictFails,
   draftReviewRetryCount,
+  getReviewVerdictFails,
   setReviewRetryDispatcher,
   MAX_REVIEW_RETRIES,
+  MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
   type RetryDispatcher,
 };
@@ -64,8 +76,9 @@ export async function bootDraftReview(
   pi: Pi,
   ctx: PiCtx,
   target: string,
-  config: QuestConfig = DEFAULT_CONFIG,
+  baseConfig: QuestConfig = DEFAULT_CONFIG,
 ): Promise<void> {
+  const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
@@ -74,15 +87,28 @@ export async function bootDraftReview(
   if (content === null) return;
   const sections = parseDraftSections(content);
   const material = reviewMaterial(getState(), sections);
-  const belowBar = !meetsReviewThresholds(sections, config.draftThresholds, kind);
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
+  const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
+
+  // Policy-based bypass (reviewPolicy "off", or "balanced" for non-complex).
+  if (bypassesDraftReview(config, state)) {
+    await bypassDraftReview(pi, ctx, config, { qid, state, sections, thresholds, belowBar: belowBar || quality.blocks, quality });
+    return;
+  }
+
+  const reviewerModel = resolveRoleModel(config, "reviewer");
   const outcome = await runIsolatedReview({
     pi,
     ctx,
     qid,
     target,
-    prompt: buildReviewPrompt("draft", qid, target, material, config.draftThresholds, belowBar),
+    prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar) +
+      (quality.summary !== "" ? `\n\nDeterministic quality findings (advisory): ${quality.summary}` : ""),
     runnerTool: config.bindings.reviewRunner.tool,
+    ...(reviewerModel ? { model: reviewerModel } : {}),
+    fallbackModels: resolveRoleFallbacks(config, "reviewer"),
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
   });
@@ -103,13 +129,14 @@ export async function bootDraftReview(
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (outcome.review.verdict === "PASS") {
     clearDraftReviewRetry(qid);
+    clearReviewVerdictFails(qid);
     if (!researchRecorded(getState(), sections.evidence.length)) {
       sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or a live user may reply "go".`);
       return;
     }
     // Route by kind: standard quests promote to implementing; analysis quests
     // auto-claim straight to validating (D3) unless sub-quests still run.
-    const message = promoteAfterPass(pi, ctx, qid, "review");
+    const message = await promoteAfterPass(pi, ctx, qid, "review");
     if (message === null) return;
     const advisories = outcome.review.advisories.trim();
     sendWake(pi, `${message}${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
@@ -118,13 +145,25 @@ export async function bootDraftReview(
   updateState((s) => noteDraftFindings(s));
   clearDraftReviewRetry(qid);
   emitNow(pi);
+  const consecutive = noteReviewVerdictFailed(qid);
   const verbatim = outcome.review.text.trim();
   const reviewExcerpt = verbatim === ""
     ? ""
     : `\n\nReview text (verbatim, budget-bounded):\n${verbatim}`;
   const profile = belowBar
-    ? `\n\nDraft profile:\n${draftProfileText(sections, config.draftThresholds, "", kind)}`
+    ? `\n\nDraft profile:\n${draftProfileText(sections, thresholds, "", kind, state.difficulty)}`
     : "";
+
+  if (consecutive >= MAX_CONSECUTIVE_REVIEW_FAILS) {
+    sendWake(
+      pi,
+      `Draft review rejected ${consecutive} consecutive times for ${qid}. Automated review loop paused to prevent thrashing.\n` +
+      `Reviewer findings: ${outcome.review.findings}${reviewExcerpt}\n\n` +
+      `Consult the human operator for guidance, or the operator may reply "go" / "proceed" to bypass review and start coding immediately.`,
+    );
+    return;
+  }
+
   sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Revise the ${deliverableWord(kind).toLowerCase()} and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
 }
 
@@ -148,7 +187,7 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   const content = await readDraftFile(ctx, state);
   if (content === null) return;
   const sections = parseDraftSections(content);
-  if (deliverableBody(sections, state.kind).length > 0 && !state.draft.planAuthored) {
+  if (hasAuthoredText(deliverableBody(sections, state.kind)) && !state.draft.planAuthored) {
     updateState((s) => s.draft === null ? s : {
       ...s,
       draft: { ...s.draft, planAuthored: true },
@@ -160,7 +199,7 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   if (state.draft.approvedBy !== null && state.draft.contentHash === target) return;
   if (isCurrentReview(state.qid, target)) return;
   if (state.contract !== undefined || (state.parentQid !== null && !childDeviated(getState()))) {
-    const message = promoteAfterPass(pi, ctx, state.qid, "review");
+    const message = await promoteAfterPass(pi, ctx, state.qid, "review");
     if (message !== null) {
       sendWake(pi, `${message} Sub-quest ${state.qid} auto-promoted to implementing based on contract/parent brief.`);
     }
@@ -185,27 +224,40 @@ export async function ensureDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   await maybeBootDraftReview(pi, ctx);
 }
 
-export function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): boolean {
+export async function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy): Promise<boolean> {
   const state = getState();
   if (state.phase !== "drafting" || state.qid !== qid) return false;
+  if (state.draft === null || !state.draft.planAuthored) {
+    if (by === "user") {
+      try {
+        ctx.ui?.notify("Cannot promote draft: Implementation plan has not been authored yet.", "warning");
+      } catch {
+        // Best effort
+      }
+    }
+    return false;
+  }
   cancelReview(qid);
   clearDraftReviewRetry(qid);
+  clearReviewVerdictFails(qid);
   // Kind-aware routing in promoteAfterPass: standard → implementing, analysis
   // → full-on validating once its children are done (D3).
-  const message = promoteAfterPass(pi, ctx, qid, by);
+  const message = await promoteAfterPass(pi, ctx, qid, by);
   if (message === null) return false;
   sendSteer(pi, message);
   return true;
 }
 
-export function handleGoInput(pi: Pi, ctx: PiCtx, text: string): boolean {
-  // "go" here is a LIVE user input event (wired in watchGoInput via
-  // onUserMessage). It is never served from a tool result — a quest_ask_human
-  // default is absence, not approval, and so can never promote a draft.
-  if (!GO_PATTERN.test(text)) return false;
+export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
+  // Natural language steering: advance intent (or GO_PATTERN) promotes a draft.
+  // It is never served from a tool result — a quest_ask_human default is absence,
+  // not approval, and so can never promote a draft.
+  const config = await readQuestConfig(ctx.cwd);
+  const steering = await evaluateSteeringIntent(text, "drafting", config);
+  if (steering.action !== "advance" && !GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;
-  return approveDraft(pi, ctx, state.qid, "user");
+  return await approveDraft(pi, ctx, state.qid, "user");
 }
 
 async function onWriteResult(pi: Pi, ctx: PiCtx, event: ToolResultEvent): Promise<void> {
@@ -275,18 +327,18 @@ export async function onTurnEndCatchAll(pi: Pi, ctx: PiCtx): Promise<void> {
 
 export function watchDraftFileCatchAll(pi: Pi): void {
   onTurnEnd(pi, (_event, eventCtx) => {
-    void onTurnEndCatchAll(pi, eventCtx);
+    void onTurnEndCatchAll(pi, eventCtx).catch(() => {});
   });
 }
 
 export function watchResume(pi: Pi): void {
   onSessionStart(pi, (_event, eventCtx) => {
-    void ensureDraftReview(pi, eventCtx);
+    void ensureDraftReview(pi, eventCtx).catch(() => {});
   });
 }
 
 export function watchGoInput(pi: Pi): void {
   onUserMessage(pi, (text, eventCtx) => {
-    handleGoInput(pi, eventCtx, text);
+    void handleGoInput(pi, eventCtx, text).catch(() => {});
   });
 }

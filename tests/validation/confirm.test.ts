@@ -18,7 +18,14 @@ import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
 import { archiveActiveQuest, archiveTool } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
-import { handleConfirmInput } from "../../src/validation/flow.ts";
+import {
+  ensureValidationFlow,
+  handleConfirmInput,
+  noteValidationVerdictFailed,
+  clearValidationVerdictFails,
+  getValidationVerdictFails,
+  MAX_CONSECUTIVE_VALIDATION_FAILS,
+} from "../../src/validation/flow.ts";
 import { fakeCtx, fakePi, barePi } from "../fake-pi.ts";
 
 function tmp(): string {
@@ -118,3 +125,72 @@ Deno.test("continueWork demotes validating back to implementing", async () => {
   check(getState().phase === "implementing", "back to implementing");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("user steering advances and archives COMPLETED even when reviewer is available", async () => {
+  const cwd = tmp();
+  const pi = fakePi(); // fake reviewer subagent is available
+  replaceState(validatingWithStalePlanPass());
+  await withDraftFile(cwd);
+  const accepted = await handleConfirmInput(pi, fakeCtx(cwd), "ship it");
+  check(accepted === true, "ship it accepted by human override");
+  check(getState().phase === "idle", "quest archived as completed");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("validation consecutive fails track and pause automated loop", () => {
+  clearValidationVerdictFails("abc123" as Qid);
+  check(noteValidationVerdictFailed("abc123" as Qid) === 1, "first fail");
+  check(noteValidationVerdictFailed("abc123" as Qid) === 2, "second fail reaches cap");
+  check(MAX_CONSECUTIVE_VALIDATION_FAILS === 2, "max consecutive fails is 2");
+  clearValidationVerdictFails("abc123" as Qid);
+  check(getValidationVerdictFails("abc123" as Qid) === 0, "cleared fails");
+});
+
+Deno.test("reviewPolicy off validation auto-archives when tests pass", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  const state = validatingWithStalePlanPass();
+  state.lastTestReceipt = {
+    command: "npm test",
+    exitCode: 0,
+    tailOutput: "ok",
+    executedAt: Date.now(),
+  };
+  replaceState(state);
+  await withDraftFile(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
+  await writeFile(
+    join(cwd, ".pi", "settings.json"),
+    JSON.stringify({ "pi-quest": { reviewPolicy: "off", autoArchive: true } }),
+    "utf8",
+  );
+  await ensureValidationFlow(pi, fakeCtx(cwd));
+  check(getState().phase === "idle", "quest auto-archived under reviewPolicy off");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("reviewPolicy balanced validation auto-archives standard task when tests pass", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  const state = validatingWithStalePlanPass();
+  state.difficulty = "standard";
+  state.lastTestReceipt = {
+    command: "npm test",
+    exitCode: 0,
+    tailOutput: "ok",
+    executedAt: Date.now(),
+  };
+  replaceState(state);
+  await withDraftFile(cwd);
+  await mkdir(join(cwd, ".pi"), { recursive: true });
+  await writeFile(
+    join(cwd, ".pi", "settings.json"),
+    JSON.stringify({ "pi-quest": { reviewPolicy: "balanced", autoArchive: true } }),
+    "utf8",
+  );
+  await ensureValidationFlow(pi, fakeCtx(cwd));
+  check(getState().phase === "idle", "quest auto-archived under reviewPolicy balanced");
+  replaceState(IDLE_STATE);
+});
+
+

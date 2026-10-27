@@ -44,10 +44,34 @@ quest id (`future/<qid>.md`); there are no slugs.
   alternative dismissed without evidence; does it commit prematurely; does it
   contradict itself; does it credibly satisfy the request. Draft so the
   answers are visibly yes:
-  - Write requirements as numbered, objective-stated bullets. A draft clears
-    the review threshold at **2 requirements**, or **1 requirement + 7
-    evidence items**, with an actionable plan — below that, the reviewer
+  - Write requirements as numbered, objective-stated bullets. Thresholds scale
+    dynamically with difficulty (`trivial`: 1 requirement + 2 evidence items;
+    `standard`: 2 requirements, or 1 requirement + 7 evidence items;
+    `complex`: 3 requirements + 10 evidence items) — below the bar, the reviewer
     fails fast.
+  - **Review policies & autonomy:** under `reviewPolicy: "balanced"` (frontier mode),
+    trivial and standard tasks auto-promote to coding immediately without subagent
+    review delay; complex tasks undergo full review. Under `reviewPolicy: "off"`,
+    all subagent reviews are bypassed while retaining full quest journal structure.
+  - **Depth bar (`draftQuality`):** when review is bypassed (balanced/off) the plan is
+    gated on more than counts. For `standard` quests: at least 2 `file:line` citations
+    that really resolve in the repo (evidence or plan), at least 3 discrete plan steps
+    written as a numbered/bulleted list (not prose), and an explicit verification step
+    (a test or check). `complex` wants 4 citations / 5 steps; `trivial` almost nothing.
+    The draft profile (`checkPlan`, every save) shows the quality line and what is
+    missing — build up to it before saving. Cite only locations you actually read.
+  - **Model-aware policy:** `policyByModel` may switch the review policy by the model in
+    use, so the same repo can be balanced for a frontier model and strict for a weaker
+    one. The draft profile names the rule when it applies.
+  - **Two-strike safety pause:** if a review or validation is rejected 2 consecutive
+    times, the automated review loop automatically pauses to prevent thrashing and
+    prompts the human operator for guidance.
+  - **Human operator steering:** the operator is the supreme authority. Natural
+    phrasing (`go`, `proceed`, `start coding` in drafting; `ship it`, `confirm`,
+    `looks good` in validation) bypasses automated reviews and advances immediately.
+  - **Sub-quest decomposition:** for complex tasks, define backlog items under
+    `## Sub-Quests` using `- [ ] SQ1: Goal [paths: ...] [tests: ...] [req: ...]`.
+    Upon plan approval, the Foreman automatically mounts `SQ1` into a bounded worker lane.
   - Distinguish a **user requirement** (blocks), a **technical constraint**
     (binds your approach), and a **reviewer preference** (never blocks).
     Each requirement needs evidence or a verification step; research you
@@ -67,7 +91,9 @@ quest id (`future/<qid>.md`); there are no slugs.
   happen; nothing blocks. When reality contradicts the plan, record an
   amendment with reasons via `quest_update_state` — amendments adjust the
   plan, never the scope (scope change = new quest). Work from the quest's
-  Exact Next Action. User refinements are recorded and feed the validator.
+  Exact Next Action. User remarks mid-quest are automatically captured as
+  active directives and injected into your turn context; route separable work
+  via `quest_subquest` and constraints via plan amendments.
   When done, claim completion via `quest_update_state` with `claimComplete`
   — an unverified claim that boots the validator immediately. The quest doc
   is locked to direct edits during implementing; all plan changes go through
@@ -98,6 +124,27 @@ quest id (`future/<qid>.md`); there are no slugs.
   Validation PASS archives as usual; FAIL returns the quest to **drafting**
   (not implementing) with findings and resets the doc's `## Status`. The
   conclusion wake reproduces the delivered analysis when it matters most.
+
+## Mid-Quest Operator Directives & Autonomous Triage
+
+The operator may speak to you mid-quest without stopping or restarting the quest.
+`pi-quest` captures these remarks into `state.refinements` and injects active directives
+into your turn context on every turn under `[Active Mid-Quest Directives - Must be satisfied]:`.
+
+When you receive a mid-quest directive, evaluate it using this decision protocol:
+1. **Separable Task or New Feature** (e.g. *"Also build an export command"*, *"Handle the CSS in a subtask"*):
+   - Do NOT try to cram unrelated work into your active single-lane plan.
+   - Proactively spawn a sub-quest via `quest_subquest({ goal, brief, switchNow })`.
+   - Set `switchNow: true` if the task is an immediate prerequisite/blocker, or `switchNow: false` if it can queue into the backlog for the autonomous Foreman.
+2. **Constraint, Rule, or Course Correction** (e.g. *"Port must be 8080"*, *"Don't touch db.c"*, *"Ensure tests pass"*):
+   - Incorporate the constraint into your implementation immediately.
+   - Record an amendment via `quest_update_state { amendment: { change: "...", reasons: "Operator mid-quest directive" } }`.
+3. **Conversational Question** (e.g. *"What does this function do?"*, *"Status?"*):
+   - Answer the question directly in your conversational response. Do not modify the plan or open a sub-quest.
+
+**Validation Invariant:** Every operator directive is part of the acceptance criteria verified
+by the validator at completion. Claiming completion (`claimComplete: true`) while ignoring an
+active user directive will cause validation to FAIL.
 
 ## Tools
 

@@ -7,9 +7,17 @@ import type { PiCtx } from "../../hooks/events";
 import type { QuestKind, QuestState } from "../../domain/quest";
 import { draftPath } from "../../domain/paths";
 import { getState } from "../../app/store";
-import { readQuestConfig } from "../../config";
+import { readQuestConfig, getThresholdsForDifficulty, type QuestConfig } from "../../config";
 import { draftProfileText, parseDraftSections, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { checkPlanCitations } from "./claims";
+import { assessDraftQuality } from "../../drafting/quality";
+import { withEffectivePolicy } from "../../policy/effective";
+
+// Which review policy is in force for the active model, so the agent sees why.
+function policyLine(config: QuestConfig, ctx: PiCtx): string {
+  const eff = withEffectivePolicy(config, ctx);
+  return eff.policyNote === undefined ? "" : `review policy: ${eff.reviewPolicy} (${eff.policyNote})`;
+}
 
 async function deliverableProfile(
   ctx: PiCtx,
@@ -34,8 +42,12 @@ async function deliverableProfile(
   const updated = splice(current, body);
   const sections = parseDraftSections(updated);
   const config = await readQuestConfig(ctx.cwd);
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
   const claims = await checkPlanCitations(ctx, body);
-  return { text: draftProfileText(sections, config.draftThresholds, claims, kind) };
+  const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
+  const policy = policyLine(config, ctx);
+  const extra = [claims, quality.summary, policy].filter((l) => l !== "").join("\n");
+  return { text: draftProfileText(sections, thresholds, extra, kind, state.difficulty) };
 }
 
 export async function applyPlanCheck(
@@ -56,7 +68,12 @@ export async function applyAnalysisCheck(
 
 export async function profileForSavedDoc(ctx: PiCtx, docText: string, kind: QuestKind = "standard"): Promise<string> {
   const config = await readQuestConfig(ctx.cwd);
-  return draftProfileText(parseDraftSections(docText), config.draftThresholds, "", kind);
+  const state = getState();
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  const sections = parseDraftSections(docText);
+  const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
+  const extra = [quality.summary, policyLine(config, ctx)].filter((l) => l !== "").join("\n");
+  return draftProfileText(sections, thresholds, extra, kind, state.difficulty);
 }
 
 // The quest_update_state { checkPlan } parameter: a pure read-only probe that

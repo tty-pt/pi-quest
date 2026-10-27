@@ -32,9 +32,17 @@ function holdForRevisionReview(event: ToolCallEvent): { block: true; reason: str
   if (toolClass === "journal" || toolClass === "ask") return undefined;
   return {
     block: true,
-    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn.",
+    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn. (Hint: reply APPROVE or run /quest-cancel-review to unblock immediately.)",
     terminate: true,
   };
+}
+
+function notifyWarning(ctx: PiCtx, text: string): void {
+  try {
+    ctx.ui?.notify(text, "warning");
+  } catch {
+    // headless or no ui
+  }
 }
 
 export function installDraftGate(pi: Pi): void {
@@ -46,8 +54,13 @@ export function installDraftGate(pi: Pi): void {
         toolName: event.toolName,
         toolClass: classify(event.toolName, event.input),
         path: pathOf(event.input),
-      }, { isReviewerSession: reviewerCaller(ctx) });
-      if (decision.allowed) return undefined;
+      }, { isReviewerSession: reviewerCaller(ctx), cwd: ctx.cwd });
+      if (decision.allowed) {
+        if ("advisory" in decision && decision.advisory) {
+          notifyWarning(ctx, decision.advisory);
+        }
+        return undefined;
+      }
       const verdict: { block: true; reason: string; terminate?: true } = {
         block: true,
         reason: reasonText(decision),
