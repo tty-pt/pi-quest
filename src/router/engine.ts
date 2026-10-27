@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #router — virtual model routing engine with fallback and quota cooldown.
+// HIGH_LEVEL: #configurations — virtual model routing engine with fallback and quota cooldown.
 import { getState } from "../app/store";
 import { parseModelSpec, resolveMatrixCell } from "./matrix";
 import type {

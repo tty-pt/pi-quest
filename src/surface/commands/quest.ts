@@ -1,14 +1,17 @@
 // HIGH_LEVEL: #commands — resume a quest or drafting phase, or show the active quest.
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getState, replaceState } from "../../app/store";
-import { emitNow } from "../../app/interpreter";
-import { createQuest } from "../../domain/quest";
-import { createDraft } from "../../domain/transitions";
-import { isQid } from "../../domain/qid";
-import { FUTURE_DIR } from "../../domain/paths";
-import { newestSnapshot, newestSnapshotFor } from "../../durability/snapshots";
-import type { Pi, PiCtx } from "../../hooks/events";
+import { getState, replaceState } from "../../app/store.ts";
+import { emitNow } from "../../app/interpreter.ts";
+import { createQuest } from "../../domain/quest.ts";
+import { createDraft } from "../../domain/transitions.ts";
+import { isQid } from "../../domain/qid.ts";
+import { FUTURE_DIR } from "../../domain/paths.ts";
+import { newestSnapshot, newestSnapshotFor } from "../../durability/snapshots.ts";
+import type { Pi, PiCtx } from "../../hooks/events.ts";
+import { listDraftQids } from "../../files.ts";
+
+export { listDraftQids };
 
 export function summarizeActive(): string {
   const state = getState();
@@ -18,16 +21,6 @@ export function summarizeActive(): string {
     : "";
   const review = state.activeReview ? ` Review ${state.activeReview.kind} running.` : "";
   return `Quest ${state.qid} — phase ${state.phase}.${review}${kids} ${state.exactNextAction}`;
-}
-
-export async function listDraftQids(cwd: string): Promise<string[]> {
-  try {
-    const files = await readdir(join(cwd, FUTURE_DIR));
-    return files.filter((f) => f.endsWith(".md")).map((f) => f.replace(/\.md$/, ""));
-  } catch {
-    // Directory scan is best-effort.
-    return [];
-  }
 }
 
 export async function readDraftObjective(cwd: string, qid: string): Promise<string | null> {

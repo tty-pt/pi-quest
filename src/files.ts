@@ -2,33 +2,55 @@
 // HIGH_LEVEL: #storage — the drafting workspace starts from a template.
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PiCtx } from "./hooks/events";
-import { draftPath, FUTURE_DIR } from "./domain/paths";
-import { isQid, type Qid } from "./domain/qid";
-import type { QuestDifficulty } from "./config";
-import { renderChildDraftTemplate, renderDraftTemplate } from "./views/draft-template";
-import type { SubQuestContract } from "./domain/contract";
+import type { PiCtx } from "./hooks/events.ts";
+import { ARCHIVE_DIR, draftPath, FUTURE_DIR } from "./domain/paths.ts";
+import { isQid, type Qid } from "./domain/qid.ts";
+import type { QuestDifficulty } from "./config.ts";
+import {
+  renderChildDraftTemplate,
+  renderDraftTemplate,
+} from "./views/draft-template.ts";
+import type { SubQuestContract } from "./domain/contract.ts";
+
+async function listQidsInDir(cwd: string, dir: string, ext: string): Promise<string[]> {
+  try {
+    const files = await readdir(join(cwd, dir));
+    return files
+      .filter((f) => f.endsWith(ext))
+      .map((f) => f.slice(0, -ext.length))
+      .filter((id) => id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+export async function listDraftQids(cwd: string): Promise<string[]> {
+  return await listQidsInDir(cwd, FUTURE_DIR, ".md");
+}
+
+export async function listArchivedQids(cwd: string): Promise<string[]> {
+  return await listQidsInDir(cwd, ARCHIVE_DIR, ".zip");
+}
 
 export async function listKnownQids(cwd: string): Promise<string[]> {
-  const qids = new Set<string>();
+  const [drafts, archives] = await Promise.all([
+    listDraftQids(cwd),
+    listArchivedQids(cwd),
+  ]);
+  return [...new Set([...drafts, ...archives])];
+}
+
+async function writeDraftFileIfNotExists(
+  cwd: string,
+  qid: Qid,
+  content: string,
+): Promise<void> {
+  await mkdir(join(cwd, FUTURE_DIR), { recursive: true });
   try {
-    const futures = await readdir(join(cwd, FUTURE_DIR));
-    for (const f of futures) {
-      if (f.endsWith(".md")) qids.add(f.slice(0, -3));
-    }
-  } catch {
-    // Missing workspace is fine — no known ids.
+    await writeFile(join(cwd, draftPath(qid)), content, { flag: "wx" });
+  } catch (err) {
+    if ((err as { code?: string }).code !== "EEXIST") throw err;
   }
-  // Archived quests keep their id reserved so a past id is never reused.
-  try {
-    const archives = await readdir(join(cwd, ".pi", "quest", "archive"));
-    for (const f of archives) {
-      if (f.endsWith(".zip")) qids.add(f.slice(0, -4));
-    }
-  } catch {
-    // Missing workspace is fine — no known ids.
-  }
-  return [...qids];
 }
 
 // Write the draft scaffold for a quest unless one already exists —
@@ -44,12 +66,11 @@ export async function ensureDraftFile(
 ): Promise<void> {
   if (!isQid(rawQid)) throw new Error(`invalid qid: ${rawQid}`);
   const qid: Qid = rawQid;
-  await mkdir(join(ctx.cwd, FUTURE_DIR), { recursive: true });
-  try {
-    await writeFile(join(ctx.cwd, draftPath(qid)), renderDraftTemplate(name, objective, context, difficulty), { flag: "wx" });
-  } catch (err) {
-    if ((err as { code?: string }).code !== "EEXIST") throw err;
-  }
+  await writeDraftFileIfNotExists(
+    ctx.cwd,
+    qid,
+    renderDraftTemplate(name, objective, context, difficulty),
+  );
 }
 
 export async function ensureChildDraftFile(
@@ -59,14 +80,9 @@ export async function ensureChildDraftFile(
   contract: SubQuestContract,
   goal: string,
 ): Promise<void> {
-  await mkdir(join(cwd, FUTURE_DIR), { recursive: true });
-  try {
-    await writeFile(
-      join(cwd, draftPath(childQid)),
-      renderChildDraftTemplate(childQid, parentQid, contract, goal),
-      { flag: "wx" },
-    );
-  } catch (err) {
-    if ((err as { code?: string }).code !== "EEXIST") throw err;
-  }
+  await writeDraftFileIfNotExists(
+    cwd,
+    childQid,
+    renderChildDraftTemplate(childQid, parentQid, contract, goal),
+  );
 }

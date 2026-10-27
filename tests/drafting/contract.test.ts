@@ -73,7 +73,7 @@ Deno.test("child quest in implementing gates writes to allowedPaths", () => {
   const rogueWrite = ref("edit", "write", "mods/other/file.c");
   const decision = decide(quest, rogueWrite);
   check(decision.allowed, "write outside allowedPaths is permitted with advisory");
-  check(typeof (decision as any).advisory === "string", "advisory notice is present");
+  check("advisory" in decision && typeof decision.advisory === "string", "advisory notice is present");
 
   // Reading any path is always allowed
   const readOther = ref("read", "read", "mods/other/file.c");
@@ -115,7 +115,7 @@ Deno.test("child quest with empty or undefined allowedPaths acts as unrestricted
     parentQid: PARENT_QID,
     title: "Unconstrained fix",
     assignedRequirements: [],
-    allowedPaths: undefined as any,
+    allowedPaths: undefined as unknown as string[],
     requiredTestCommands: [],
     acceptanceCriteria: [],
   };

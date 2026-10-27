@@ -106,33 +106,39 @@ export function reconcileDocContent(text: string, receipt: HandbackReceipt): str
   return `${lines.join("\n").trimEnd()}\n\n## Sub-Quests\n\n${receiptLine}\n`;
 }
 
-export function appendRequirementToDoc(text: string, requirementText: string): string {
-  const lines = text.split("\n");
-  const header = lines.findIndex((l) => /^##\s+requirements\b/i.test(l));
-
-  let maxR = 0;
+function findMaxSequenceNumber(lines: string[], prefix: string): number {
+  const pattern = new RegExp(`\\b${prefix}(\\d+)\\b`, "i");
+  let max = 0;
   for (const line of lines) {
-    const m = line.match(/\bR(\d+)\b/i);
+    const m = line.match(pattern);
     if (m) {
       const num = parseInt(m[1], 10);
-      if (num > maxR) maxR = num;
+      if (num > max) max = num;
     }
   }
-  const nextR = maxR + 1;
-  const newReq = `- R${nextR}: [User Directive] ${requirementText.trim()}`;
+  return max;
+}
 
-  if (header === -1) {
-    return `${text.trimEnd()}\n\n## Requirements\n\n${newReq}\n`;
-  }
-
+function insertBeforeSectionEnd(lines: string[], header: number, item: string): string[] {
   const end = sectionEnd(lines, header);
   let insertIdx = end;
   while (insertIdx > header + 1 && lines[insertIdx - 1].trim() === "") {
     insertIdx--;
   }
+  lines.splice(insertIdx, 0, item);
+  return lines;
+}
 
-  lines.splice(insertIdx, 0, newReq);
-  return lines.join("\n");
+export function appendRequirementToDoc(text: string, requirementText: string): string {
+  const lines = text.split("\n");
+  const header = lines.findIndex((l) => /^##\s+requirements\b/i.test(l));
+  const nextR = findMaxSequenceNumber(lines, "R") + 1;
+  const newReq = `- R${nextR}: [User Directive] ${requirementText.trim()}`;
+
+  if (header === -1) {
+    return `${text.trimEnd()}\n\n## Requirements\n\n${newReq}\n`;
+  }
+  return insertBeforeSectionEnd(lines, header, newReq).join("\n");
 }
 
 export function appendSubQuestBacklogItem(
@@ -141,15 +147,7 @@ export function appendSubQuestBacklogItem(
   options?: { paths?: string[]; tests?: string[] },
 ): string {
   const lines = text.split("\n");
-  let maxSQ = 0;
-  for (const line of lines) {
-    const m = line.match(/\bSQ(\d+)\b/i);
-    if (m) {
-      const num = parseInt(m[1], 10);
-      if (num > maxSQ) maxSQ = num;
-    }
-  }
-  const nextSQ = maxSQ + 1;
+  const nextSQ = findMaxSequenceNumber(lines, "SQ") + 1;
   const pathsTag = options?.paths && options.paths.length > 0 ? ` [paths: ${options.paths.join(", ")}]` : "";
   const testsTag = options?.tests && options.tests.length > 0
     ? ` [tests: ${options.tests.join(", ")}]`
@@ -158,13 +156,7 @@ export function appendSubQuestBacklogItem(
 
   const header = lines.findIndex((l) => /^##\s+sub-quests\b/i.test(l));
   if (header !== -1) {
-    const end = sectionEnd(lines, header);
-    let insertIdx = end;
-    while (insertIdx > header + 1 && lines[insertIdx - 1].trim() === "") {
-      insertIdx--;
-    }
-    lines.splice(insertIdx, 0, sqLine);
-    return lines.join("\n");
+    return insertBeforeSectionEnd(lines, header, sqLine).join("\n");
   }
 
   const planIdx = lines.findIndex((l) => /^##\s+implementation plan\b/i.test(l));
@@ -190,11 +182,5 @@ export function appendAmendmentToDoc(text: string, change: string, reason: strin
     return `## Amendments\n\n${bullet}\n\n${text}`;
   }
 
-  const end = sectionEnd(lines, header);
-  let insertIdx = end;
-  while (insertIdx > header + 1 && lines[insertIdx - 1].trim() === "") {
-    insertIdx--;
-  }
-  lines.splice(insertIdx, 0, bullet);
-  return lines.join("\n");
+  return insertBeforeSectionEnd(lines, header, bullet).join("\n");
 }

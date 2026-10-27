@@ -75,7 +75,10 @@ export function fakePi(): FakePi {
       virtualModels.push(model);
     },
     unregisterVirtualModel(provider: string, id: string): void {
-      const idx = virtualModels.findIndex((m: any) => m && m.provider === provider && m.id === id);
+      const idx = virtualModels.findIndex((m: unknown) => {
+        const model = m as { provider?: string; id?: string } | null;
+        return model?.provider === provider && model?.id === id;
+      });
       if (idx !== -1) virtualModels.splice(idx, 1);
     },
     registerShortcut(shortcut: string, options: ShortcutReg["options"]): void {

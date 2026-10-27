@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #router — virtual model registration hook for pi extension.
+// HIGH_LEVEL: #configurations — virtual model registration hook for pi extension.
 import type { Pi, PiCtx } from "../hooks/events";
 import { readQuestConfig } from "../config";
 import { routeRequest } from "./engine";

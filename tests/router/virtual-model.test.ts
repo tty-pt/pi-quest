@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@^1.0.0";
+import { assertEquals } from "../check.ts";
 import { fakePi, fakeCtx } from "../fake-pi.ts";
 import { installRouter } from "../../src/router/virtual-model.ts";
 import { installCommands } from "../../src/surface/commands/index.ts";

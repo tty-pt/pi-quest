@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #router — remembers the physical model quest/auto last routed to,
+// HIGH_LEVEL: #configurations — remembers the physical model quest/auto last routed to,
 // so model-keyed policy (policyByModel) judges the model really doing the work
 // rather than the virtual wrapper.
 let lastRouted: string | undefined;

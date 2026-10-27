@@ -6,6 +6,7 @@ import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { IDLE_STATE } from "../../src/domain/quest.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
 import { draftPath } from "../../src/domain/paths.ts";
+import type { Qid } from "../../src/domain/qid.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 import type { Pi, PiCtx, TranscriptEntry } from "../../src/hooks/events.ts";
 import { join } from "node:path";
@@ -60,12 +61,12 @@ Deno.test("conversation_context: ensureDraftFile creates draft file with precedi
   const tmpDir = await Deno.makeTempDir({ prefix: "quest_context_ensure_test" });
   try {
     const ctx = fakeCtx(tmpDir);
-    const qid = "ctx123";
+    const qid = "ctx123" as Qid;
     const context = "[user] Need FLAC player\n[assistant] Will design architecture";
 
     await ensureDraftFile(ctx, qid, "AudioQuest", "Build player", context);
 
-    const fullPath = join(tmpDir, draftPath(qid as any));
+    const fullPath = join(tmpDir, draftPath(qid));
     const content = await readFile(fullPath, "utf8");
     check(content.includes("## Original request"), "has original request");
     check(content.includes("## Context / Background Discussion"), "has context section");

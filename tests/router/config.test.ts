@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@^1.0.0";
+import { assertEquals } from "../check.ts";
 import { loadConfig, loadRouterConfig, DEFAULT_ROUTER_CONFIG } from "../../src/config.ts";
 import { parseModelSpec, normalizeModelSpecs, resolveMatrixCell, validateMatrixConfig } from "../../src/router/matrix.ts";
 

@@ -241,13 +241,16 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | `reviewInactivityMs` | number (ms) | `300000` (5 min) | Subagent review watchdog inactivity timeout before aborting. |
 | `reviewMaxDurationMs` | number (ms) | `1500000` (25 min) | Hard upper ceiling for reviewer subagent wall-clock execution. |
 | `planEditor` | string / `null` | `null` | Custom external plan editor command (falls back to `$EDITOR`). |
-| `judgeMode` | `"auto"` / `"systemone"` / `"heuristic"` / `"off"` | `"auto"` | How quest intent is evaluated on new user messages: `"auto"` / `"systemone"` queries Jev System One, `"heuristic"` uses pattern rules, `"off"` disables automatic quest initiation from prompt text. |
-| `judgeUrl` | URL string | `http://127.0.0.1:4242` | Endpoint for Jev System One decisions (falls back to `PI_QUEST_JUDGE_URL` or `PI_MM_JUDGE_URL`). |
+| `judgeMode` | `"auto"` / `"systemone"` / `"heuristic"` / `"off"` | `"auto"` | How quest intent is evaluated on new user messages: `"auto"` / `"systemone"` queries judge, `"heuristic"` uses pattern rules, `"off"` disables automatic quest initiation from prompt text. |
+| `judgeProtocol` | `"auto"` / `"systemzero"` / `"systemone"` | `"auto"` | Decision protocol: `"systemzero"` uses axil-auren's fast binary next-token logit probe (`/api/v1/systemzero/`), `"systemone"` uses standard Jev choice questions (`/api/v1/systemone/`), `"auto"` attempts System Zero first and falls back gracefully to System One. |
+| `judgeUrl` | URL string | `http://127.0.0.1:4242` | Endpoint for judge decisions (falls back to `PI_QUEST_JUDGE_URL` or `PI_MM_JUDGE_URL`). |
 | `judgeModel` | model name | `"qwen"` | Model identifier submitted to the judge service (falls back to `PI_QUEST_JUDGE_MODEL` or `PI_MM_JUDGE_MODEL`). |
 | `judgeKey` | token string | `undefined` | Optional Bearer authorization token for remote endpoints. |
 | `judgeFallback` | `"skip"` / `"heuristic"` | `"skip"` | Fallback policy when the judge is unreachable or times out: `"skip"` fails closed to conversation with trigger prompts, `"heuristic"` falls back to legacy pattern rules. |
 | `judgeTimeoutMs` | number (ms) | `2000` | Network timeout for judge decision evaluations. |
 | `triggerPrefixes` | array of strings | `["quest:", "task:", "fix:", "feat:", "refactor:", "chore:", "test:", "@quest", "!quest"]` | Deterministic word families that immediately start a quest without querying the judge. |
+| `autoStartAuren` | `true` / `false` | `true` | Automatically spawn axil-auren daemon on port 4242 in the background when installed. |
+| `autoDownloadModels` | `"auto"` / `"ask"` / `"never"` | `"ask"` | Auto-download policy for missing default judge models (`small` tier models like `qwen2.5-0.5b` auto-download; `large` tier `olmoe-1b-7b` prompts once for consent). |
 
 ### Environment Variables
 
@@ -257,6 +260,7 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | `PI_QUEST_POLICY_BY_MODEL` | `policyByModel` | Comma-separated `glob=policy` rules, e.g. `anthropic/*=balanced,*flash*=strict`. Settings win over env. |
 | `PI_QUEST_DRAFT_QUALITY` | `draftQuality` | Draft quality mode (`enforce`, `warn`, `off`). |
 | `PI_QUEST_REVIEWER_MODEL` / `PI_REVIEW_MODEL` | `roles.reviewer` | Pin specific provider/model for plan reviews. |
+| `PI_QUEST_JUDGE_PROTOCOL` | `judgeProtocol` | Set decision protocol (`auto`, `systemzero`, `systemone`). |
 | `PI_QUEST_VALIDATOR_MODEL` / `PI_VALIDATOR_MODEL` | `roles.validator` | Pin specific provider/model for validation audits. |
 | `PI_QUEST_JUDGE_MODEL` / `PI_MM_JUDGE_MODEL` | `roles.judge` | Model for Jev System One intent & difficulty judging. |
 | `PI_QUEST_JUDGE_MODE` / `PI_MM_JUDGE_MODE` | `judgeMode` | Judge strategy (`auto`, `systemone`, `heuristic`, `off`). |
@@ -279,13 +283,18 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 3. **Offline Fail-Closed Safety**:
    If the judge is offline or times out, `pi-quest` avoids false-positive regex guesses: it leaves the conversation active and notifies the user to use a trigger prefix (e.g. `quest:`) or `/quest`.
 
-### Diagnostic Commands
+### Diagnostic Commands & Zero-Config Bring-Up
+
+`pi-quest` is completely zero-configuration out of the box:
+- **Automatic Daemon Start**: Upon starting a session, `pi-quest` checks if `axil-auren` is running on port 4242. If offline, it brings up the local server automatically.
+- **Automatic Model Provisioning**: Discovers models in `~/.models/` and auto-downloads the fast decision models (`qwen2.5-0.5b`, `bge-base`) while prompting interactively for large MoE models (`olmoe`).
+- **Proactive Dependency Checks**: Automatically inspects core C engine versions (`axil`, `libcorm`, `libsepal`, `liblemma`, `libjoint`, `axil-auren`) on `session_start`. If any component is missing or outdated, an immediate toast notification alerts the user with remediation steps without needing manual commands.
 
 Run `/quest doctor` (or `/quest-doctor`) in the terminal to inspect health:
 ```text
 /quest doctor
 ```
-Outputs live endpoint connectivity, latency, loaded models, active trigger prefixes, and evaluation policy.
+Outputs live endpoint connectivity, latency, loaded models, core C engine versions, active trigger prefixes, and evaluation policy.
 
 ## Workspace on disk
 

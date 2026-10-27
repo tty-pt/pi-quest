@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #steering — natural language circuit breaking and intent evaluation
+// HIGH_LEVEL: #drafting — natural language circuit breaking and intent evaluation
 // allowing human operators to advance, abort, or refine active quests without rigid keyword matching.
 import { type QuestConfig, resolveRoleModel } from "../config.ts";
 import { normalizeJevUrl } from "../drafting/judge.ts";

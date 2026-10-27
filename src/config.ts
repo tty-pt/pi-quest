@@ -29,6 +29,7 @@ export interface InterfaceBindings {
 
 export type StatusStyle = "icon" | "text";
 export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
+export type JudgeProtocol = "auto" | "systemzero" | "systemone";
 export type JudgeFallback = "heuristic" | "skip";
 export type ReviewPolicy = "strict" | "balanced" | "off";
 
@@ -98,12 +99,15 @@ export interface QuestConfig {
   planRevisionMaxDurationMs?: number;
   planEditor: string | null;
   judgeMode: JudgeMode;
+  judgeProtocol: JudgeProtocol;
   judgeUrl?: string;
   judgeModel?: string;
   judgeKey?: string;
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
   triggerPrefixes: string[];
+  autoStartAuren?: boolean;
+  autoDownloadModels?: "auto" | "ask" | "never";
   midQuest: MidQuestConfig;
   router: RouterConfig;
 }
@@ -141,12 +145,15 @@ export const DEFAULT_CONFIG: QuestConfig = {
   planRevisionMaxDurationMs: 300000,
   planEditor: null,
   judgeMode: "auto",
+  judgeProtocol: "auto",
   judgeUrl: undefined,
   judgeModel: "qwen",
   judgeKey: undefined,
   judgeFallback: "heuristic",
   judgeTimeoutMs: 2000,
   triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
+  autoStartAuren: true,
+  autoDownloadModels: "ask",
   midQuest: DEFAULT_MID_QUEST_CONFIG,
   router: DEFAULT_ROUTER_CONFIG,
 };
@@ -163,18 +170,27 @@ function getEnv(key: string): string | undefined {
 
 function loadJudgeConfig(record: Record<string, unknown>): {
   judgeMode: JudgeMode;
+  judgeProtocol: JudgeProtocol;
   judgeUrl?: string;
   judgeModel?: string;
   judgeKey?: string;
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
   triggerPrefixes: string[];
+  autoStartAuren: boolean;
+  autoDownloadModels: "auto" | "ask" | "never";
 } {
   const rawJudgeMode = record["judgeMode"] ?? getEnv("PI_QUEST_JUDGE_MODE") ?? getEnv("PI_MM_JUDGE_MODE");
   const judgeMode: JudgeMode =
     rawJudgeMode === "auto" || rawJudgeMode === "systemone" || rawJudgeMode === "heuristic" || rawJudgeMode === "off"
       ? rawJudgeMode
       : DEFAULT_CONFIG.judgeMode;
+
+  const rawJudgeProto = record["judgeProtocol"] ?? getEnv("PI_QUEST_JUDGE_PROTOCOL") ?? getEnv("PI_MM_JUDGE_PROTOCOL");
+  const judgeProtocol: JudgeProtocol =
+    rawJudgeProto === "systemzero" || rawJudgeProto === "systemone" || rawJudgeProto === "auto"
+      ? rawJudgeProto
+      : "auto";
 
   const rawJudgeUrl =
     record["judgeUrl"] ??
@@ -220,14 +236,22 @@ function loadJudgeConfig(record: Record<string, unknown>): {
     triggerPrefixes = rawTriggers.split(",").map((t) => t.trim()).filter(Boolean);
   }
 
+  const autoStartRaw = record["autoStartAuren"] ?? getEnv("PI_QUEST_AUTO_START_AUREN") ?? getEnv("PI_MM_AUTO_START_AUREN");
+  const autoStartAuren = typeof autoStartRaw === "boolean" ? autoStartRaw : !(autoStartRaw === "0" || autoStartRaw === "false");
+  const autoDlRaw = record["autoDownloadModels"] ?? getEnv("PI_QUEST_AUTO_DOWNLOAD_MODELS") ?? getEnv("PI_MM_AUTO_DOWNLOAD_MODELS");
+  const autoDownloadModels = autoDlRaw === "auto" || autoDlRaw === "ask" || autoDlRaw === "never" ? autoDlRaw : "ask";
+
   return {
     judgeMode,
+    judgeProtocol,
     judgeUrl,
     judgeModel,
     judgeKey,
     judgeFallback,
     judgeTimeoutMs,
     triggerPrefixes,
+    autoStartAuren,
+    autoDownloadModels,
   };
 }
 

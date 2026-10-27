@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "jsr:@std/assert@^1.0.0";
+import { assertEquals, assertRejects } from "../check.ts";
 import {
   isRateLimitOrQuotaError,
   cleanExpiredCooldowns,

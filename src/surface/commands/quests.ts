@@ -1,20 +1,9 @@
 // HIGH_LEVEL: #commands — list all quests with their states and the active marker.
-import { readdir } from "node:fs/promises";
-import { join } from "node:path";
-import { getState } from "../../app/store";
-import { ARCHIVE_DIR, FUTURE_DIR } from "../../domain/paths";
-import { decodeSnapshot } from "../../durability/snapshots";
-import type { PiCtx } from "../../hooks/events";
-import type { QuestState } from "../../domain/quest";
-
-async function listDir(cwd: string, dir: string, stripExt: string): Promise<string[]> {
-  try {
-    const files = await readdir(join(cwd, dir));
-    return files.map((f) => f.endsWith(stripExt) ? f.slice(0, -stripExt.length) : f).filter((f) => f.length > 0);
-  } catch {
-    return [];
-  }
-}
+import { getState } from "../../app/store.ts";
+import { decodeSnapshot } from "../../durability/snapshots.ts";
+import type { PiCtx } from "../../hooks/events.ts";
+import type { QuestState } from "../../domain/quest.ts";
+import { listArchivedQids, listDraftQids } from "../../files.ts";
 
 export async function questRows(ctx: PiCtx): Promise<string[]> {
   const active = getState();
@@ -30,14 +19,24 @@ export async function questRows(ctx: PiCtx): Promise<string[]> {
       branch.push(state);
     }
   }
-  const futures = await listDir(ctx.cwd, FUTURE_DIR, ".md");
-  const archives = await listDir(ctx.cwd, ARCHIVE_DIR, ".zip");
+  const futures = await listDraftQids(ctx.cwd);
+  const archives = await listArchivedQids(ctx.cwd);
   const mark = (qid: string) => active.qid === qid ? "  ◀ active" : "";
   for (const state of branch) {
     if (state.qid) rows.push(`  ${state.qid} — ${state.phase}${mark(state.qid)}`);
   }
   for (const qid of futures) {
-    if (!seen.has(qid)) rows.push(`  ${qid} — ${active.qid === qid ? (active.phase === "implementing" || active.phase === "validating" ? active.phase : "drafting") : "drafting"}${mark(qid)}`);
+    if (!seen.has(qid)) {
+      rows.push(
+        `  ${qid} — ${
+          active.qid === qid
+            ? (active.phase === "implementing" || active.phase === "validating"
+              ? active.phase
+              : "drafting")
+            : "drafting"
+        }${mark(qid)}`,
+      );
+    }
   }
   for (const qid of archives) {
     rows.push(`  ${qid} — archived`);

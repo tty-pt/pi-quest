@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #router — virtual model routing types for phase × difficulty matrix.
+// HIGH_LEVEL: #configurations — virtual model routing types for phase × difficulty matrix.
 
 export type ModelRouteReason = "user" | "continuation" | "retry" | "direct";
 

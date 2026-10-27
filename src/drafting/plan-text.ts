@@ -239,7 +239,8 @@ export interface PlanCitation {
   lineEnd: number | undefined;
 }
 
-const CITATION_RE = /([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:c|h|ts|md|sh|js|mjs|json|py|mk|yml|yaml|toml|rs|go|css|html|cc|cpp|hpp))[:](\d+)(?:-(\d+))?/g;
+const CITATION_RE =
+  /((?:\.{1,2}\/|\.)?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:c|h|ts|md|sh|js|mjs|json|py|mk|yml|yaml|toml|rs|go|css|html|cc|cpp|hpp))[:](\d+)(?:-(\d+))?/g;
 
 // URLs like http://host/y.c:5 look like citations but are not local refs.
 export function citeLocations(text: string): PlanCitation[] {

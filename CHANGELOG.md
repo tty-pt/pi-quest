@@ -5,9 +5,20 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-10-27
 
 ### Added
+- **Zero-Configuration `axil-auren` Inference Server Bring-Up (`src/auren-bootstrap.ts`)**:
+  - Automatically provisions local inference configuration at `~/.config/auren/config.json` if absent, mapping detected models and capabilities without requiring manual setup.
+  - Automatically manages background daemon startup on port 4242 with socket/HTTP readiness polling and process lifecycle management.
+- **Intelligent Model Provisioning & Tiered Consent (`~/.models/`)**:
+  - Supports automatic discovery and downloading of local models (`qwen2.5-0.5b`, `bge-base`, `bge-small`, `olmoe`) with cryptographic `sha256` verification, resumable range downloads, and atomic file swaps.
+  - Tiered consent: light models download seamlessly, while large MoE models (`olmoe`, 3.3 GB) prompt interactively via `ctx.ui.confirm()` to respect user bandwidth and disk budget.
+- **Proactive C Engine Dependency Tracking on `session_start` (`src/versions.ts`, `src/index.ts`)**:
+  - Pure TypeScript SemVer parser and engine detector inspecting system packages (`pkgconfig`), source repositories (`external/`), and git tags for `axil`, `libcorm`, `libsepal`, `liblemma`, `libjoint`, and `axil-auren`.
+  - Automatically alerts users on `session_start` with concise TUI remediation toasts if any required engine is missing or outdated, eliminating the need to manually invoke `/quest doctor`.
+- **Integrated C Engine Diagnostics in `/quest doctor` (`src/surface/commands/doctor.ts`)**:
+  - Displays full matrix of core C engines, installed versions, required thresholds, and exact copy-paste remediation commands for package managers and source compilation.
 - **`policyByModel`** (`src/policy/effective.ts`): ordered glob rules map the active `provider/id` to `strict` / `balanced` / `off`. The model is read live from `ctx.model` (env fallback); under `quest/auto` the physical model last routed to (`src/router/last-route.ts`) is matched. Applied in draft review, plan-revision review and validation; wake messages and the draft profile name the rule.
 - **`draftQuality`** (`src/drafting/quality.ts`, `quality-config.ts`, `citations.ts`): configurable per-difficulty depth bar — resolvable `file:line` citations, discrete plan steps, a verification step. `mode` `enforce` (default) holds bypassed drafts below the bar, `warn` promotes with an advisory, `off` disables; under `strict` it is advisory reviewer context. Shown in every draft profile.
 - **`/quest-policy`** command: active model, configured vs effective policy, matching rule, quality tiers, and config warnings (`src/surface/commands/policy.ts`, `src/policy/warnings.ts`). Invalid or shadowed `policyByModel` / `draftQuality` settings are reported instead of silently dropped.

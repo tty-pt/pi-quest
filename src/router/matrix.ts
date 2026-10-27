@@ -1,4 +1,4 @@
-// HIGH_LEVEL: #router — deterministic phase × difficulty matrix resolution.
+// HIGH_LEVEL: #configurations — deterministic phase × difficulty matrix resolution.
 import { THINKING_LEVELS } from "../review/model";
 import type { ModelSpec, ParsedModelSpec } from "./types";
 
