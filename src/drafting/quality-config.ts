@@ -33,11 +33,16 @@ function nonNegInt(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
+const MODES: ReadonlySet<string> = new Set(["enforce", "warn", "off"]);
+
+// Accepts the full object, or a bare mode string ("warn"), or a boolean
+// (false = off, true = defaults) for the shortest possible settings line.
 export function parseDraftQuality(raw: unknown): DraftQualityConfig {
+  if (typeof raw === "boolean") return raw ? DEFAULT_DRAFT_QUALITY : { ...DEFAULT_DRAFT_QUALITY, mode: "off" };
+  if (typeof raw === "string") raw = { mode: raw.trim().toLowerCase() };
   const rec = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-  const mode: DraftQualityMode = rec["mode"] === "enforce" || rec["mode"] === "warn" || rec["mode"] === "off"
-    ? rec["mode"]
-    : DEFAULT_DRAFT_QUALITY.mode;
+  const rawMode = typeof rec["mode"] === "string" ? rec["mode"].trim().toLowerCase() : "";
+  const mode: DraftQualityMode = MODES.has(rawMode) ? (rawMode as DraftQualityMode) : DEFAULT_DRAFT_QUALITY.mode;
   const rawTiers = typeof rec["tiers"] === "object" && rec["tiers"] !== null ? (rec["tiers"] as Record<string, unknown>) : {};
   const tiers = {} as Record<QuestDifficulty, DraftQualityTier>;
   for (const tier of TIERS) {

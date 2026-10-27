@@ -22,12 +22,30 @@ export interface EffectivePolicy {
 const POLICIES: ReadonlySet<string> = new Set(["strict", "balanced", "off"]);
 const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max)$/i;
 
+function asPolicy(value: unknown): ReviewPolicy | undefined {
+  if (typeof value !== "string") return undefined;
+  const v = value.trim().toLowerCase();
+  return POLICIES.has(v) ? (v as ReviewPolicy) : undefined;
+}
+
+// Accepts the settings object form ({ "glob": "policy" }) and the env-var
+// string form ("glob=policy,glob=policy"). Order is preserved; invalid entries
+// are dropped here and reported by collectConfigWarnings.
 export function parsePolicyRules(raw: unknown): PolicyRule[] {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
+  let entries: Array<[string, unknown]> = [];
+  if (typeof raw === "string") {
+    entries = raw.split(",").map((part): [string, unknown] => {
+      const eq = part.lastIndexOf("=");
+      return eq < 0 ? ["", ""] : [part.slice(0, eq), part.slice(eq + 1)];
+    });
+  } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    entries = Object.entries(raw as Record<string, unknown>);
+  }
   const rules: PolicyRule[] = [];
-  for (const [pattern, policy] of Object.entries(raw as Record<string, unknown>)) {
-    if (pattern.trim() === "" || typeof policy !== "string" || !POLICIES.has(policy)) continue;
-    rules.push({ pattern: pattern.trim(), policy: policy as ReviewPolicy });
+  for (const [pattern, value] of entries) {
+    const policy = asPolicy(value);
+    if (pattern.trim() === "" || policy === undefined) continue;
+    rules.push({ pattern: pattern.trim(), policy });
   }
   return rules;
 }

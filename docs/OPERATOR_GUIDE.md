@@ -100,6 +100,11 @@ Instead of one global `reviewPolicy`, map the model that is actually working to 
 - Applies to draft review, plan-revision review and validation. The draft profile and bypass wake messages say which rule applied (`review policy: balanced (… matched policyByModel "…")`).
 - Unlisted models use `reviewPolicy` (default `strict`), so an unfamiliar model is never silently trusted.
 
+#### Checking and troubleshooting
+Run `/quest-policy` to see the active model, the configured vs effective policy, the rule that matched, and the quality tiers (the current quest's tier is marked). Invalid settings are not fatal — they fall back to defaults — but `/quest-policy` lists them under **Config Warnings** (bad policy names, unknown tiers, negative numbers, and rules that can never match because an earlier, broader rule shadows them). Put specific rules before general ones.
+
+For one-off overrides without editing settings, use env vars: `PI_QUEST_POLICY_BY_MODEL="anthropic/*=balanced,*flash*=strict"` and `PI_QUEST_DRAFT_QUALITY=warn`. Settings take precedence over env.
+
 ### Draft quality bar (`draftQuality`)
 Under `balanced`/`off` no reviewer reads the plan, so a deterministic depth bar stands in. In addition to the requirement/evidence counts, a draft needs, per difficulty tier:
 
@@ -121,6 +126,8 @@ Under `balanced`/`off` no reviewer reads the plan, so a deterministic depth bar 
   "tiers": { "standard": { "citations": 3, "steps": 4 }, "complex": { "requireVerification": true } }
 }
 ```
+
+Shorthands: `"draftQuality": "warn"` sets just the mode; `"draftQuality": false` disables the check. Omitted tier fields keep their defaults.
 
 ### Role-Based Model Customization (`roles`)
 If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your primary agent, you don't need to burn expensive tokens on reviewing. Delegate review and validation roles to fast, economical models:
@@ -262,6 +269,8 @@ If you prefer explicit, deterministic 1-step routing without relying on natural 
 | `Ctrl + Q` | Open the floating plan viewer overlay at any time. |
 | `/quest` | Pick an idle quest, resume a previous quest, or view active status. |
 | `/quest doctor` / `/quest-doctor` | Test live health of decision judge, latency, models, and word families. |
+| `/quest-policy` | Show the effective review policy for the active model, the matching `policyByModel` rule, the draft quality tiers, and config warnings. |
+| `/quest-router` | Show the `quest/auto` router cell, models and cooldowns. |
 | `/quests` | Display all active, draft, and archived quests in a widget. |
 | `/quest-del` | Abandon and archive the active quest or pop a child sub-quest. |
 

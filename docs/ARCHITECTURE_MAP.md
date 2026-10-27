@@ -18,12 +18,21 @@ src/
     detect.ts       intent detection and trigger prefix routing
     judge.ts        Jev System One neural quest intent classification
     plan-text.ts    markdown plan section extraction, RTM items, citation parsing
+    citations.ts    resolves cited file:line locations against the working tree
+    quality-config.ts draftQuality settings: types, per-tier defaults, forgiving parser
+    quality.ts      draftQuality assessor: resolvable citations, plan steps, verification step
+    bypass.ts       balanced/off policy bypass: promote at the bar, otherwise wake the agent with what is missing
     reviews.ts      draft review booting, catch-all turn-end monitor, threshold enforcement
     draft-retry.ts  backoff retry dispatcher for transient reviewer launch failures
     gate.ts         turn termination during active review
     edits.ts        draft file edit tracking and content hashing
     promotion.ts    verdict evaluation, advisory attachments, phase advancement
     resume.ts       session startup review recovery
+  policy/           model-aware review policy
+    effective.ts    policyByModel rules (glob → policy), active-model resolution, withEffectivePolicy
+    warnings.ts     collectConfigWarnings: readable warnings for ignored policy/quality settings
+  router/           quest/auto virtual model: phase × difficulty routing
+    last-route.ts   remembers the physical model last routed to (feeds policyByModel)
   implementing/     plan execution and adaptation
     plan-revision.ts re-reviewable in-flight plan revisions
     setbacks.ts     automatic test/build failure extraction
@@ -44,10 +53,10 @@ src/
     transcript.ts   session history extraction for review context
   surface/          agent and user interaction layer
     tools/          tools: quest_update_state, quest_subquest, quest_archive, quest_recover, quest_rebut, quest_ask_human
-    commands/       user commands: /quest, /quests, /quest-del, /quest doctor
+    commands/       user commands: /quest, /quests, /quest-del, /quest doctor, /quest-router, /quest-policy, /quest-cancel-review
     plan.ts         full-screen terminal plan viewer overlay ([^Q])
 scripts/            dag · complexity (<80 func, <350 file) · spec-map · zip
-tests/              367 tests across 53 test suites covering all domain, drafting, validation, and UI systems
+tests/              ~500 tests across 66 test suites covering all domain, drafting, validation, and UI systems
 ```
 
 - Architectural invariants:

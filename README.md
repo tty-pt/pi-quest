@@ -152,6 +152,8 @@ Engine usage — commands for the user:
 | `/quest <qid\|name>` | Resume a named quest or drafting phase directly. |
 | `/quest doctor` | Check judge endpoint health, network latency, detected models, and active trigger word families. |
 | `/quest-doctor` | Dedicated command alias for `/quest doctor`. |
+| `/quest-policy` | Show the review policy in force for the active model (which `policyByModel` rule matched), the draft quality bar per difficulty, and any ignored/invalid settings. |
+| `/quest-router` | Inspect the `quest/auto` router: active phase × difficulty cell, resolved models, cooldowns, matrix. |
 | `/quests` | List all quests with their phases and the active marker in an interactive terminal widget. |
 | `/quest-del [qid]` | Archive (kill) the current or named quest. Only you can abandon a quest this way. |
 
@@ -219,8 +221,8 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | Setting | Values | Default | Effect |
 |---------|--------|---------|--------|
 | `reviewPolicy` | `"strict"` / `"balanced"` / `"off"` | `"strict"` | Review intensity: `"strict"` audits every plan and validation; `"balanced"` skips reviews on `trivial` and `standard` tasks when tests pass and audits `complex` tasks; `"off"` runs zero subagent reviews. |
-| `policyByModel` | object: glob → policy | `{}` | Pick `reviewPolicy` from the model doing the work. Ordered rules matched against `provider/id` (`*` wildcard, case-insensitive, first match wins); no match keeps `reviewPolicy`. Under `quest/auto` the physical model it routed to is matched. See the operator guide. |
-| `draftQuality` | object | `{ mode: "enforce", tiers: {…} }` | Deterministic depth bar for drafts: resolvable `file:line` citations, discrete plan steps, a verification step — per difficulty tier. `mode`: `"enforce"` holds bypassed (balanced/off) drafts below the bar, `"warn"` only reports, `"off"` disables. Defaults: standard 2 citations / 3 steps / verification, complex 4 / 5 / verification, trivial 0 / 1 / —. |
+| `policyByModel` | object: glob → policy | `{}` | Pick `reviewPolicy` from the model doing the work. Ordered rules matched against `provider/id` (`*` wildcard, case-insensitive, first match wins); no match keeps `reviewPolicy`. Check with `/quest-policy`. Under `quest/auto` the physical model it routed to is matched. See the operator guide. |
+| `draftQuality` | object | `{ mode: "enforce", tiers: {…} }` | Deterministic depth bar for drafts: resolvable `file:line` citations, discrete plan steps, a verification step — per difficulty tier. Shorthand: `"draftQuality": "warn"` (or `false` to disable). `mode`: `"enforce"` holds bypassed (balanced/off) drafts below the bar, `"warn"` only reports, `"off"` disables. Defaults: standard 2 citations / 3 steps / verification, complex 4 / 5 / verification, trivial 0 / 1 / —. |
 | `roles.reviewer` | model name / id | `undefined` (inherit) | Model used for plan review subagents (e.g. `"google/gemini-2.5-flash"`). Fallback: `PI_QUEST_REVIEWER_MODEL`. |
 | `roles.reviewerFallback` | model id or list | `[]` | Ordered fallback models for plan review when the reviewer model fails with a provider/model/rate-limit error. |
 | `roles.validatorFallback` | model id or list | `[]` | Same, for validation subagents. |
@@ -252,6 +254,8 @@ All settings are optional and live in `.pi/settings.json` under `"pi-quest"`:
 | Variable | Corresponds to | Description |
 | :--- | :--- | :--- |
 | `PI_QUEST_REVIEW_POLICY` | `reviewPolicy` | Set review intensity (`strict`, `balanced`, `off`). |
+| `PI_QUEST_POLICY_BY_MODEL` | `policyByModel` | Comma-separated `glob=policy` rules, e.g. `anthropic/*=balanced,*flash*=strict`. Settings win over env. |
+| `PI_QUEST_DRAFT_QUALITY` | `draftQuality` | Draft quality mode (`enforce`, `warn`, `off`). |
 | `PI_QUEST_REVIEWER_MODEL` / `PI_REVIEW_MODEL` | `roles.reviewer` | Pin specific provider/model for plan reviews. |
 | `PI_QUEST_VALIDATOR_MODEL` / `PI_VALIDATOR_MODEL` | `roles.validator` | Pin specific provider/model for validation audits. |
 | `PI_QUEST_JUDGE_MODEL` / `PI_MM_JUDGE_MODEL` | `roles.judge` | Model for Jev System One intent & difficulty judging. |

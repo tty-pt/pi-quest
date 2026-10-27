@@ -53,6 +53,16 @@ quest id (`future/<qid>.md`); there are no slugs.
     trivial and standard tasks auto-promote to coding immediately without subagent
     review delay; complex tasks undergo full review. Under `reviewPolicy: "off"`,
     all subagent reviews are bypassed while retaining full quest journal structure.
+  - **Depth bar (`draftQuality`):** when review is bypassed (balanced/off) the plan is
+    gated on more than counts. For `standard` quests: at least 2 `file:line` citations
+    that really resolve in the repo (evidence or plan), at least 3 discrete plan steps
+    written as a numbered/bulleted list (not prose), and an explicit verification step
+    (a test or check). `complex` wants 4 citations / 5 steps; `trivial` almost nothing.
+    The draft profile (`checkPlan`, every save) shows the quality line and what is
+    missing — build up to it before saving. Cite only locations you actually read.
+  - **Model-aware policy:** `policyByModel` may switch the review policy by the model in
+    use, so the same repo can be balanced for a frontier model and strict for a weaker
+    one. The draft profile names the rule when it applies.
   - **Two-strike safety pause:** if a review or validation is rejected 2 consecutive
     times, the automated review loop automatically pauses to prevent thrashing and
     prompts the human operator for guidance.

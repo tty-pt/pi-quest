@@ -412,8 +412,8 @@ export function loadConfig(raw: unknown): QuestConfig {
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
     autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
     reviewPolicy,
-    policyByModel: parsePolicyRules(record["policyByModel"]),
-    draftQuality: parseDraftQuality(record["draftQuality"]),
+    policyByModel: parsePolicyRules(record["policyByModel"] ?? getEnv("PI_QUEST_POLICY_BY_MODEL")),
+    draftQuality: parseDraftQuality(record["draftQuality"] ?? getEnv("PI_QUEST_DRAFT_QUALITY")),
     reviewerModel,
     validatorModel,
     roles,
@@ -476,6 +476,16 @@ export function resolveRoleModel(
   if (role === "validator") return cfg.roles.validator ?? cfg.validatorModel;
   if (role === "judge") return cfg.roles.judge ?? cfg.judgeModel;
   return undefined;
+}
+
+// The raw "pi-quest" settings section (unvalidated), for diagnostics.
+export async function readQuestSettings(cwd: string): Promise<unknown> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(cwd, ".pi", "settings.json"), "utf8"));
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>)["pi-quest"] : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function readQuestConfig(cwd: string): Promise<QuestConfig> {
