@@ -6,7 +6,7 @@
 import { check } from "../check.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
 import { clearIntentMemo, interpretUserTurn, type UserIntentKind } from "../../src/domain/intent.ts";
-import { clearEmbedState } from "../../src/judge/embed.ts";
+import { type Case, evaluateStrategy, formatReport, serverInfo, type Strategy } from "./harness.ts";
 
 const LIVE = Deno.env.get("PI_QUEST_EVAL_JUDGE") === "1";
 const URL_ = Deno.env.get("PI_QUEST_EVAL_URL") ?? "http://127.0.0.1:4242";
@@ -37,20 +37,19 @@ Deno.test({
   fn: async () => {
     const cfg: QuestConfig = { ...DEFAULT_CONFIG, judgeMode: "auto", judgeUrl: URL_, judgeProtocol: "systemone" };
     const actionable = new Set<string>(["advance", "abort", "constraint", "subquest_now", "subquest_later"]);
-    let ok = 0;
-    let falseActions = 0;
-    const misses: string[] = [];
-    for (const [text, want] of CORPUS) {
-      clearIntentMemo();
-      clearEmbedState();
-      const got = await interpretUserTurn(text, "implementing", cfg);
-      if (got.kind === want) ok += 1;
-      else misses.push(`${text} => ${got.kind} (${got.source}), want ${want}`);
-      if (actionable.has(got.kind) && got.kind !== want) falseActions += 1;
-    }
-    console.log(`intent eval: ${ok}/${CORPUS.length} correct, ${falseActions} false actions`);
-    for (const m of misses) console.log(`  miss: ${m}`);
-    check(falseActions === 0, `${falseActions} false state-changing verdicts`);
-    check(ok / CORPUS.length >= 0.8, `accuracy ${ok}/${CORPUS.length}`);
+    const strategy: Strategy = {
+      name: `embeddings(${cfg.embedModel})`,
+      classify: async (text) => {
+        clearIntentMemo();
+        const got = await interpretUserTurn(text, "implementing", cfg);
+        return got.source === "embed" ? got.kind : null;
+      },
+    };
+    const corpus: Case[] = CORPUS.map(([text, want]) => ({ text, want }));
+    console.log(await serverInfo(cfg));
+    const r = await evaluateStrategy(strategy, corpus, { stateChanging: actionable });
+    console.log(formatReport("steering", r));
+    check(r.falsePositives === 0, `${r.falsePositives} false state-changing verdicts`);
+    check(r.accuracy >= 0.8, `accuracy ${r.correct}/${r.total}`);
   },
 });

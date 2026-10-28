@@ -5,6 +5,8 @@
 import type { QuestConfig } from "../config.ts";
 import type { QuestDifficulty } from "../domain/quest.ts";
 import { askJudgeChoice, extractJevAnswer, resolveChoice, type JudgeQuestion } from "../judge/choice.ts";
+import { gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
+import { DIFFICULTY_EXEMPLARS, DIFFICULTY_KINDS } from "./difficulty-exemplars.ts";
 
 export const DIFFICULTY_QUESTION: JudgeQuestion = {
   id: "quest_difficulty",
@@ -51,9 +53,27 @@ export async function callJevDifficultyJudge(prompt: string, cfg: QuestConfig): 
 
 export interface QuestDifficultyResult {
   difficulty: QuestDifficulty;
-  source: "judge" | "heuristic" | "default" | "override";
+  source: "embed" | "judge" | "heuristic" | "default" | "override";
   degraded?: boolean;
   reason?: string;
+}
+
+/**
+ * Embedding verdict for the request's difficulty, or null when embeddings are unavailable.
+ * `trivial` and `complex` need `intentMinSimilarity` AND `difficultyMinMargin` over the
+ * runner-up level; anything weaker is `standard`, so a doubtful request never loses plan
+ * review (held-out: 0 wrong-trivial in 135 requests where the judge made 52).
+ */
+export async function classifyDifficultyByEmbedding(prompt: string, cfg: QuestConfig): Promise<QuestDifficulty | null> {
+  const examples = mergeExemplars(DIFFICULTY_EXEMPLARS, cfg.difficultyExemplars, DIFFICULTY_KINDS);
+  const verdict = await nearestExemplar(cfg, examples, prompt);
+  if (verdict === null) return null;
+  return gate(verdict, {
+    minSimilarity: cfg.intentMinSimilarity,
+    minMargin: cfg.difficultyMinMargin,
+    harmless: "standard",
+    actionable: new Set(["trivial", "complex"]),
+  }) as QuestDifficulty;
 }
 
 export async function evaluateQuestDifficulty(
@@ -79,7 +99,16 @@ export async function evaluateQuestDifficulty(
     };
   }
 
-  // 3. Auto / Judge mode without configured URL
+  // 3. Auto mode: embeddings decide when available (deterministic, ~20 ms); an explicit
+  // `judge` mode skips them. The judge and the structural heuristic remain the fallbacks.
+  if (cfg.difficultyMode === "auto") {
+    const embedded = await classifyDifficultyByEmbedding(prompt, cfg);
+    if (embedded !== null) {
+      return { difficulty: embedded, source: "embed", reason: "Nearest difficulty exemplar (embeddings)" };
+    }
+  }
+
+  // 4. Auto / Judge mode without configured URL
   if (!cfg.judgeUrl || cfg.judgeUrl.trim() === "") {
     if (cfg.difficultyMode === "judge" && cfg.judgeFallback === "skip") {
       return {
@@ -98,7 +127,7 @@ export async function evaluateQuestDifficulty(
     };
   }
 
-  // 4. Try remote Jev judge
+  // 5. Try remote Jev judge
   try {
     const choice = await callJevDifficultyJudge(prompt, cfg);
     return {

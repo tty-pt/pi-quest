@@ -155,7 +155,9 @@ Deno.test("ctrl+q via onTerminalInput opens the plan viewer", async () => {
   const handler = ctx.inputHandlers[ctx.inputHandlers.length - 1];
   const result = handler("\x11"); // raw ctrl+Q
   check(result?.consume === true, "ctrl+Q consumed");
-  await new Promise((r) => setTimeout(r, 50)); // let async viewActivePlan settle (file I/O)
+  // viewActivePlan reads the draft (file I/O) before opening the viewer; wait for that condition,
+  // not for a fixed sleep that whole-suite load can overrun (bounded so a real failure still fails).
+  for (let waited = 0; !opened && waited < 2000; waited += 5) await new Promise((r) => setTimeout(r, 5));
   check(opened, "viewer opened on ctrl+Q");
   // Non-ctrl+Q passes through.
   opened = false;

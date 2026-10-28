@@ -132,6 +132,20 @@ export interface QuestConfig {
   intentMinSimilarity: number;
   /** Operator exemplars per intent kind (any language), merged with the shipped defaults. */
   intentExemplars: Record<string, string[]>;
+  /**
+   * Best-vs-runner-up cosine margin a message must clear to OPEN a quest by embeddings. Higher than
+   * `intentMinMargin` because a false quest is costlier than a missed one (use /quest or a trigger).
+   */
+  questMinMargin: number;
+  /** Operator exemplars for quest detection (kinds `quest` / `conversation`), merged with the shipped ones. */
+  questExemplars: Record<string, string[]>;
+  /**
+   * Best-vs-runner-up cosine margin a `trivial` or `complex` embedding verdict must clear; anything
+   * weaker is `standard`. A wrong `trivial` drops plan review, so this is a safety gate.
+   */
+  difficultyMinMargin: number;
+  /** Operator exemplars for difficulty (kinds `trivial` / `standard` / `complex`), merged with the shipped ones. */
+  difficultyExemplars: Record<string, string[]>;
   triggerPrefixes: string[];
   /** Operator-owned exact messages (any language) that advance a quest when the judge is unavailable. */
   steeringPhrases: string[];
@@ -190,6 +204,10 @@ export const DEFAULT_CONFIG: QuestConfig = {
   intentMinMargin: 0.075,
   intentMinSimilarity: 0.6,
   intentExemplars: {},
+  questMinMargin: 0.1,
+  questExemplars: {},
+  difficultyMinMargin: 0.075,
+  difficultyExemplars: {},
   triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
   steeringPhrases: [],
   testCommands: [],
@@ -568,6 +586,19 @@ export function loadConfig(raw: unknown): QuestConfig {
       DEFAULT_CONFIG.intentMinSimilarity,
     ),
     intentExemplars: parseExemplars(record["intentExemplars"]),
+    questMinMargin: unitInterval(record["questMinMargin"] ?? getEnv("PI_QUEST_QUEST_MIN_MARGIN"), DEFAULT_CONFIG.questMinMargin),
+    difficultyMinMargin: unitInterval(
+      record["difficultyMinMargin"] ?? getEnv("PI_QUEST_DIFFICULTY_MIN_MARGIN"),
+      DEFAULT_CONFIG.difficultyMinMargin,
+    ),
+    difficultyExemplars: Object.fromEntries(
+      Object.entries(parseExemplars(record["difficultyExemplars"])).filter(([kind]) =>
+        kind === "trivial" || kind === "standard" || kind === "complex"
+      ),
+    ),
+    questExemplars: Object.fromEntries(
+      Object.entries(parseExemplars(record["questExemplars"])).filter(([kind]) => kind === "quest" || kind === "conversation"),
+    ),
     steeringPhrases: stringList(record["steeringPhrases"]),
     testCommands: stringList(record["testCommands"]),
     lintRules: parseLintRules(record["lintRules"]),

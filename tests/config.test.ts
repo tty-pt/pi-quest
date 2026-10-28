@@ -128,6 +128,10 @@ Deno.test("judge and intent defaults work out of the box (systemone + olmoe + em
   check(d.embedUrl === "http://127.0.0.1:4242", "embedUrl follows the judge url");
   check(d.intentMinMargin === 0.075 && d.intentMinSimilarity === 0.6, "calibrated intent thresholds");
   check(Object.keys(d.intentExemplars).length === 0, "no operator exemplars by default");
+  check(d.questMinMargin === 0.1, "quest detection margin calibrated on held-out corpus B");
+  check(Object.keys(d.questExemplars).length === 0, "no operator quest exemplars by default");
+  check(d.difficultyMinMargin === 0.075, "difficulty margin validated on held-out corpus C");
+  check(Object.keys(d.difficultyExemplars).length === 0, "no operator difficulty exemplars by default");
 });
 
 Deno.test("intent and embedding settings are configurable and validated", () => {
@@ -138,11 +142,20 @@ Deno.test("intent and embedding settings are configurable and validated", () => 
     intentMinMargin: 0.2,
     intentMinSimilarity: "0.7",
     intentExemplars: { advance: ["vamos", "", 3], bogus: "x" },
+    questMinMargin: "0.2",
+    questExemplars: { quest: ["faz isto", ""], conversation: ["olá"], bogus: ["x"] },
   });
+  const dc = loadConfig({ difficultyMinMargin: "0.2", difficultyExemplars: { trivial: ["x", ""], complex: ["y"], bogus: ["z"] } });
+  check(dc.difficultyMinMargin === 0.2, "difficultyMinMargin, numeric strings accepted");
+  check(JSON.stringify(dc.difficultyExemplars) === JSON.stringify({ trivial: ["x"], complex: ["y"] }), "difficulty exemplars sanitized to known levels");
+  check(loadConfig({ difficultyMinMargin: 9 }).difficultyMinMargin === 0.075, "out-of-range difficultyMinMargin falls back");
+  check(c.questMinMargin === 0.2, "questMinMargin, numeric strings accepted");
+  check(JSON.stringify(c.questExemplars) === JSON.stringify({ quest: ["faz isto"], conversation: ["olá"] }), "quest exemplars sanitized to known kinds");
   check(c.embedMode === "off" && c.embedUrl === "http://emb.test" && c.embedModel === "bge-small", "embedding settings");
   check(c.intentMinMargin === 0.2 && c.intentMinSimilarity === 0.7, "thresholds, numeric strings accepted");
   check(JSON.stringify(c.intentExemplars) === JSON.stringify({ advance: ["vamos"] }), "exemplars sanitized");
   const bad = loadConfig({ intentMinMargin: 5, intentMinSimilarity: -1, embedMode: "maybe" });
   check(bad.embedMode === "auto" || Deno.env.get("PI_QUEST_EMBED_MODE") === "off", "unknown embedMode never means off by itself");
   check(bad.intentMinMargin === 0.075 && bad.intentMinSimilarity === 0.6, "out-of-range thresholds fall back");
+  check(loadConfig({ questMinMargin: 9 }).questMinMargin === 0.1, "out-of-range questMinMargin falls back");
 });

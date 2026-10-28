@@ -11,7 +11,7 @@
 // weaker degrades to a recorded refinement, which can never advance, abort or
 // archive a quest.
 import { type QuestConfig } from "../config.ts";
-import { cosine, embedBaseUrl, embedTexts } from "../judge/embed.ts";
+import { clearNearestIndexes, type Exemplar, gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
 import { DEFAULT_INTENT_EXEMPLARS } from "./intent-exemplars.ts";
 
 export type UserIntentKind =
@@ -109,50 +109,13 @@ const EMBED_KINDS: ReadonlySet<string> = new Set<UserIntentKind>([
   "advance", "abort", "constraint", "subquest_now", "subquest_later", "question", "ack", "refinement",
 ]);
 
-interface ExemplarIndex {
-  kinds: string[];
-  vectors: number[][];
-}
-
-const exemplarIndexes = new Map<string, Promise<ExemplarIndex | null>>();
-
 /** Shipped exemplars plus the operator's, de-duplicated, restricted to known kinds. */
-export function mergedExemplars(cfg: QuestConfig): Array<{ kind: string; text: string }> {
-  const out: Array<{ kind: string; text: string }> = [];
-  const seen = new Set<string>();
-  const add = (kind: string, texts: readonly string[]): void => {
-    if (!EMBED_KINDS.has(kind)) return;
-    for (const text of texts) {
-      const key = `${kind}\u0000${text}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push({ kind, text });
-      }
-    }
-  };
-  for (const [kind, texts] of Object.entries(DEFAULT_INTENT_EXEMPLARS)) add(kind, texts);
-  for (const [kind, texts] of Object.entries(cfg.intentExemplars)) add(kind, texts);
-  return out;
+export function mergedExemplars(cfg: QuestConfig): Exemplar[] {
+  return mergeExemplars(DEFAULT_INTENT_EXEMPLARS, cfg.intentExemplars, EMBED_KINDS);
 }
 
 export function clearExemplarIndexes(): void {
-  exemplarIndexes.clear();
-}
-
-function exemplarIndex(cfg: QuestConfig, base: string): Promise<ExemplarIndex | null> {
-  const examples = mergedExemplars(cfg);
-  const key = [base, cfg.embedModel, examples.map((e) => `${e.kind}:${e.text}`).join("\u0001")].join("\u0000");
-  let hit = exemplarIndexes.get(key);
-  if (hit === undefined) {
-    // First use embeds every exemplar in one batch; a slow cold start must not abort it.
-    const timeoutMs = Math.max((cfg.judgeTimeoutMs || 2000) * 4, 8000);
-    hit = embedTexts(cfg, examples.map((e) => e.text), { timeoutMs }).then((vectors) =>
-      vectors === null ? null : { kinds: examples.map((e) => e.kind), vectors }
-    );
-    exemplarIndexes.set(key, hit);
-    void hit.then((v) => { if (v === null) exemplarIndexes.delete(key); });
-  }
-  return hit;
+  clearNearestIndexes();
 }
 
 /**
@@ -161,27 +124,14 @@ function exemplarIndex(cfg: QuestConfig, base: string): Promise<ExemplarIndex | 
  * other kind; everything weaker is a refinement.
  */
 async function classifyByEmbedding(text: string, cfg: QuestConfig): Promise<UserIntentKind | null> {
-  const base = embedBaseUrl(cfg);
-  if (base === null) return null;
-  const index = await exemplarIndex(cfg, base);
-  if (index === null) return null;
-  const vec = await embedTexts(cfg, [text]);
-  const probe = vec?.[0];
-  if (probe === undefined) return null;
-  const best = new Map<string, number>();
-  index.vectors.forEach((v, i) => {
-    const kind = index.kinds[i] ?? "";
-    const sim = cosine(probe, v);
-    if (sim > (best.get(kind) ?? -Infinity)) best.set(kind, sim);
-  });
-  const ranked = [...best.entries()].sort((a, b) => b[1] - a[1]);
-  const top = ranked[0];
-  if (top === undefined) return null;
-  const margin = top[1] - (ranked[1]?.[1] ?? -1);
-  if (top[1] < cfg.intentMinSimilarity) return "refinement";
-  const kind = top[0] as UserIntentKind;
-  if (ACTIONABLE.has(kind) && margin < cfg.intentMinMargin) return "refinement";
-  return kind;
+  const verdict = await nearestExemplar(cfg, mergedExemplars(cfg), text);
+  if (verdict === null) return null;
+  return gate(verdict, {
+    minSimilarity: cfg.intentMinSimilarity,
+    minMargin: cfg.intentMinMargin,
+    harmless: "refinement",
+    actionable: ACTIONABLE,
+  }) as UserIntentKind;
 }
 
 async function interpret(text: string, phase: string, cfg: QuestConfig): Promise<UserIntent> {
