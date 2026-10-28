@@ -105,21 +105,13 @@ Deno.test("operator questExemplars extend the shipped ones", async () => {
   }
 });
 
-Deno.test("embeddings down falls to the judge, then to the structural fallback", async () => {
+Deno.test("embeddings down falls to the structural fallback", async () => {
   fresh();
-  const viaJudge = stubJudgeFetch(() => "quest"); // no embed => /v1/embeddings is down
-  try {
-    const r = await evaluateQuestIntent("build me a thing", ON);
-    check(r.isQuest === true && r.source === "llm", `judge answered, got ${r.isQuest}/${r.source}`);
-  } finally {
-    viaJudge();
-    fresh();
-  }
   const bothDown = stubJudgeFetch(() => null);
   try {
-    const r = await evaluateQuestIntent("build me a thing", { ...ON, judgeFallback: "heuristic" });
+    const r = await evaluateQuestIntent("build me a thing", { ...ON, embedMode: "off", judgeFallback: "heuristic" });
     check(r.isQuest === false && r.source === "heuristic" && r.degraded === true, "structural fallback, degraded");
-    const header = await evaluateQuestIntent("# Quest: do it", { ...ON, judgeFallback: "heuristic" });
+    const header = await evaluateQuestIntent("# Quest: do it", { ...ON, embedMode: "off", judgeFallback: "heuristic" });
     check(header.isQuest === true, "a pasted quest header still counts");
   } finally {
     bothDown();

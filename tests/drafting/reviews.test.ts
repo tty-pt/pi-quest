@@ -755,3 +755,52 @@ Deno.test("balanced e2e: saving a standard plan promotes without leaving the too
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("a stale PASS verdict with no review in flight re-boots the review instead of stalling", async () => {
+  const d = await draftFailureSetup("stal01" as Qid);
+  const bus = retryBus();
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    // A newer boot took over and then vanished: the tracker holds no entry for
+    // the target this verdict answers, and nothing is in flight.
+    // The race: the verdict lands, then the supersede cancels the tracker
+    // entry before the flow settles it.
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\n\nSolid." },
+    });
+    cancelReview(d.qid);
+    check(!hasInFlight(d.qid), "nothing in flight after the supersede");
+    await booted;
+    await new Promise((r) => setTimeout(r, 20));
+    const stillDrafting = getState().phase === "drafting";
+    const rebooted = requests(bus.emitted).length >= 2;
+    const woke = wakes(bus.pi).length > 0;
+    check(!stillDrafting || rebooted || woke, "a stale verdict must re-boot a review or wake the agent, never stall silently");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("a stale verdict leaves a genuinely newer in-flight review alone", async () => {
+  const d = await draftFailureSetup("stal02" as Qid);
+  const bus = retryBus();
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    const firstRequest = requests(bus.emitted)[0]["requestId"];
+    trackReview(d.qid, "newer-target", () => {});
+    bus.feed({ requestId: firstRequest, status: "completed", result: { kind: "text", text: "VERDICT: PASS\n\nOk." } });
+    await booted;
+    await new Promise((r) => setTimeout(r, 20));
+    check(requests(bus.emitted).length === 1, "no extra review booted while a newer one is in flight");
+    check(hasInFlight(d.qid), "the newer review stays tracked");
+    check(getState().phase === "drafting", "a stale PASS never promotes");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});

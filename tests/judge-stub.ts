@@ -18,7 +18,13 @@ export type EmbedAnswer = (text: string) => number[] | null;
 export function stubJudgeFetch(answer: JudgeAnswer, embed?: EmbedAnswer): () => void {
   const real = globalThis.fetch;
   globalThis.fetch = ((url: unknown, init?: { body?: string }) => {
-    if (String(url).includes("/v1/embeddings")) {
+    const urlStr = String(url);
+    if (urlStr.includes("/v1/classify")) {
+      // In the mock/stub environment for existing embed-counting tests,
+      // return 404 to let tests testing local batch embedding and index caching fall back seamlessly
+      return Promise.resolve(new Response("classify not available in mock", { status: 404 }));
+    }
+    if (urlStr.includes("/v1/embeddings")) {
       if (embed === undefined) return Promise.resolve(new Response("down", { status: 503 }));
       const input = (JSON.parse(init?.body ?? "{}") as { input?: string | string[] }).input ?? [];
       const texts = Array.isArray(input) ? input : [input];

@@ -10,8 +10,9 @@
 import { check } from "../check.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
 import { judgeHasVerificationStep } from "../../src/drafting/quality.ts";
+import { VERIFICATION_EXEMPLARS, VERIFY_CLUSTERS } from "../../src/drafting/verification-exemplars.ts";
 import { gate, mergeExemplars, nearestExemplar } from "../../src/judge/nearest.ts";
-import { PLAN_CORPUS, STEP_EXEMPLARS } from "./corpora/plan-verification.ts";
+import { PLAN_CORPUS, PLAN_CORPUS_A, PLAN_CORPUS_B, STEP_EXEMPLARS } from "./corpora/plan-verification.ts";
 import { runComparison, type Strategy } from "./harness.ts";
 
 const LIVE = Deno.env.get("PI_QUEST_EVAL_JUDGE") === "1";
@@ -26,15 +27,17 @@ export function planSteps(plan: string): string[] {
 }
 
 Deno.test("plan corpus is large, balanced, bilingual and disjoint from the exemplars", () => {
-  check(PLAN_CORPUS.length >= 40, `>= 40 cases, got ${PLAN_CORPUS.length}`);
-  const yes = PLAN_CORPUS.filter((c) => c.want === "yes").length;
-  check(yes >= 15 && PLAN_CORPUS.length - yes >= 15, `balanced labels (${yes} yes)`);
-  check(PLAN_CORPUS.some((c) => /Adicionar|Corrigir|Atualizar|Mover/.test(c.text)), "Portuguese cases present");
-  check(new Set(PLAN_CORPUS.map((c) => c.text)).size === PLAN_CORPUS.length, "no duplicate cases");
-  const exemplarTexts = new Set(Object.values(STEP_EXEMPLARS).flat().map((t) => t.toLowerCase()));
-  for (const c of PLAN_CORPUS) {
-    for (const step of planSteps(c.text)) {
-      check(!exemplarTexts.has(step.toLowerCase()), `corpus step is an exemplar: ${step}`);
+  for (const [name, corpus] of [["A", PLAN_CORPUS_A], ["B", PLAN_CORPUS_B]] as const) {
+    check(corpus.length >= 40, `corpus ${name}: >= 40 cases, got ${corpus.length}`);
+    const yes = corpus.filter((c) => c.want === "yes").length;
+    check(yes >= 15 && corpus.length - yes >= 15, `corpus ${name}: balanced labels (${yes} yes)`);
+    check(corpus.some((c) => /Adicionar|Corrigir|Atualizar|Mover|Criar/.test(c.text)), `corpus ${name}: Portuguese cases present`);
+    check(new Set(corpus.map((c) => c.text)).size === corpus.length, `corpus ${name}: no duplicate cases`);
+    const exemplarTexts = new Set(Object.values(STEP_EXEMPLARS).flat().map((t) => t.toLowerCase()));
+    for (const c of corpus) {
+      for (const step of planSteps(c.text)) {
+        check(!exemplarTexts.has(step.toLowerCase()), `corpus ${name} step is an exemplar: ${step}`);
+      }
     }
   }
 });
@@ -83,5 +86,43 @@ Deno.test({
     console.log(`recall embeddings: ${recall(out.embed)} (false "no" = plans wrongly blocked: ${out.embed.falsePositives})`);
     if (out.judge !== null) console.log(`recall judge: ${recall(out.judge)} (false "no" = plans wrongly blocked: ${out.judge.falsePositives})`);
     check(out.embed.total === PLAN_CORPUS.length, "every case evaluated");
+  },
+});
+
+Deno.test({
+  name: "live: plan verification held-out corpus B validation",
+  ignore: !LIVE,
+  fn: async () => {
+    const cfg: QuestConfig = { ...DEFAULT_CONFIG, judgeMode: "auto", judgeUrl: URL_, judgeProtocol: "systemone" };
+    const examples = mergeExemplars(VERIFICATION_EXEMPLARS, {});
+    const embed: Strategy = {
+      name: `decomposed-embeddings(${cfg.embedModel})`,
+      classify: async (plan) => {
+        const steps = planSteps(plan);
+        if (steps.length === 0) return null;
+        let anyAnswer = false;
+        for (const step of steps) {
+          const v = await nearestExemplar(cfg, examples, step);
+          if (v === null) continue;
+          anyAnswer = true;
+          if (VERIFY_CLUSTERS.has(v.kind) && v.similarity >= 0.45 && v.margin >= 0.02) {
+            return "yes";
+          }
+        }
+        return anyAnswer ? "no" : null;
+      },
+    };
+    const out = await runComparison("plan verification corpus B", PLAN_CORPUS_B, cfg, embed, null, new Set(["no"]));
+    const noTotal = out.embed.byLabel["no"]?.total ?? 0;
+    const noCorrect = out.embed.byLabel["no"]?.correct ?? 0;
+    const gapDetectionRate = noTotal > 0 ? noCorrect / noTotal : 0;
+
+    console.log(`Corpus B false negatives (wrong "no" verdicts): ${out.embed.falsePositives}`);
+    console.log(`Corpus B gap detection rate: ${(gapDetectionRate * 100).toFixed(1)}% (${noCorrect}/${noTotal})`);
+
+    // Pass criteria: zero false blocks on valid plans and >= 75% gap detection
+    check(out.embed.falsePositives === 0, `0 false blocks on valid plans, got ${out.embed.falsePositives}`);
+    check(gapDetectionRate >= 0.75, `>= 75% gap detection, got ${(gapDetectionRate * 100).toFixed(1)}%`);
+    check(out.embed.total === PLAN_CORPUS_B.length, "every case in corpus B evaluated");
   },
 });

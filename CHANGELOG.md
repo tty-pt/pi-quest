@@ -5,6 +5,11 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A stale draft-review verdict no longer strands a draft.** When a reviewer verdict arrived for a superseded revision and nothing was in flight, `bootDraftReview` returned silently: no promotion, no new review, no wake. It now re-boots one review for the current file (then wakes the agent instead of looping). A PASS that cannot promote steers the agent instead of returning silently. The cause of the originally reported stall is unproven; this closes the one silent path found.
+
 ## [1.9.0] - 2026-10-28
 
 ### Changed

@@ -574,7 +574,7 @@ export function loadConfig(raw: unknown): QuestConfig {
     embedMode: (record["embedMode"] ?? getEnv("PI_QUEST_EMBED_MODE")) === "off" ? "off" : "auto",
     embedUrl: (() => {
       const raw = record["embedUrl"] ?? getEnv("PI_QUEST_EMBED_URL") ?? judge.judgeUrl ?? "http://127.0.0.1:4242";
-      return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : undefined;
+      return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : "http://127.0.0.1:4242";
     })(),
     embedModel: (() => {
       const raw = record["embedModel"] ?? getEnv("PI_QUEST_EMBED_MODEL");

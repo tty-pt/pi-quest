@@ -1,10 +1,7 @@
-// HIGH_LEVEL: #drafting — the single seam for asking the System One judge a closed
-// multiple-choice question. Every semantic decision that used to be a word list
-// (steering, quest intent, difficulty, plan verification) goes through here.
-// The answer must equal one of the declared option keys; anything else — HTTP
-// failure, timeout, unknown label, malformed body — is `null` ("unavailable"),
-// never a guess. Callers decide their own language-neutral fallback.
-import { type QuestConfig, resolveRoleModel } from "../config.ts";
+// HIGH_LEVEL: #working together — choice normalization helpers.
+// Generative Jev / System One choices have been deprecated in favor of pure embeddings.
+// String cleaning and option matching helpers remain for general tool usage.
+import type { QuestConfig } from "../config.ts";
 
 export interface JudgeOption {
   key: string;
@@ -12,12 +9,27 @@ export interface JudgeOption {
 }
 
 export interface JudgeQuestion {
-  /** Stable question id (also the key in the Jev `answers` object). */
   id: string;
-  /** Context handed to the judge (phase, pending state, the user's message). */
   state: string;
   instructions: string;
-  options: readonly JudgeOption[];
+  options: JudgeOption[];
+}
+
+export function extractJevAnswer(data: unknown, questionId: string): unknown {
+  if (typeof data !== "object" || data === null) return undefined;
+  const answers = (data as { answers?: Record<string, unknown> }).answers;
+  if (!answers || typeof answers !== "object") return undefined;
+  const q = answers[questionId];
+  if (!q || typeof q !== "object") return undefined;
+  return (q as { choice?: unknown }).choice;
+}
+
+export function resolveChoice(raw: string, options: JudgeOption[]): string | null {
+  const norm = raw.trim().toLowerCase();
+  for (const opt of options) {
+    if (opt.key.toLowerCase() === norm) return opt.key;
+  }
+  return null;
 }
 
 export function normalizeJevUrl(baseUrlOrUrl: string): string {
@@ -25,112 +37,16 @@ export function normalizeJevUrl(baseUrlOrUrl: string): string {
   if (trimmed.includes("/systemone")) {
     return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
   }
-  return `${trimmed.replace(/\/+$/, "")}/api/v1/systemone/`;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function pickChoiceValue(rec: Record<string, unknown>): unknown {
-  return rec["choice"] ?? rec["answer"] ?? rec["value"];
+  return `${trimmed.replace(/\/+$/, "").replace(/\/api\/v1\/systemone$/, "").replace(/\/v1$/, "")}/api/v1/systemone/`;
 }
 
 /**
- * Extract the raw answer for `questionId` from a Jev response (keyed object or
- * array form). Returns undefined when absent.
- */
-export function extractJevAnswer(data: unknown, questionId: string): unknown {
-  if (!isRecord(data)) return undefined;
-  const answers = data["answers"];
-  if (isRecord(answers)) {
-    const entry = answers[questionId] ?? Object.values(answers)[0];
-    return isRecord(entry) ? pickChoiceValue(entry) : entry;
-  }
-  if (Array.isArray(answers) && answers.length > 0) {
-    const matched = answers.find((a) => isRecord(a) && (a["id"] === questionId || a["question_id"] === questionId));
-    const entry = matched ?? answers[0];
-    return isRecord(entry) ? pickChoiceValue(entry) : entry;
-  }
-  return undefined;
-}
-
-/**
- * True when the server's answer entry is the legacy fabricated one: older
- * auren builds answered an unparseable generation with the FIRST option, a
- * hard-coded 0.90 confidence and 0.05 for every other option. That is not a
- * judgement, so it must read as "judge unavailable" (current servers return
- * `choice: null` instead, which resolves to null on its own).
- */
-export function isFabricatedAnswer(data: unknown, questionId: string): boolean {
-  if (!isRecord(data) || !isRecord(data["answers"])) return false;
-  const answers = data["answers"];
-  const entry = answers[questionId] ?? Object.values(answers)[0];
-  if (!isRecord(entry) || entry["confidence"] !== 0.9 || !isRecord(entry["probabilities"])) return false;
-  const chosen = entry["choice"];
-  const rest = Object.entries(entry["probabilities"]).filter(([k]) => k !== chosen);
-  return rest.length > 0 && rest.every(([, v]) => v === 0.05);
-}
-
-/**
- * Resolve a raw judge answer to exactly one declared option key. Case and
- * surrounding whitespace are ignored; there is deliberately NO synonym or
- * substring matching — an unknown label is "unavailable", not a best guess.
- */
-export function resolveChoice(raw: unknown, options: readonly JudgeOption[]): string | null {
-  if (typeof raw !== "string") return null;
-  const normalized = raw.trim().toLowerCase();
-  const hit = options.find((o) => o.key.toLowerCase() === normalized);
-  return hit ? hit.key : null;
-}
-
-export function buildJevPayload(q: JudgeQuestion, model: string): Record<string, unknown> {
-  const criteria: Record<string, string> = {};
-  for (const o of q.options) criteria[o.key] = o.description;
-  return {
-    model,
-    state: q.state,
-    questions: {
-      [q.id]: { type: "choice", instructions: q.instructions, criteria },
-    },
-  };
-}
-
-export function judgeAvailable(cfg: QuestConfig): boolean {
-  if (cfg.judgeMode === "off" || cfg.judgeMode === "heuristic") return false;
-  return typeof cfg.judgeUrl === "string" && cfg.judgeUrl.trim() !== "";
-}
-
-/**
- * Ask the judge a closed question. Resolves to the chosen option key, or null
- * when the judge is off, unconfigured, unreachable, slow, or answers outside
- * the declared options.
+ * Deprecated: Generative judge calls are removed in favor of embeddings (/v1/classify).
+ * Always returns null to ensure deterministic fallback.
  */
 export async function askJudgeChoice(
-  cfg: QuestConfig,
-  q: JudgeQuestion,
-  opts: { timeoutMs?: number } = {},
+  _cfg: QuestConfig,
+  _question: JudgeQuestion,
 ): Promise<string | null> {
-  if (!judgeAvailable(cfg) || cfg.judgeUrl === undefined) return null;
-  const controller = new AbortController();
-  const timeoutMs = opts.timeoutMs ?? (cfg.judgeTimeoutMs || 2000);
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cfg.judgeKey && cfg.judgeKey.trim() !== "") headers["Authorization"] = `Bearer ${cfg.judgeKey.trim()}`;
-  try {
-    const res = await fetch(normalizeJevUrl(cfg.judgeUrl), {
-      method: "POST",
-      headers,
-      body: JSON.stringify(buildJevPayload(q, resolveRoleModel(cfg, "judge") || cfg.judgeModel || "qwen")),
-      signal: controller.signal,
-    });
-    if (!res.ok) return null;
-    const data: unknown = await res.json();
-    if (isFabricatedAnswer(data, q.id)) return null;
-    return resolveChoice(extractJevAnswer(data, q.id), q.options);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  return null;
 }

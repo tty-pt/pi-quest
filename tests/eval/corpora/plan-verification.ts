@@ -7,7 +7,7 @@ import type { Case } from "../harness.ts";
 const yes = (text: string): Case => ({ text, want: "yes" });
 const no = (text: string): Case => ({ text, want: "no" });
 
-export const PLAN_CORPUS: Case[] = [
+export const PLAN_CORPUS_A: Case[] = [
   // ---- plans WITH a verification step --------------------------------------------------
   yes("1. Add the retry loop to the client\n2. Wire it into the request path\n3. Run the unit tests and confirm they pass"),
   yes("- Rename the config key\n- Update the loader\n- Add a regression test that fails on the old key"),
@@ -55,6 +55,58 @@ export const PLAN_CORPUS: Case[] = [
   no("1. Fix the race in the queue\n2. Add a mutex around the shared counter\n3. Update the design notes"),
   no("- Atualizar o schema\n- Migrar os dados antigos\n- Remover as colunas obsoletas"),
 ];
+
+// Held-out test split B (44 fresh cases: 22 with verification, 22 without, disjoint from A and exemplars)
+export const PLAN_CORPUS_B: Case[] = [
+  // ---- plans WITH a verification step ----
+  yes("1. Create worker process pool\n2. Wire tasks into queue\n3. Run end-to-end load tests to confirm no deadlocks"),
+  yes("- Implement JWT token auth\n- Add middleware hook\n- Probe protected routes with curl to check 401 and 200 responses"),
+  yes("1. Add connection pooling\n2. Configure max limits\n3. Run leak-detection test suite to prove connections are freed"),
+  yes("- Refactor CSS layout grid\n- Clean old flexbox classes\n- Visually inspect rendered page in headless Chrome"),
+  yes("1. Implement CSV streaming export\n2. Wire route\n3. Validate exported row count and checksum match database"),
+  yes("- Add database migration for user preferences\n- Apply schema\n- Verify query returns updated columns without error"),
+  yes("1. Update TLS certificate handling\n2. Rebind port\n3. Hit endpoint with openssl s_client and verify TLS 1.3 handshake"),
+  yes("- Upgrade markdown parser\n- Update AST converter\n- Diff rendering output against golden sample suite"),
+  yes("1. Add webhook signature validation\n2. Store secret\n3. Test webhook endpoint with valid and invalid crypto signatures"),
+  yes("- Implement rate limiter token bucket\n- Bind to IP\n- Assert 429 Too Many Requests response on burst limit exceeded"),
+  yes("1. Criar novo serviço de notificações\n2. Registar handler no barramento\n3. Executar testes de integração e validar receção"),
+  yes("- Atualizar dependências vulneráveis\n- Corrigir chamadas de API descontinuadas\n- Confirmar que o comando `npm audit` fica limpo"),
+  yes("1. Otimizar índice na base de dados\n2. Ajustar plano de execução\n3. Medir tempo de query e confirmar redução de latência"),
+  yes("- Adicionar suporte para WebP\n- Converter imagens de teste\n- Validar no browser que a imagem carrega sem artefactos"),
+  yes("1. Implementar cache local de DNS\n2. Configurar TTL\n3. Verificar com dig que os pedidos subsequentes respondem em <1ms"),
+  yes("- Corrigir overflow no cálculo de saldos\n- Adicionar teste com números grandes\n- Validar que a suite de testes passa"),
+  yes("1. Adicionar compressão gzip\n2. Ativar middleware\n3. Fazer pedido HTTP e verificar header Content-Encoding: gzip"),
+  yes("- Separar lógica de faturação\n- Isolar cálculos de impostos\n- Comparar totais gerados com os relatórios contabilisticos"),
+  yes("1. Implementar verificação de integridade no arranque\n2. Validar ficheiros de configuração\n3. Testar arranque com config inválida e confirmar saída de erro correta"),
+  yes("- Ajustar tamanho do buffer de socket\n- Correr teste de carga com 50 clientes\n- Verificar ausência de pacotes perdidos"),
+  yes("1. Implementar endpoint de status /healthz\n2. Integrar verificação de disco e base de dados\n3. Testar com curl e validar status 200"),
+  yes("- Migrar configurações para variáveis de ambiente\n- Atualizar ficheiro .env.example\n- Executar a suite de testes automatizados"),
+  // ---- plans WITHOUT a verification step ----
+  no("1. Create worker process pool\n2. Wire tasks into queue\n3. Clean up obsolete comments"),
+  no("- Implement JWT token auth\n- Add middleware hook\n- Commit the changes to git"),
+  no("1. Add connection pooling\n2. Configure max limits\n3. Update the architecture diagram"),
+  no("- Refactor CSS layout grid\n- Clean old flexbox classes\n- Delete unused stylesheet"),
+  no("1. Implement CSV streaming export\n2. Wire route\n3. Add comments to public methods"),
+  no("- Add database migration for user preferences\n- Apply schema\n- Bump application patch version"),
+  no("1. Update TLS certificate handling\n2. Rebind port\n3. Update server deployment notes"),
+  no("- Upgrade markdown parser\n- Update AST converter\n- Remove legacy deprecation warnings"),
+  no("1. Add webhook signature validation\n2. Store secret\n3. Document webhook payload format"),
+  no("- Implement rate limiter token bucket\n- Bind to IP\n- Notify operations team"),
+  no("1. Criar novo serviço de notificações\n2. Registar handler no barramento\n3. Escrever notas de versão"),
+  no("- Atualizar dependências vulneráveis\n- Corrigir chamadas de API descontinuadas\n- Atualizar package-lock.json"),
+  no("1. Otimizar índice na base de dados\n2. Ajustar plano de execução\n3. Adicionar comentários explicativos"),
+  no("- Adicionar suporte para WebP\n- Converter imagens de teste\n- Apagar ficheiros PNG antigos"),
+  no("1. Implementar cache local de DNS\n2. Configurar TTL\n3. Documentar novas opções de configuração"),
+  no("- Corrigir overflow no cálculo de saldos\n- Limpar código comentado\n- Fazer push para a branch"),
+  no("1. Adicionar compressão gzip\n2. Ativar middleware\n3. Atualizar manual de operações"),
+  no("- Separar lógica de faturação\n- Isolar cálculos de impostos\n- Mover ficheiros para pastas novas"),
+  no("1. Implementar verificação de integridade no arranque\n2. Validar ficheiros de configuração\n3. Atualizar README"),
+  no("- Ajustar tamanho do buffer de socket\n- Alterar valor padrão no ficheiro de config\n- Notificar sysadmin"),
+  no("1. Implementar endpoint de status /healthz\n2. Integrar verificação de disco e base de dados\n3. Registar rota no roteador"),
+  no("- Migrar configurações para variáveis de ambiente\n- Atualizar ficheiro .env.example\n- Abrir pull request"),
+];
+
+export const PLAN_CORPUS = PLAN_CORPUS_A;
 
 /** Study exemplars for single plan STEPS: does this step verify the change, or is it other work? */
 export const STEP_EXEMPLARS: Record<string, string[]> = {

@@ -18,7 +18,7 @@ import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
 import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview } from "../review/flow";
-import { cancelReview, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
+import { cancelReview, hasInFlight, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
 import {
@@ -70,6 +70,24 @@ async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | nu
 }
 
 const userPathSteered = new Set<string>();
+const staleRecovered = new Set<string>();
+
+// A verdict for a superseded target is normally harmless: the save that
+// superseded it booted its own review. When nothing is in flight any more the
+// draft would sit unreviewed with nothing to wake the agent, so re-boot once
+// for the current file content, then wake the agent instead of looping.
+async function recoverStaleVerdict(pi: Pi, ctx: PiCtx, qid: Qid, target: string): Promise<void> {
+  const state = getState();
+  if (state.phase !== "drafting" || state.qid !== qid || state.draft === null) return;
+  if (hasInFlight(qid) || state.draft.approvedBy !== null) return;
+  const key = `${qid}:${target}`;
+  if (staleRecovered.has(key)) {
+    sendWake(pi, `A draft review verdict for ${qid} arrived for a superseded revision and no review is running. Save the draft to boot a fresh review, or a live user may reply "go".`);
+    return;
+  }
+  staleRecovered.add(key);
+  await maybeBootDraftReview(pi, ctx);
+}
 
 export async function bootDraftReview(
   pi: Pi,
@@ -125,7 +143,11 @@ export async function bootDraftReview(
     noteReviewLaunchFailed(pi, ctx, config, qid, target, outcome.detail, userPathSteered, bootDraftReview);
     return;
   }
-  if (outcome.status !== "verdict" || !outcome.settled) return;
+  if (outcome.status !== "verdict") return;
+  if (!outcome.settled) {
+    await recoverStaleVerdict(pi, ctx, qid, target);
+    return;
+  }
   if (outcome.review.verdict === "PASS") {
     clearDraftReviewRetry(qid);
     clearReviewVerdictFails(qid);
@@ -136,7 +158,10 @@ export async function bootDraftReview(
     // Route by kind: standard quests promote to implementing; analysis quests
     // auto-claim straight to validating (D3) unless sub-quests still run.
     const message = await promoteAfterPass(pi, ctx, qid, "review");
-    if (message === null) return;
+    if (message === null) {
+      sendSteer(pi, `Reviewer PASS recorded for ${qid}, but the quest did not promote (it is no longer an unapproved draft). Check its phase; a live user "go" promotes a draft.`);
+      return;
+    }
     const advisories = outcome.review.advisories.trim();
     sendWake(pi, `${message}${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     return;

@@ -52,8 +52,8 @@ export default function install(pi: Pi): void {
           }
         }
 
-        if (cfg.judgeMode === "off" || cfg.judgeMode === "heuristic") return;
-        if (cfg.judgeUrl && !cfg.judgeUrl.includes("4242")) return;
+        if (cfg.embedMode === "off") return;
+        if (cfg.embedUrl && !cfg.embedUrl.includes("4242")) return;
         const { ensureAuren } = await import("./auren-bootstrap");
         const confirmFn = ctx.ui ? (m: string) => ctx.ui!.confirm("pi-quest: local model", m) : undefined;
         const told = new Set<string>();

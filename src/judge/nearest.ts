@@ -80,6 +80,52 @@ function exemplarIndex(cfg: QuestConfig, base: string, examples: readonly Exempl
   return hit;
 }
 
+async function classifyViaEndpoint(
+  base: string,
+  model: string,
+  examples: readonly Exemplar[],
+  text: string,
+  timeoutMs: number,
+  fetchFn: typeof fetch = fetch,
+): Promise<NearestVerdict | null> {
+  const labels: Record<string, string[]> = {};
+  for (const ex of examples) {
+    if (!labels[ex.kind]) labels[ex.kind] = [];
+    labels[ex.kind]?.push(ex.text);
+  }
+
+  const url = `${base.replace(/\/+$/, "")}/v1/classify`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetchFn(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, text, labels }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const body = await res.json() as {
+      choice?: string;
+      similarity?: number;
+      margin?: number;
+    };
+    if (typeof body.choice === "string" && typeof body.similarity === "number" && typeof body.margin === "number") {
+      return {
+        kind: body.choice,
+        similarity: body.similarity,
+        margin: body.margin,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Nearest-example verdict for `text`, or null when embeddings are unavailable. */
 export async function nearestExemplar(
   cfg: QuestConfig,
@@ -88,6 +134,20 @@ export async function nearestExemplar(
 ): Promise<NearestVerdict | null> {
   const base = embedBaseUrl(cfg);
   if (base === null || examples.length === 0) return null;
+
+  // Try fast in-memory server-side classification endpoint first (<15ms, zero float vectors over TCP)
+  const serverChoice = await classifyViaEndpoint(
+    base,
+    cfg.embedModel,
+    examples,
+    text,
+    Math.max(cfg.judgeTimeoutMs || 2000, 2000),
+  );
+  if (serverChoice !== null) {
+    return serverChoice;
+  }
+
+  // Graceful fallback to client-side vector batching if endpoint is unsupported/down
   const index = await exemplarIndex(cfg, base, examples);
   if (index === null) return null;
   const vec = await embedTexts(cfg, [text]);

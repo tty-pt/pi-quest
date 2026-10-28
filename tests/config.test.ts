@@ -120,12 +120,10 @@ Deno.test("config derives reviewer/validator fallback chains from role lists", (
   check(JSON.stringify(ignored.roles.reviewerChain ?? []) === JSON.stringify([]), "legacy fallback key ignored");
 });
 
-Deno.test("judge and intent defaults work out of the box (systemone + olmoe + embeddings)", () => {
-  const d = loadConfig({ judgeMode: "auto", embedMode: "auto" });
-  check(d.judgeProtocol === "systemone" && d.judgeModel === "olmoe", "judge defaults to systemone/olmoe");
-  check(d.judgeUrl === "http://127.0.0.1:4242", "local auren by default");
+Deno.test("embedding defaults work out of the box (bge-base)", () => {
+  const d = loadConfig({ embedMode: "auto" });
   check(DEFAULT_CONFIG.embedMode === "auto" && d.embedMode === "auto" && d.embedModel === "bge-base", "embeddings on by default");
-  check(d.embedUrl === "http://127.0.0.1:4242", "embedUrl follows the judge url");
+  check(d.embedUrl === "http://127.0.0.1:4242", "local auren by default");
   check(d.intentMinMargin === 0.075 && d.intentMinSimilarity === 0.6, "calibrated intent thresholds");
   check(Object.keys(d.intentExemplars).length === 0, "no operator exemplars by default");
   check(d.questMinMargin === 0.1, "quest detection margin calibrated on held-out corpus B");

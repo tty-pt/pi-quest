@@ -152,7 +152,7 @@ async function interpret(text: string, phase: string, cfg: QuestConfig): Promise
  * independent message handlers share one classification.
  */
 export function interpretUserTurn(text: string, phase: string, cfg: QuestConfig): Promise<UserIntent> {
-  const key = [phase, cfg.embedUrl ?? cfg.judgeUrl ?? "", cfg.embedMode, cfg.embedModel, cfg.steeringPhrases.join("|"), text].join("\u0000");
+  const key = [phase, cfg.embedUrl ?? "", cfg.embedMode, cfg.embedModel, cfg.steeringPhrases.join("|"), text].join("\u0000");
   const now = Date.now();
   const hit = memo.get(key);
   if (hit !== undefined && now - hit.at < MEMO_TTL_MS) return hit.value;

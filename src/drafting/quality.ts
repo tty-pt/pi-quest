@@ -8,7 +8,8 @@
 import type { QuestDifficulty, QuestKind } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
 import type { QuestConfig } from "../config";
-import { askJudgeChoice, type JudgeQuestion } from "../judge/choice";
+import { mergeExemplars, nearestExemplar } from "../judge/nearest";
+import { VERIFICATION_EXEMPLARS, VERIFY_CLUSTERS } from "./verification-exemplars";
 import { resolveCitations } from "./citations";
 import { deliverableBody, type DraftSections } from "./plan-text";
 
@@ -21,25 +22,41 @@ export function countSteps(plan: string): number {
   return plan.split("\n").filter((line) => /^\s*(?:\d+[.)]|[-*+])\s+\S/.test(line)).length;
 }
 
-const VERIFICATION_QUESTION: JudgeQuestion = {
-  id: "plan_verification",
-  state: "",
-  instructions:
-    "Does this implementation plan include at least one step that verifies the change (a test, check, build, or other concrete way to prove it works)? The plan may be written in any language.",
-  options: [
-    { key: "yes", description: "The plan contains a concrete verification step" },
-    { key: "no", description: "The plan has no verification step" },
-  ],
-};
+/**
+ * Decomposed step evaluation: extracts steps and classifies them against fine-grained
+ * verification categories via in-memory server-side or local nearest-exemplar embeddings.
+ * S_verify = max(sim in verify clusters)
+ * S_other = max(sim in non_verify clusters)
+ * step_margin = S_verify - S_other
+ */
+export async function evaluateVerificationDecomposed(config: QuestConfig, plan: string): Promise<boolean | null> {
+  const steps = plan
+    .split("\n")
+    .map((l) => /^\s*(?:\d+[.)]|[-*+])\s+(\S.*)$/.exec(l)?.[1]?.trim() ?? "")
+    .filter((s) => s !== "");
+
+  if (steps.length === 0) return null;
+
+  const examples = mergeExemplars(VERIFICATION_EXEMPLARS, {});
+  let anyEvaluated = false;
+
+  for (const step of steps) {
+    const verdict = await nearestExemplar(config, examples, step);
+    if (!verdict) continue;
+    anyEvaluated = true;
+    if (VERIFY_CLUSTERS.has(verdict.kind) && verdict.similarity >= 0.50 && verdict.margin >= 0.05) {
+      return true;
+    }
+  }
+
+  return anyEvaluated ? false : null;
+}
 
 /**
- * true/false from the judge; null when the judge is unavailable. No keyword
- * matching: an English-only word list would wrongly block plans written in any
- * other language, and the draft gate must never block on a guess.
+ * true/false from decomposed classification; null when embeddings are unavailable (advisory, never blocks).
  */
 export async function judgeHasVerificationStep(config: QuestConfig, plan: string): Promise<boolean | null> {
-  const choice = await askJudgeChoice(config, { ...VERIFICATION_QUESTION, state: `Implementation plan:\n${plan.slice(0, 6000)}` });
-  return choice === null ? null : choice === "yes";
+  return await evaluateVerificationDecomposed(config, plan);
 }
 
 export interface QualityResult {

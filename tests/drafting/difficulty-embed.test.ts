@@ -97,19 +97,11 @@ Deno.test("operator difficultyExemplars extend the shipped ones", async () => {
   }
 });
 
-Deno.test("embeddings down falls to the judge, then to the structural heuristic", async () => {
+Deno.test("embeddings down falls to the structural heuristic", async () => {
   fresh();
-  const viaJudge = stubJudgeFetch(() => "complex"); // no embed => /v1/embeddings is down
-  try {
-    const r = await evaluateQuestDifficulty("anything at all", ON);
-    check(r.difficulty === "complex" && r.source === "judge", `judge answered, got ${r.difficulty}/${r.source}`);
-  } finally {
-    viaJudge();
-    fresh();
-  }
   const bothDown = stubJudgeFetch(() => null);
   try {
-    const r = await evaluateQuestDifficulty("touch a.ts b.ts c.ts d.ts", ON);
+    const r = await evaluateQuestDifficulty("touch a.ts b.ts c.ts d.ts", { ...ON, embedMode: "off" });
     check(r.difficulty === "complex" && r.source === "heuristic" && r.degraded === true, "structural fallback, degraded");
   } finally {
     bothDown();
@@ -117,18 +109,17 @@ Deno.test("embeddings down falls to the judge, then to the structural heuristic"
   }
 });
 
-Deno.test("difficultyMode off, heuristic or judge never uses embeddings; auto does", async () => {
+Deno.test("difficultyMode off or heuristic never uses embeddings; auto does", async () => {
   fresh();
   let embedCalls = 0;
   const real = globalThis.fetch;
   globalThis.fetch = ((url: unknown) => {
-    if (String(url).includes("/v1/embeddings")) embedCalls += 1;
+    if (String(url).includes("/v1/embeddings") || String(url).includes("/v1/classify")) embedCalls += 1;
     return Promise.resolve(new Response("x", { status: 500 }));
   }) as typeof fetch;
   try {
     await evaluateQuestDifficulty("x", { ...ON, difficultyMode: "off" });
     await evaluateQuestDifficulty("x", { ...ON, difficultyMode: "heuristic" });
-    await evaluateQuestDifficulty("x", { ...ON, difficultyMode: "judge" });
     check(embedCalls === 0, `no embedding calls outside auto, got ${embedCalls}`);
     await evaluateQuestDifficulty("x", ON);
     check(embedCalls > 0, "auto consults embeddings first");
