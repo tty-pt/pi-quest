@@ -60,7 +60,7 @@ Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable
 - **Automatic Daemon Start**: Automatically detects and launches `axil-auren` on port 4242 for local intent evaluation.
 - **Proactive Dependency Checks**: On `session_start`, checks core C engine versions and alerts with remediation steps if anything is outdated.
 - **Deterministic Trigger Words**: Starting a prompt with `quest:`, `task:`, `fix:`, or `feat:` starts the quest instantly with 0ms latency.
-- **Embeddings First, Judge as Fallback**: Steering ("go on", cancel), quest-vs-conversation and difficulty are decided by nearest-example embeddings (~15 ms, any language you add examples for); the generative judge is the fallback, and plan verification stays on it. Each move was measured on held-out English/Portuguese corpora and adopted only with zero wrong state-changing verdicts. See the matrix in [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
+- **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/classify` (~10–20 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` falls back to deterministic local heuristics (explicit trigger words, `/quest`, structural path counts) without invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
 
 ### Diagnostic Command
 ```text
