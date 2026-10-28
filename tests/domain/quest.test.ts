@@ -131,9 +131,26 @@ Deno.test("demoteToDrafting returns an analysis quest to drafting with findings 
   check(back.draft?.outstandingFindings === true, "findings flagged");
   check(back.draft?.approvedBy === null, "approval cleared");
   check(back.activeReview === null, "review cleared");
+  check(back.exactNextAction.includes("analysis"), "analysis default exactNextAction");
   const alive = { ...validating, activeReview: { kind: "validation" as const, target: "h1" } };
   const liveBack = demoteToDrafting(alive);
   check(liveBack.draft?.outstandingFindings === true, "keeps contentHash, flags findings");
+});
+
+Deno.test("demoteToDrafting returns a standard quest in implementing to drafting", () => {
+  const s = promote(authored(), "user");
+  check(s.phase === "implementing", "in implementing");
+  check(s.draft?.approvedBy === "user", "approved by user");
+
+  const back = demoteToDrafting(s);
+  check(back.phase === "drafting", "demoted to drafting from implementing");
+  check(back.draft?.outstandingFindings === true, "findings flagged");
+  check(back.draft?.approvedBy === null, "approval cleared");
+  check(back.activeReview === null, "review cleared");
+  check(back.exactNextAction.includes("Revise the draft plan"), "standard default exactNextAction");
+
+  const custom = demoteToDrafting(s, "Custom next action for amendment");
+  check(custom.exactNextAction === "Custom next action for amendment", "custom exactNextAction honored");
 });
 
 Deno.test("quest every transition marks snapshot pending", () => {

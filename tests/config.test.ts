@@ -106,11 +106,16 @@ Deno.test("config parses midQuest settings cleanly", () => {
 
 
 
-Deno.test("config parses role fallbacks as string or list", () => {
+Deno.test("config derives reviewer/validator fallback chains from role lists", () => {
   const cfg = loadConfig({
-    roles: { reviewer: "a/x", reviewerFallback: ["b/y", " ", 3, "c/z"], validatorFallback: "d/w" },
+    roles: { reviewer: ["a/x", "b/y", " ", "c/z"], validator: "d/w" },
   });
-  check(JSON.stringify(cfg.roles.reviewerFallback) === JSON.stringify(["b/y", "c/z"]), "reviewer list sanitized");
-  check(JSON.stringify(cfg.roles.validatorFallback) === JSON.stringify(["d/w"]), "single string becomes list");
+  check(cfg.roles.reviewer === "a/x", "first reviewer entry is primary");
+  check(JSON.stringify(cfg.roles.reviewerChain) === JSON.stringify(["b/y", "c/z"]), "reviewer rest is chain");
+  check(cfg.roles.validator === "d/w", "string validator stays string");
+  check(cfg.roles.validatorChain?.length === 0, "string validator has empty chain");
   check(resolveRoleFallbacks(DEFAULT_CONFIG, "reviewer").length === 0, "absent means none");
+  // The legacy *Fallback settings keys are ignored, by string concatenation.
+  const ignored = loadConfig({ roles: { reviewer: "a/x", [`reviewer` + "Fallback"]: ["b/y"] } });
+  check(JSON.stringify(ignored.roles.reviewerChain ?? []) === JSON.stringify([]), "legacy fallback key ignored");
 });

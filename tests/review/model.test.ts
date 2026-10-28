@@ -1,4 +1,8 @@
 import { check } from "../check.ts";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../../src/config.ts";
 import {
   classifyTimeoutLayer,
   isModelResolutionOrProviderError,
@@ -108,6 +112,11 @@ Deno.test("model errors are recognized for retry", () => {
     "model not found retries",
   );
   check(isModelResolutionOrProviderError("unknown provider foo"), "unknown provider retries");
+  check(
+    isModelResolutionOrProviderError("HTTP 403 permission_error: OAuth authentication is currently not allowed (oauth_not_allowed_for_organization)"),
+    "auth/permission failure falls back",
+  );
+  check(isModelResolutionOrProviderError("401 Unauthorized"), "401 falls back");
   check(!isModelResolutionOrProviderError("Subagent delegation failed (error)"), "bridge failure does not retry");
   check(!isModelResolutionOrProviderError("review cancelled: aborted"), "cancel never retries");
 });
@@ -166,4 +175,58 @@ Deno.test("overload and capacity errors are retryable provider failures", () => 
   check(isModelResolutionOrProviderError("API overloaded_error 529"), "overloaded retryable");
   check(isModelResolutionOrProviderError("503 no capacity"), "capacity retryable");
   check(!isModelResolutionOrProviderError("reviewer wrote garbage"), "garbage not retryable");
+});
+
+Deno.test("settings reviewer role and chain flow into candidate order", async () => {
+  clearReviewEnv();
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-reviewer-"));
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "settings.json"),
+    JSON.stringify({
+      "pi-quest": {
+        roles: {
+          reviewer: ["anthropic/claude-sonnet-5-5:low", "antigravity/claude-sonnet-5-5"],
+        },
+      },
+    }),
+  );
+  const config = await readQuestConfig(cwd);
+  const target = resolveRoleModel(config, "reviewer") ?? "";
+  check(target === "anthropic/claude-sonnet-5-5:low", "loader reads roles.reviewer");
+  const order = reviewModelCandidates(target, resolveRoleFallbacks(config, "reviewer")).map((c) => c.model);
+  check(
+    JSON.stringify(order) === JSON.stringify([
+      "anthropic/claude-sonnet-5-5:low",
+      "anthropic/claude-sonnet-5-5",
+      "antigravity/claude-sonnet-5-5",
+    ]),
+    `candidate order: ${JSON.stringify(order)}`,
+  );
+});
+
+Deno.test("roles.reviewer array: first is primary, rest is the chain; string stays string", async () => {
+  clearReviewEnv();
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-reviewer-arr-"));
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "settings.json"),
+    JSON.stringify({
+      "pi-quest": {
+        roles: {
+          reviewer: ["anthropic/claude-sonnet-5-5:low", "antigravity/claude-sonnet-5-5", " "],
+          validator: "v/one",
+        },
+      },
+    }),
+  );
+  const config = await readQuestConfig(cwd);
+  check(resolveRoleModel(config, "reviewer") === "anthropic/claude-sonnet-5-5:low", "first entry is primary");
+  const fb = resolveRoleFallbacks(config, "reviewer");
+  check(
+    JSON.stringify(fb) === JSON.stringify(["antigravity/claude-sonnet-5-5"]),
+    `chain is tail, deduped: ${JSON.stringify(fb)}`,
+  );
+  check(resolveRoleModel(config, "validator") === "v/one", "string form still works");
+  check(resolveRoleFallbacks(config, "validator").length === 0, "string form adds no fallbacks");
 });

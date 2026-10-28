@@ -145,25 +145,18 @@ If you use a premium reasoning model (like Grok or Claude 3.5 Sonnet) as your pr
 }
 ```
 
-#### Reviewer / validator fallback chains
-`roles.reviewerFallback` and `roles.validatorFallback` (a string or an ordered list) name models to try when the primary role model fails to launch with a provider/model error: model not found, unknown provider, rate limit / `429`, quota, `503` / `504` / `529`, `overloaded`, or `capacity`. The chain is tried in order:
+#### Reviewer / validator model chains
 
-1. the primary role model (verbatim, e.g. with a `:high` suffix);
-2. its suffix-stripped variant;
-3. each configured fallback (verbatim, then suffix-stripped);
-4. the `PI_CRITICAL_REVIEW_MODEL_FALLBACK` env model, if set.
+`roles.reviewer` and `roles.validator` accept a model string or an ordered list. The first entry is the primary; the remaining entries form the fallback chain, tried in order when the primary fails to launch with a provider/model/rate-limit error: model not found, unknown provider, rate limit / `429`, quota, `503` / `504` / `529`, `overloaded`, or `capacity`, and auth/permission errors (`401`, `403`, `permission_error`, `oauth_not_allowed`). Provider-auth failures now advance the chain instead of failing the review outright.
 
-Non-provider failures (a malformed verdict, a timeout with no provider error) do not advance the chain; they use the normal draft-review retry/backoff. The chain applies to draft review, plan-revision review and validation.
+The chain is tried in order: the primary (verbatim, e.g. with a `:low` suffix), its suffix-stripped variant, then each chain entry (verbatim, then suffix-stripped), then the `PI_CRITICAL_REVIEW_MODEL_FALLBACK` env model if set. A string value has no chain; an array `"reviewer": ["a/x:low", "b/y"]` is equivalent to a primary of `a/x:low` with a fallback of `b/y`.
 
 ```json
 "roles": {
-  "reviewer": "anthropic/claude-sonnet-4-5",
-  "reviewerFallback": ["antigravity/gemini-3.8-flash"],
+  "reviewer": ["anthropic/claude-sonnet-5-5:low", "antigravity/claude-sonnet-5-5"],
   "validator": "antigravity/gemini-3.8-flash"
 }
 ```
-
----
 
 ## Phase × Difficulty Model Router (`quest/auto`)
 
@@ -294,14 +287,14 @@ Research, reads and test runs are never blocked; the only writable file is the d
 
 ### 3. Review
 - **standard / trivial**: review is bypassed. Once the plan is authored and meets the bar, the quest promotes to implementing and the agent is told "Draft review bypassed under policy 'balanced'". No subagent runs. If the draft is below the bar (too few requirements/evidence, requirements not mapped into the plan, or an empty plan), nothing promotes, but the agent is woken with the draft profile listing what is missing; saving re-checks. Keep `## ` headings out of the plan body (use `###`).
-- **complex**: a reviewer subagent runs on `roles.reviewer` (with `reviewerFallback` as above). PASS promotes. FAIL returns findings; saving the revised plan boots a fresh review. A launch failure retries up to 3 times with exponential backoff (4s base); two consecutive FAIL verdicts pause the loop and ask the operator, who may reply `go`.
+- **complex**: a reviewer subagent runs on `roles.reviewer` (with its model chain as above). PASS promotes. FAIL returns findings; saving the revised plan boots a fresh review. A launch failure retries up to 3 times with exponential backoff (4s base); two consecutive FAIL verdicts pause the loop and ask the operator, who may reply `go`.
 - `go` (or `go on`, `proceed`, ...) promotes at any time.
 
 ### 4. Implementing
 Tools are unrestricted and the router uses the `implementing` cell (Flash in the sample config, for every difficulty). Repository rules (TDD, `make`, boundary scripts) come from `AGENTS.md`; pi-quest does not enforce them. A plan revision mid-way is re-reviewed and holds tools (`AWAITING_REVIEW: PLAN_REVISION_REVIEW`) until the verdict arrives. If that hold is ever stuck, `/quest-cancel-review` or a plain `APPROVE` clears it.
 
 ### 5. Validation
-The validator (`roles.validator`, falling back through `validatorFallback`) checks the work against the plan. Under `balanced`, a standard quest whose tests pass auto-archives to `.pi/quest/archive/<qid>.zip`. A FAIL returns to implementing with findings. `ship it` / `confirm` archives immediately.
+The validator (`roles.validator`, falling back through its model chain) checks the work against the plan. Under `balanced`, a standard quest whose tests pass auto-archives to `.pi/quest/archive/<qid>.zip`. A FAIL returns to implementing with findings. `ship it` / `confirm` archives immediately.
 
 ### Known limits
 - Only the drafting phase uses the strong model by default; implementation and validation stay on the cheap model unless the matrix says otherwise.

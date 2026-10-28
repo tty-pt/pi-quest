@@ -57,9 +57,11 @@ export interface RoleModels {
   validator?: string;
   judge?: string;
   // Ordered fallback models tried after the primary role model when a launch
-  // fails with a provider/model/rate-limit error.
-  reviewerFallback?: string[];
-  validatorFallback?: string[];
+  // fails with a provider/model/rate-limit error. Derived from the tail of
+  // roles.reviewer / roles.validator; the legacy *Fallback settings keys are no
+  // longer read.
+  reviewerChain?: string[];
+  validatorChain?: string[];
 }
 
 export const DEFAULT_TRIGGER_PREFIXES: string[] = [
@@ -369,31 +371,32 @@ export function loadConfig(raw: unknown): QuestConfig {
     ? (record["roles"] as Record<string, unknown>)
     : {};
 
+  // roles.reviewer / roles.validator accept a model string or an ordered list:
+  // the first entry is the primary, the rest are fallbacks tried before the
+  // separate *Fallback list.
+  const reviewerList = parseModelList(rawRoles["reviewer"]);
   const reviewerModel =
-    typeof rawRoles["reviewer"] === "string" && rawRoles["reviewer"].trim() !== ""
-      ? rawRoles["reviewer"].trim()
-      : typeof record["reviewerModel"] === "string" && record["reviewerModel"].trim() !== ""
+    reviewerList[0] ??
+    (typeof record["reviewerModel"] === "string" && record["reviewerModel"].trim() !== ""
       ? record["reviewerModel"].trim()
-      : getEnv("PI_QUEST_REVIEWER_MODEL") ?? getEnv("PI_REVIEW_MODEL");
+      : getEnv("PI_QUEST_REVIEWER_MODEL") ?? getEnv("PI_REVIEW_MODEL"));
 
+  const validatorList = parseModelList(rawRoles["validator"]);
   const validatorModel =
-    typeof rawRoles["validator"] === "string" && rawRoles["validator"].trim() !== ""
-      ? rawRoles["validator"].trim()
-      : typeof record["validatorModel"] === "string" && record["validatorModel"].trim() !== ""
+    validatorList[0] ??
+    (typeof record["validatorModel"] === "string" && record["validatorModel"].trim() !== ""
       ? record["validatorModel"].trim()
-      : getEnv("PI_QUEST_VALIDATOR_MODEL") ?? getEnv("PI_VALIDATOR_MODEL");
+      : getEnv("PI_QUEST_VALIDATOR_MODEL") ?? getEnv("PI_VALIDATOR_MODEL"));
 
   const judgeModelOverride =
-    typeof rawRoles["judge"] === "string" && rawRoles["judge"].trim() !== ""
-      ? rawRoles["judge"].trim()
-      : judge.judgeModel;
+    parseModelList(rawRoles["judge"])[0] ?? judge.judgeModel;
 
   const roles: RoleModels = {
     reviewer: reviewerModel,
     validator: validatorModel,
     judge: judgeModelOverride,
-    reviewerFallback: parseModelList(rawRoles["reviewerFallback"]),
-    validatorFallback: parseModelList(rawRoles["validatorFallback"]),
+    reviewerChain: dedupe(reviewerList.slice(1)),
+    validatorChain: dedupe(validatorList.slice(1)),
   };
 
   // Align judge.judgeModel with roles.judge if set
@@ -488,8 +491,12 @@ function parseModelList(raw: unknown): string[] {
     .filter((m) => m !== "");
 }
 
+function dedupe(items: string[]): string[] {
+  return [...new Set(items)];
+}
+
 export function resolveRoleFallbacks(cfg: QuestConfig, role: "reviewer" | "validator"): string[] {
-  return (role === "reviewer" ? cfg.roles.reviewerFallback : cfg.roles.validatorFallback) ?? [];
+  return (role === "reviewer" ? cfg.roles.reviewerChain : cfg.roles.validatorChain) ?? [];
 }
 
 export function resolveRoleModel(

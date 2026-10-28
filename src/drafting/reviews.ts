@@ -205,6 +205,9 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
     }
     return;
   }
+  // Nothing to review until a plan is authored; booting here would fail and
+  // leave an unretryable empty-plan review (bumpReviewCount is a no-op).
+  if (!hasAuthoredText(deliverableBody(sections, state.kind))) return;
   supersedeReviewThenBootFresh(state.qid, target, () => {
     void bootDraftReview(pi, ctx, target, config);
   });

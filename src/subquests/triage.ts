@@ -18,6 +18,13 @@ const CONFIRM_PHRASES = [
   "go", "please proceed", "please implement", "all good",
 ];
 
+// Exact-match only (no mid-sentence matching): "we should go on and also handle X"
+// is a directive, while a bare "go on" is steering.
+const CONFIRM_EXACT = new Set([
+  "go on", "carry on", "keep going", "ship it", "let's go", "lets go",
+  "please continue", "please go on", "go on please",
+]);
+
 const ACK_WORDS = new Set([
   "hi", "hello", "hey", "thanks", "thank", "you", "thx", "ok", "okay", "k",
   "got", "it", "cool", "nice", "great", "good", "fine", "done", "bye",
@@ -82,6 +89,9 @@ export function parseUserDirective(text: string): ParsedDirective {
 
   // Base confirmations & acks
   const clean = trimmed.toLowerCase().replace(/[!?.]+$/g, "");
+  if (CONFIRM_EXACT.has(clean)) {
+    return { kind: "confirmation", cleanText: trimmed };
+  }
   if (CONFIRM_PHRASES.some((phrase) => clean === phrase || (clean.length < 120 && clean.includes(` ${phrase} `)))) {
     return { kind: "confirmation", cleanText: trimmed };
   }

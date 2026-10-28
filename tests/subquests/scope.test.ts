@@ -1,5 +1,16 @@
 import { check } from "../check.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { getState, replaceState } from "../../src/app/store.ts";
+import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createDraft, promote } from "../../src/domain/transitions.ts";
+import { draftPath } from "../../src/domain/paths.ts";
+import type { Qid } from "../../src/domain/qid.ts";
 import { triageInQuestRequest } from "../../src/subquests/scope.ts";
+import { installSubQuests } from "../../src/subquests/index.ts";
+import { fakeCtx, fakePi } from "../fake-pi.ts";
 
 Deno.test("triage records refinements with routing guidance", () => {
   const triaged = triageInQuestRequest("abc123", "refinement");
@@ -43,5 +54,168 @@ Deno.test("triage respects midQuest mode off", () => {
     promptTimeoutMs: 1000,
   });
   check(off === null, "mode off disables triage interception");
+});
+
+Deno.test("steering with amendment demotes implementing quest back to draft mode", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-steer-test-"));
+  try {
+    const pi = fakePi();
+    installSubQuests(pi);
+
+    const qid = "1xTest" as Qid;
+    const base = createDraft(createQuest("Test quest", qid), "test-draft");
+    const authored = {
+      ...base,
+      draft: { ...base.draft!, planAuthored: true, contentHash: "h1" },
+    };
+    const implementing = promote(authored, "user");
+    replaceState(implementing);
+
+    const filePath = join(cwd, draftPath(qid));
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, "# Test\n\n## Requirements\n- R1: test\n\n## Implementation Plan\n1. Do thing\n", "utf8");
+
+    const ctx = fakeCtx(cwd);
+    const handler = pi.eventHandlers["input"]?.[0];
+    check(typeof handler === "function", "input handler registered");
+
+    await handler({ text: "!rule Must use UTF-8 encoding" }, ctx);
+
+    const after = getState();
+    check(after.phase === "drafting", "demoted to drafting");
+    check(after.draft?.approvedBy === null, "approvedBy cleared");
+    check(after.draft?.outstandingFindings === true, "outstandingFindings set");
+    check(after.amendments.length === 1, "amendment recorded");
+    check(after.amendments[0].change === "Must use UTF-8 encoding", "amendment change text");
+    check(pi.sent.some((s) => JSON.stringify(s).includes("Quest returned to draft mode")), "steer message sent to agent");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+Deno.test("steering when already in drafting remains in drafting without throwing", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-steer-draft-"));
+  try {
+    const pi = fakePi();
+    installSubQuests(pi);
+
+    const qid = "1xDrft" as Qid;
+    const base = createDraft(createQuest("Test quest", qid), "test-draft");
+    replaceState(base);
+
+    const filePath = join(cwd, draftPath(qid));
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, "# Test\n\n## Requirements\n\n## Implementation Plan\n", "utf8");
+
+    const ctx = fakeCtx(cwd);
+    const handler = pi.eventHandlers["input"]?.[0];
+
+    await handler({ text: "!rule Must use strict typing" }, ctx);
+
+    const after = getState();
+    check(after.phase === "drafting", "still in drafting");
+    check(after.amendments.length === 1, "amendment recorded");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+Deno.test("autoAmendRequirements: false leaves action as refinement and does not demote", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-steer-noamend-"));
+  try {
+    const pi = fakePi();
+    installSubQuests(pi);
+
+    const qid = "1xNoAm" as Qid;
+    const base = createDraft(createQuest("Test quest", qid), "test-draft");
+    const authored = {
+      ...base,
+      draft: { ...base.draft!, planAuthored: true, contentHash: "h1" },
+    };
+    const implementing = promote(authored, "user");
+    replaceState(implementing);
+
+    await mkdir(join(cwd, ".pi"), { recursive: true });
+    await writeFile(join(cwd, ".pi/settings.json"), JSON.stringify({ "pi-quest": { midQuest: { autoAmendRequirements: false } } }), "utf8");
+
+    const filePath = join(cwd, draftPath(qid));
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, "# Test\n\n## Requirements\n\n## Implementation Plan\n", "utf8");
+
+    const ctx = fakeCtx(cwd);
+    const handler = pi.eventHandlers["input"]?.[0];
+
+    await handler({ text: "Please also check edge case for empty strings" }, ctx);
+
+    const after = getState();
+    check(after.phase === "implementing", "remains in implementing");
+    check(after.amendments.length === 0, "no amendment recorded");
+    check(after.refinements.length === 1, "refinement recorded");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+async function implementingHarness(qidText: string) {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-steer-go-"));
+  const pi = fakePi();
+  installSubQuests(pi);
+  const qid = qidText as Qid;
+  const base = createDraft(createQuest("Test quest", qid), "test-draft");
+  const authored = { ...base, draft: { ...base.draft!, planAuthored: true, contentHash: "h1" } };
+  replaceState(promote(authored, "user"));
+  const filePath = join(cwd, draftPath(qid));
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, "# Test\n\n## Requirements\n- R1: test\n\n## Implementation Plan\n1. Do thing\n", "utf8");
+  return { cwd, pi, ctx: fakeCtx(cwd), handler: pi.eventHandlers["input"]![0] };
+}
+
+Deno.test("pure steering in implementing never records an amendment or demotes", async () => {
+  const phrases = ["Go on", "go on!", "ship it", "Carry on", "keep going", "continua", "vai em frente", "cancel"];
+  for (const phrase of phrases) {
+    const h = await implementingHarness("1xGoOn");
+    try {
+      await h.handler({ text: phrase }, h.ctx);
+      const after = getState();
+      check(after.phase === "implementing", `"${phrase}" keeps implementing`);
+      check(after.amendments.length === 0, `"${phrase}" records no amendment`);
+      check(after.refinements.length === 0, `"${phrase}" records no refinement`);
+      check(after.draft?.approvedBy === "user", `"${phrase}" keeps approval`);
+    } finally {
+      replaceState(IDLE_STATE);
+      rmSync(h.cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+Deno.test("a plain refinement in implementing is recorded but does not demote", async () => {
+  const h = await implementingHarness("1xRefn");
+  try {
+    await h.handler({ text: "Please also make the error messages friendlier for the user" }, h.ctx);
+    const after = getState();
+    check(after.phase === "implementing", "stays implementing");
+    check(after.draft?.approvedBy === "user", "approval kept");
+    check(after.amendments.length === 1, "amendment recorded");
+    check(!h.pi.sent.some((s) => JSON.stringify(s).includes("returned to draft mode")), "no draft-mode steer");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(h.cwd, { recursive: true, force: true });
+  }
+});
+
+Deno.test("a message that merely contains a steering word is still a directive", async () => {
+  const h = await implementingHarness("1xCnclB");
+  try {
+    await h.handler({ text: "Add a cancel button to the settings dialog and keep going on the tests" }, h.ctx);
+    const after = getState();
+    check(after.amendments.length === 1, "directive recorded despite containing steering words");
+    check(after.phase === "implementing", "still implementing (refinement, not constraint)");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(h.cwd, { recursive: true, force: true });
+  }
 });
 

@@ -106,7 +106,14 @@ export function isModelResolutionOrProviderError(errMessage: string): boolean {
     msg.includes("529") ||
     msg.includes("overloaded") ||
     msg.includes("capacity") ||
-    msg.includes("quota")
+    msg.includes("quota") ||
+    msg.includes("401") ||
+    msg.includes("403") ||
+    msg.includes("unauthorized") ||
+    msg.includes("forbidden") ||
+    msg.includes("permission_error") ||
+    msg.includes("oauth_not_allowed") ||
+    msg.includes("authentication")
   );
 }
 

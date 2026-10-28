@@ -15,7 +15,7 @@ const QID = "abc123" as Qid;
 
 function thinDraft(cwd: string): void {
   mkdirSync(join(cwd, ".pi", "quest", "future"), { recursive: true });
-  writeFileSync(join(cwd, draftPath(QID)), "## Requirements\n- one thing\n");
+  writeFileSync(join(cwd, draftPath(QID)), "## Implementation Plan\n- one thing\n");
 }
 
 Deno.test("thin drafts boot a review without thresholds", async () => {
@@ -26,6 +26,18 @@ Deno.test("thin drafts boot a review without thresholds", async () => {
   await maybeBootDraftReview(fakePi(), fakeCtx(cwd));
   await new Promise((r) => setTimeout(r, 50));
   check(hasInFlight(QID), "every mutation boots, mature or not");
+  cancelReview(QID);
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("empty plan section does not boot a review", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-empty-"));
+  mkdirSync(join(cwd, ".pi", "quest", "future"), { recursive: true });
+  writeFileSync(join(cwd, draftPath(QID)), "## Implementation Plan\n\n## Requirements\n- one thing\n");
+  replaceState(createDraft(createQuest("work", QID), "work"));
+  await maybeBootDraftReview(fakePi(), fakeCtx(cwd));
+  await new Promise((r) => setTimeout(r, 50));
+  check(!hasInFlight(QID), "no review boots without plan text");
   cancelReview(QID);
   replaceState(IDLE_STATE);
 });

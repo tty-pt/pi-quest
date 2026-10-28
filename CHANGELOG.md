@@ -5,6 +5,18 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-28
+
+### Added
+- **Array-valued role models (`roles.reviewer`, `roles.validator`)**: these keys now accept a string (primary only) or an ordered array. The first entry is the primary model; the remaining entries form the fallback chain used on provider/model/rate-limit and auth/permission errors (`401`, `403`, `permission_error`, `oauth_not_allowed`).
+
+### Fixed
+- **"Go on" no longer sends an implementing quest back to draft**: bare steering messages ("go on", "carry on", "keep going", "ship it", "let's go", PT "continua"/"vai em frente", and abort phrases like "cancel") are no longer recorded as refinements/amendments mid-quest; they are left to the phase handlers. Matching is exact, so "add a cancel button" is still recorded. Note: nothing acts on abort phrases while implementing yet; they are simply ignored by mid-quest triage.
+- **Mid-quest demotion is limited to explicit constraints**: only `!rule` / `must:` / natural constraint phrasing returns implementing or validating work to drafting. Plain refinements are recorded as amendments but keep the approved plan, and an in-flight review is cancelled only when a demotion happens.
+
+### Removed
+- **`roles.reviewerFallback` and `roles.validatorFallback`**: no longer read by the config loader or the runtime. Place fallback models as trailing entries in `roles.reviewer` / `roles.validator`. This is a breaking change with no compatibility shim, hence the minor bump.
+
 ## [1.5.0] - 2026-10-27
 
 ### Added

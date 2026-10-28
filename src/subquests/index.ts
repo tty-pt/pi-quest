@@ -7,12 +7,15 @@ import { join, dirname, basename } from "node:path";
 import { getState, updateState } from "../app/store";
 import { sendSteer } from "../app/interpreter";
 import { recordAmendment, recordRefinement } from "../domain/quest";
+import { demoteToDrafting } from "../domain/transitions";
 import { draftPath } from "../domain/paths";
 import { hashContent } from "../drafting/plan-text";
 import { appendAmendmentToDoc, appendRequirementToDoc, appendSubQuestBacklogItem } from "../domain/quest-doc";
 import type { Qid } from "../domain/qid";
 import { onUserMessage, type Pi, type PiCtx } from "../hooks/events";
 import { readQuestConfig } from "../config";
+import { evaluateSteeringHeuristic } from "../domain/steering";
+import { cancelReview } from "../review/tracker";
 import { createChildQuest } from "../surface/tools/subquest";
 import { triageInQuestRequest } from "./scope";
 import { parseUserDirective } from "./triage";
@@ -127,6 +130,13 @@ export function installSubQuests(pi: Pi): void {
 
       const config = await readQuestConfig(ctx.cwd);
       const parsed = parseUserDirective(trimmed);
+      // Pure steering ("go on", "ship it", "continua", "cancel", ...) belongs to the
+      // phase handlers (go/confirm/approve); it is never a requirement or refinement.
+      // Exact matches only, so "add a cancel button" still records as a directive.
+      if (parsed.kind === "refinement") {
+        const steering = evaluateSteeringHeuristic(trimmed);
+        if (steering.action !== "neutral" && steering.confidence >= 0.95) return;
+      }
       const triaged = triageInQuestRequest(state.qid, parsed.kind, parsed.cleanText, config.midQuest);
       if (triaged === null) return;
 
@@ -144,9 +154,25 @@ export function installSubQuests(pi: Pi): void {
       }
 
       if (triaged.action === "amend_requirement") {
-        updateState((s) => recordAmendment(recordRefinement(s, parsed.cleanText), parsed.cleanText, "User mid-quest directive"));
+        // Only an explicit constraint (!rule / must: / natural constraint phrasing)
+        // sends active work back to drafting; casual refinements are recorded as
+        // amendments but never revoke an approved plan.
+        const demote = parsed.kind === "directive_constraint" &&
+          (state.phase === "implementing" || state.phase === "validating");
+        if (demote) cancelReview(state.qid);
+        updateState((s) => {
+          const next = recordAmendment(recordRefinement(s, parsed.cleanText), parsed.cleanText, "User mid-quest directive");
+          if (!demote || (next.phase !== "implementing" && next.phase !== "validating")) return next;
+          const nextAction = next.kind === "analysis"
+            ? `Revise ## Analysis in the draft file to incorporate amendment "${parsed.cleanText}", then save.`
+            : `Revise ## Implementation Plan in the draft file to incorporate amendment "${parsed.cleanText}", then save.`;
+          return demoteToDrafting(next, nextAction);
+        });
         void appendRequirementAndAmendmentToDraft(ctx, state.qid, parsed.cleanText, "User mid-quest directive");
-        sendSteer(pi, triaged.steer);
+        const steerMessage = demote
+          ? `Recorded amendment on quest ${state.qid}: "${parsed.cleanText}". Quest returned to draft mode — update the plan in the quest doc to reflect this amendment, then save to trigger review (or reply 'go' to proceed).`
+          : triaged.steer;
+        sendSteer(pi, steerMessage);
         return;
       }
 

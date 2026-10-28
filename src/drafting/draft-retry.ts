@@ -104,7 +104,12 @@ export async function bumpReviewCountAndReboot(
     return;
   }
   const bumped = bumpReviewCount(content, attempt, getState().kind);
-  if (bumped === content) return;
+  if (bumped === content) {
+    // Nothing to bump (e.g. empty plan section): don't drop the retry silently.
+    clearDraftReviewRetry(qid);
+    sendWake(pi, "Draft review retry dropped: the draft has no plan text to re-review. Author the plan and save to boot a fresh review.");
+    return;
+  }
   try {
     await writeFile(file, bumped, "utf8");
   } catch {

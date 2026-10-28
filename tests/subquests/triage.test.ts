@@ -73,4 +73,10 @@ Deno.test("triage recognizes natural subquest and constraint phrases without pre
   check(classifyUserMessage("Must use C99 standard") === "directive_constraint", "must use is constraint");
 });
 
+Deno.test("triage classifies bare 'go on'-style steering as confirmation, exact only", () => {
+  for (const phrase of ["go on", "Go on!", "carry on", "keep going", "ship it", "let's go", "please continue"]) {
+    check(classifyUserMessage(phrase) === "confirmation", `"${phrase}" is confirmation`);
+  }
+  check(classifyUserMessage("Carry on with the migration but also rename the table to users_v2") !== "confirmation", "embedded phrase is not confirmation");
+});
 
