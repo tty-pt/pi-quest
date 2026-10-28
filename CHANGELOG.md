@@ -5,6 +5,12 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-10-29
+
+### Fixed
+- **A failing judge no longer looks decisive.** `askJudgeChoice` treats a `choice: null` answer and the legacy fabricated answer of older auren builds (first option, confidence exactly 0.90, every other option 0.05) as "judge unavailable". That fabricated answer, not model weakness, is what made every message read as the first option and made the local judge look biased.
+- Settings: `pi-quest` and `pi-mm` now use `judgeProtocol: "systemone"` with `judgeModel: "olmoe"`. SystemZero (`auto` tried it first) scores 3/8 with `qwen` and 6/8 with `olmoe` on a quest-vs-chat check, so it is no longer the default path.
+
 ## [1.7.0] - 2026-10-29
 
 ### Changed (breaking)

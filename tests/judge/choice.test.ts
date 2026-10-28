@@ -1,6 +1,6 @@
 import { check } from "../check.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
-import { askJudgeChoice, extractJevAnswer, resolveChoice, type JudgeQuestion } from "../../src/judge/choice.ts";
+import { askJudgeChoice, extractJevAnswer, isFabricatedAnswer, resolveChoice, type JudgeQuestion } from "../../src/judge/choice.ts";
 import { stubJudgeFetch } from "../judge-stub.ts";
 import { parseJevDifficultyChoice } from "../../src/drafting/difficulty.ts";
 import { parseJevQuestChoice } from "../../src/drafting/judge.ts";
@@ -42,4 +42,28 @@ Deno.test("quest and difficulty parsers no longer accept synonym substrings", ()
     }
   }
   check(threw === 8, `all synonyms rejected, got ${threw}`);
+});
+
+function stubRaw(entry: unknown): () => void {
+  const real = globalThis.fetch;
+  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ answers: { q1: entry } }), { status: 200 }))) as typeof fetch;
+  return () => { globalThis.fetch = real; };
+}
+
+Deno.test("askJudgeChoice rejects a null choice and the legacy fabricated 0.90/0.05 answer", async () => {
+  let restore = stubRaw({ type: "choice", choice: null, error: "unparseable model output" });
+  try { check((await askJudgeChoice(ON, Q)) === null, "null choice => unavailable"); } finally { restore(); }
+  restore = stubRaw({ choice: "yes", confidence: 0.9, probabilities: { yes: 0.9, no: 0.05 } });
+  try { check((await askJudgeChoice(ON, Q)) === null, "fabricated signature => unavailable"); } finally { restore(); }
+  restore = stubRaw({ choice: "yes", confidence: 0.83, probabilities: { yes: 0.83, no: 0.17 } });
+  try { check((await askJudgeChoice(ON, Q)) === "yes", "real probabilities are trusted"); } finally { restore(); }
+  restore = stubRaw({ choice: "yes", confidence: 0.9, probabilities: { yes: 0.9, no: 0.1 } });
+  try { check((await askJudgeChoice(ON, Q)) === "yes", "0.9 alone is not the signature"); } finally { restore(); }
+});
+
+Deno.test("isFabricatedAnswer only matches the exact legacy signature", () => {
+  check(isFabricatedAnswer({ answers: { q1: { choice: "a", confidence: 0.9, probabilities: { a: 0.9, b: 0.05, c: 0.05 } } } }, "q1"), "signature");
+  check(!isFabricatedAnswer({ answers: { q1: { choice: "a" } } }, "q1"), "no confidence");
+  check(!isFabricatedAnswer({ answers: { q1: { choice: "a", confidence: 0.9, probabilities: { a: 0.9 } } } }, "q1"), "no other options");
+  check(!isFabricatedAnswer(null, "q1"), "null");
 });

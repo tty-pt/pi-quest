@@ -56,6 +56,23 @@ export function extractJevAnswer(data: unknown, questionId: string): unknown {
 }
 
 /**
+ * True when the server's answer entry is the legacy fabricated one: older
+ * auren builds answered an unparseable generation with the FIRST option, a
+ * hard-coded 0.90 confidence and 0.05 for every other option. That is not a
+ * judgement, so it must read as "judge unavailable" (current servers return
+ * `choice: null` instead, which resolves to null on its own).
+ */
+export function isFabricatedAnswer(data: unknown, questionId: string): boolean {
+  if (!isRecord(data) || !isRecord(data["answers"])) return false;
+  const answers = data["answers"];
+  const entry = answers[questionId] ?? Object.values(answers)[0];
+  if (!isRecord(entry) || entry["confidence"] !== 0.9 || !isRecord(entry["probabilities"])) return false;
+  const chosen = entry["choice"];
+  const rest = Object.entries(entry["probabilities"]).filter(([k]) => k !== chosen);
+  return rest.length > 0 && rest.every(([, v]) => v === 0.05);
+}
+
+/**
  * Resolve a raw judge answer to exactly one declared option key. Case and
  * surrounding whitespace are ignored; there is deliberately NO synonym or
  * substring matching — an unknown label is "unavailable", not a best guess.
@@ -108,7 +125,9 @@ export async function askJudgeChoice(
       signal: controller.signal,
     });
     if (!res.ok) return null;
-    return resolveChoice(extractJevAnswer(await res.json(), q.id), q.options);
+    const data: unknown = await res.json();
+    if (isFabricatedAnswer(data, q.id)) return null;
+    return resolveChoice(extractJevAnswer(data, q.id), q.options);
   } catch {
     return null;
   } finally {
