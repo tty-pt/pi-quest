@@ -119,3 +119,30 @@ Deno.test("config derives reviewer/validator fallback chains from role lists", (
   const ignored = loadConfig({ roles: { reviewer: "a/x", [`reviewer` + "Fallback"]: ["b/y"] } });
   check(JSON.stringify(ignored.roles.reviewerChain ?? []) === JSON.stringify([]), "legacy fallback key ignored");
 });
+
+Deno.test("judge and intent defaults work out of the box (systemone + olmoe + embeddings)", () => {
+  const d = loadConfig({ judgeMode: "auto", embedMode: "auto" });
+  check(d.judgeProtocol === "systemone" && d.judgeModel === "olmoe", "judge defaults to systemone/olmoe");
+  check(d.judgeUrl === "http://127.0.0.1:4242", "local auren by default");
+  check(DEFAULT_CONFIG.embedMode === "auto" && d.embedMode === "auto" && d.embedModel === "bge-base", "embeddings on by default");
+  check(d.embedUrl === "http://127.0.0.1:4242", "embedUrl follows the judge url");
+  check(d.intentMinMargin === 0.075 && d.intentMinSimilarity === 0.6, "calibrated intent thresholds");
+  check(Object.keys(d.intentExemplars).length === 0, "no operator exemplars by default");
+});
+
+Deno.test("intent and embedding settings are configurable and validated", () => {
+  const c = loadConfig({
+    embedMode: "off",
+    embedUrl: " http://emb.test ",
+    embedModel: "bge-small",
+    intentMinMargin: 0.2,
+    intentMinSimilarity: "0.7",
+    intentExemplars: { advance: ["vamos", "", 3], bogus: "x" },
+  });
+  check(c.embedMode === "off" && c.embedUrl === "http://emb.test" && c.embedModel === "bge-small", "embedding settings");
+  check(c.intentMinMargin === 0.2 && c.intentMinSimilarity === 0.7, "thresholds, numeric strings accepted");
+  check(JSON.stringify(c.intentExemplars) === JSON.stringify({ advance: ["vamos"] }), "exemplars sanitized");
+  const bad = loadConfig({ intentMinMargin: 5, intentMinSimilarity: -1, embedMode: "maybe" });
+  check(bad.embedMode === "auto" || Deno.env.get("PI_QUEST_EMBED_MODE") === "off", "unknown embedMode never means off by itself");
+  check(bad.intentMinMargin === 0.075 && bad.intentMinSimilarity === 0.6, "out-of-range thresholds fall back");
+});

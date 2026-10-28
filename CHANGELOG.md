@@ -5,6 +5,19 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-29
+
+### Changed
+- **Operator steering is classified by embeddings, not a generative judge.** `interpretUserTurn()` embeds the message through axil-auren `POST /v1/embeddings` (`bge-base`, ~15 ms) and picks the nearest labelled exemplar kind (`src/judge/embed.ts`, `src/domain/intent-exemplars.ts`). State-changing verdicts need cosine similarity >= `intentMinSimilarity` (0.6) and a margin >= `intentMinMargin` (0.075) over the runner-up; anything weaker is a recorded refinement. Held-out evaluation (48 English/Portuguese messages, disjoint from the exemplars): 43/48 correct, 0 false state-changing verdicts; the misses are mostly non-English phrasings. For comparison, permutation-averaged judge questions on `olmoe` recognised 1 of 7 approvals because forward and reversed option orders cancel each other (position bias). The judge tier is removed from steering (it stays for difficulty and plan verification), as is the double-ask-agree rule.
+- **Defaults work out of the box.** `judgeProtocol` defaults to `systemone` and `judgeModel` to `olmoe` (SystemZero scored 3/8 with `qwen`, 6/8 with `olmoe` on a quest-vs-chat check); `judgeTimeoutMs` defaults to 6000. The project `.pi/settings.json` no longer needs to override them. The loader's fallback for an invalid `judgeProtocol` is the default instead of `auto`.
+- pi-mm: `judgeModel` now defaults to `olmoe` (protocol was already `systemone`).
+
+### Added
+- Settings: `embedMode`, `embedUrl`, `embedModel`, `intentMinSimilarity`, `intentMinMargin`, `intentExemplars` (extra exemplars per intent, any language, merged with the shipped ones). Env: `PI_QUEST_EMBED_MODE`, `PI_QUEST_EMBED_URL`, `PI_QUEST_EMBED_MODEL`, `PI_QUEST_INTENT_MIN_MARGIN`, `PI_QUEST_INTENT_MIN_SIMILARITY`.
+- Opt-in live evaluation `tests/eval/intent-eval.test.ts` (`PI_QUEST_EVAL_JUDGE=1`).
+- A failed embeddings endpoint is skipped for 10 s so a dead server cannot stall every message; exemplar vectors are embedded once per server/model in a single batch request.
+- `npm test` is hermetic: it runs with `PI_QUEST_JUDGE_MODE=off PI_QUEST_EMBED_MODE=off`; tests that need the stubs enable them explicitly.
+
 ## [1.7.1] - 2026-10-29
 
 ### Fixed

@@ -13,6 +13,7 @@ export interface DraftThresholds {
   evidence: number;
 }
 
+export type EmbedMode = "auto" | "off";
 export type DifficultyMode = "auto" | "judge" | "heuristic" | "off";
 
 export type DifficultyThresholds = Record<QuestDifficulty, DraftThresholds>;
@@ -120,6 +121,17 @@ export interface QuestConfig {
   judgeKey?: string;
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
+  /** "auto" classifies operator steering by embedding similarity; "off" skips embeddings (judge / fallback only). */
+  embedMode: EmbedMode;
+  /** Embeddings server base URL; defaults to the judge URL. */
+  embedUrl?: string;
+  embedModel: string;
+  /** Best-vs-runner-up cosine margin an actionable verdict (advance, abort, constraint, sub-task) must clear. */
+  intentMinMargin: number;
+  /** Minimum cosine similarity to the nearest exemplar for any verdict; below it the message is a refinement. */
+  intentMinSimilarity: number;
+  /** Operator exemplars per intent kind (any language), merged with the shipped defaults. */
+  intentExemplars: Record<string, string[]>;
   triggerPrefixes: string[];
   /** Operator-owned exact messages (any language) that advance a quest when the judge is unavailable. */
   steeringPhrases: string[];
@@ -166,12 +178,18 @@ export const DEFAULT_CONFIG: QuestConfig = {
   planRevisionMaxDurationMs: 300000,
   planEditor: null,
   judgeMode: "auto",
-  judgeProtocol: "auto",
+  judgeProtocol: "systemone",
   judgeUrl: undefined,
-  judgeModel: "qwen",
+  judgeModel: "olmoe",
   judgeKey: undefined,
   judgeFallback: "heuristic",
-  judgeTimeoutMs: 2000,
+  judgeTimeoutMs: 6000,
+  embedMode: "auto",
+  embedUrl: undefined,
+  embedModel: "bge-base",
+  intentMinMargin: 0.075,
+  intentMinSimilarity: 0.6,
+  intentExemplars: {},
   triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
   steeringPhrases: [],
   testCommands: [],
@@ -185,6 +203,21 @@ export const DEFAULT_CONFIG: QuestConfig = {
 function stringList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim());
+}
+
+function unitInterval(raw: unknown, fallback: number): number {
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
+}
+
+function parseExemplars(raw: unknown): Record<string, string[]> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [kind, list] of Object.entries(raw)) {
+    const items = stringList(list);
+    if (items.length > 0) out[kind] = items;
+  }
+  return out;
 }
 
 function parseLintRules(raw: unknown): LintRule[] {
@@ -240,7 +273,7 @@ function loadJudgeConfig(record: Record<string, unknown>): {
   const judgeProtocol: JudgeProtocol =
     rawJudgeProto === "systemzero" || rawJudgeProto === "systemone" || rawJudgeProto === "auto"
       ? rawJudgeProto
-      : "auto";
+      : DEFAULT_CONFIG.judgeProtocol;
 
   const rawJudgeUrl =
     record["judgeUrl"] ??
@@ -520,6 +553,21 @@ export function loadConfig(raw: unknown): QuestConfig {
     midQuest,
     router: loadRouterConfig(record),
     ...judge,
+    embedMode: (record["embedMode"] ?? getEnv("PI_QUEST_EMBED_MODE")) === "off" ? "off" : "auto",
+    embedUrl: (() => {
+      const raw = record["embedUrl"] ?? getEnv("PI_QUEST_EMBED_URL") ?? judge.judgeUrl ?? "http://127.0.0.1:4242";
+      return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : undefined;
+    })(),
+    embedModel: (() => {
+      const raw = record["embedModel"] ?? getEnv("PI_QUEST_EMBED_MODEL");
+      return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : DEFAULT_CONFIG.embedModel;
+    })(),
+    intentMinMargin: unitInterval(record["intentMinMargin"] ?? getEnv("PI_QUEST_INTENT_MIN_MARGIN"), DEFAULT_CONFIG.intentMinMargin),
+    intentMinSimilarity: unitInterval(
+      record["intentMinSimilarity"] ?? getEnv("PI_QUEST_INTENT_MIN_SIMILARITY"),
+      DEFAULT_CONFIG.intentMinSimilarity,
+    ),
+    intentExemplars: parseExemplars(record["intentExemplars"]),
     steeringPhrases: stringList(record["steeringPhrases"]),
     testCommands: stringList(record["testCommands"]),
     lintRules: parseLintRules(record["lintRules"]),

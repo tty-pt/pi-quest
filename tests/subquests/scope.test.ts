@@ -11,7 +11,7 @@ import type { Qid } from "../../src/domain/qid.ts";
 import { triageInQuestRequest } from "../../src/subquests/scope.ts";
 import { installSubQuests } from "../../src/subquests/index.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
-import { JUDGE_OFF, JUDGE_ON, stubJudgeFetch, writeQuestSettings } from "../judge-stub.ts";
+import { JUDGE_OFF, JUDGE_ON, stubIntentEmbeddings, writeQuestSettings } from "../judge-stub.ts";
 
 Deno.test("triage records refinements with routing guidance", () => {
   const triaged = triageInQuestRequest("abc123", "refinement");
@@ -175,9 +175,11 @@ async function implementingHarness(qidText: string, settings: Record<string, unk
   return { cwd, pi, ctx: fakeCtx(cwd), handler: pi.eventHandlers["input"]![0] };
 }
 
-Deno.test("judge-classified steering in implementing never records an amendment or demotes (any language)", async () => {
+Deno.test("embedding-classified steering in implementing never records an amendment or demotes (any language)", async () => {
   const phrases = ["Go on", "ship it", "Carry on", "continua", "vai em frente", "cancel", "ok bora lá"];
-  const restore = stubJudgeFetch((_id, state) => (state.includes("cancel") ? "abort" : "advance"));
+  const restore = stubIntentEmbeddings(
+    Object.fromEntries(phrases.map((p) => [p, p === "cancel" ? "abort" : "advance"])),
+  );
   try {
     for (const phrase of phrases) {
       const h = await implementingHarness("1xGoOn", JUDGE_ON);

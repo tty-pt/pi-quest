@@ -1,6 +1,6 @@
 {
   "name": "@tty-pt/pi-quest",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "description": "Quest Journal & Epistemic Workflow Extension for Pi Coding Agent (v2, layered rebuild)",
   "keywords": [
     "pi-package",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "deno test --allow-all --sloppy-imports --node-modules-dir=none tests/",
+    "test": "PI_QUEST_JUDGE_MODE=off PI_QUEST_EMBED_MODE=off deno test --allow-all --sloppy-imports --node-modules-dir=none tests/",
     "lint": "deno lint",
     "zip": "deno run --allow-all scripts/zip_bundle.ts"
   },

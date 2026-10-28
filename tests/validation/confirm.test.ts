@@ -27,7 +27,7 @@ import {
   MAX_CONSECUTIVE_VALIDATION_FAILS,
 } from "../../src/validation/flow.ts";
 import { fakeCtx, fakePi, barePi } from "../fake-pi.ts";
-import { JUDGE_ON, stubJudgeFetch, writeQuestSettings } from "../judge-stub.ts";
+import { JUDGE_ON, stubIntentEmbeddings, writeQuestSettings } from "../judge-stub.ts";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "pi-quest-confirm-"));
@@ -133,14 +133,14 @@ Deno.test("user steering advances and archives COMPLETED even when reviewer is a
   replaceState(validatingWithStalePlanPass());
   await withDraftFile(cwd);
   writeQuestSettings(cwd, JUDGE_ON);
-  const restore = stubJudgeFetch(() => "advance");
+  const restore = stubIntentEmbeddings({ "ship it": "advance" });
   let accepted: boolean;
   try {
     accepted = await handleConfirmInput(pi, fakeCtx(cwd), "ship it");
   } finally {
     restore();
   }
-  check(accepted === true, "judge-classified steering accepted by human override");
+  check(accepted === true, "embedding-classified steering accepted by human override");
   check(getState().phase === "idle", "quest archived as completed");
   replaceState(IDLE_STATE);
 });

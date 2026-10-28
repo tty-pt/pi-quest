@@ -2,12 +2,17 @@
 // Every handler that reacts to user input (draft approval, plan-revision
 // adoption, validation confirmation, late ask answers, mid-quest triage) asks
 // `interpretUserTurn` instead of keeping its own word list. Meaning comes from
-// the judge; when the judge is unavailable the fallback contains no natural
-// language beyond ONE configurable word ("go") and the operator's own
-// `steeringPhrases` — everything else degrades to a recorded refinement, which
-// can never advance, abort or archive a quest.
+// embedding similarity to labelled exemplars — deterministic, ~15 ms, free of the
+// option-position bias that makes small generative judges unusable for this. The
+// generative judge is deliberately NOT consulted for steering. When embeddings are
+// unavailable the fallback contains no natural language beyond ONE configurable
+// word ("go") and the operator's own `steeringPhrases`. State-changing verdicts
+// must clear a similarity floor and a margin over the runner-up kind; anything
+// weaker degrades to a recorded refinement, which can never advance, abort or
+// archive a quest.
 import { type QuestConfig } from "../config.ts";
-import { askJudgeChoice, type JudgeOption } from "../judge/choice.ts";
+import { cosine, embedBaseUrl, embedTexts } from "../judge/embed.ts";
+import { DEFAULT_INTENT_EXEMPLARS } from "./intent-exemplars.ts";
 
 export type UserIntentKind =
   | "advance"
@@ -24,34 +29,18 @@ export interface UserIntent {
   kind: UserIntentKind;
   /** Message with any explicit sigil removed. */
   cleanText: string;
-  source: "sigil" | "judge" | "fallback";
+  source: "sigil" | "embed" | "fallback";
 }
 
 /** The single built-in word recognized without a judge (case/punctuation-insensitive, exact message). */
 export const FALLBACK_ADVANCE_WORD = "go";
 
-/** Messages longer than this are directives, never one-word steering: skip the judge. */
+/** Messages longer than this are directives, never one-word steering: skip classification. */
 export const MAX_JUDGED_CHARS = 600;
 /** A trailing "?" only means "question" for short messages. */
 export const MAX_QUESTION_CHARS = 250;
 
-// Safest label first: small local judges show strong first-option bias, and a
-// biased "first option" must land on a harmless label, never on an action.
-const INTENT_OPTIONS: readonly JudgeOption[] = [
-  { key: "refinement", description: "Any other technical guidance, correction, opinion, proposal, or extra detail about the current task" },
-  { key: "question", description: "The operator asks a question or requests information without asking for a change" },
-  { key: "ack", description: "Greeting, thanks, or a bare acknowledgement with no instruction" },
-  { key: "constraint", description: "The operator states a hard rule the work must satisfy (must / never / make sure / do not touch)" },
-  { key: "subquest_now", description: "The operator asks for a separate sub-task to be done immediately, before continuing" },
-  { key: "subquest_later", description: "The operator asks for a separate sub-task or follow-up to be queued for later" },
-  { key: "abort", description: "ONLY a request to cancel, stop, abandon, or delete the whole quest" },
-  { key: "advance", description: "ONLY a bare approval or go-ahead (approve, accept, confirm, proceed, continue, ship it) with no other instruction or topic" },
-];
-
-// Verdicts that change quest state. They are never trusted on a single judge
-// answer: the question is asked again with the options in reverse order, and
-// only an agreeing answer acts. A position-biased judge disagrees with itself
-// and degrades to a harmless refinement.
+// Verdicts that change quest state. They must clear the margin gate.
 const ACTIONABLE: ReadonlySet<UserIntentKind> = new Set<UserIntentKind>([
   "advance",
   "abort",
@@ -114,21 +103,85 @@ export function clearIntentMemo(): void {
   memo.clear();
 }
 
-async function askIntent(
-  text: string,
-  phase: string,
-  cfg: QuestConfig,
-  options: readonly JudgeOption[],
-): Promise<UserIntentKind | null> {
-  const timeoutMs = Math.min(Math.max((cfg.judgeTimeoutMs || 2000) * 2, 2000), 6000);
-  const choice = await askJudgeChoice(cfg, {
-    id: "user_intent",
-    state: `Quest phase: ${phase}\nOperator message: ${text}`,
-    instructions:
-      "Classify what the operator wants done with the active quest. The message may be in any language. Choose exactly one.",
-    options,
-  }, { timeoutMs });
-  return choice === null ? null : (choice as UserIntentKind);
+// ---- embedding classification ----------------------------------------------------------
+
+const EMBED_KINDS: ReadonlySet<string> = new Set<UserIntentKind>([
+  "advance", "abort", "constraint", "subquest_now", "subquest_later", "question", "ack", "refinement",
+]);
+
+interface ExemplarIndex {
+  kinds: string[];
+  vectors: number[][];
+}
+
+const exemplarIndexes = new Map<string, Promise<ExemplarIndex | null>>();
+
+/** Shipped exemplars plus the operator's, de-duplicated, restricted to known kinds. */
+export function mergedExemplars(cfg: QuestConfig): Array<{ kind: string; text: string }> {
+  const out: Array<{ kind: string; text: string }> = [];
+  const seen = new Set<string>();
+  const add = (kind: string, texts: readonly string[]): void => {
+    if (!EMBED_KINDS.has(kind)) return;
+    for (const text of texts) {
+      const key = `${kind}\u0000${text}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ kind, text });
+      }
+    }
+  };
+  for (const [kind, texts] of Object.entries(DEFAULT_INTENT_EXEMPLARS)) add(kind, texts);
+  for (const [kind, texts] of Object.entries(cfg.intentExemplars)) add(kind, texts);
+  return out;
+}
+
+export function clearExemplarIndexes(): void {
+  exemplarIndexes.clear();
+}
+
+function exemplarIndex(cfg: QuestConfig, base: string): Promise<ExemplarIndex | null> {
+  const examples = mergedExemplars(cfg);
+  const key = [base, cfg.embedModel, examples.map((e) => `${e.kind}:${e.text}`).join("\u0001")].join("\u0000");
+  let hit = exemplarIndexes.get(key);
+  if (hit === undefined) {
+    // First use embeds every exemplar in one batch; a slow cold start must not abort it.
+    const timeoutMs = Math.max((cfg.judgeTimeoutMs || 2000) * 4, 8000);
+    hit = embedTexts(cfg, examples.map((e) => e.text), { timeoutMs }).then((vectors) =>
+      vectors === null ? null : { kinds: examples.map((e) => e.kind), vectors }
+    );
+    exemplarIndexes.set(key, hit);
+    void hit.then((v) => { if (v === null) exemplarIndexes.delete(key); });
+  }
+  return hit;
+}
+
+/**
+ * Nearest-exemplar verdict, or null when embeddings are unavailable. State-changing
+ * kinds need `intentMinSimilarity` AND a margin of `intentMinMargin` over the best
+ * other kind; everything weaker is a refinement.
+ */
+async function classifyByEmbedding(text: string, cfg: QuestConfig): Promise<UserIntentKind | null> {
+  const base = embedBaseUrl(cfg);
+  if (base === null) return null;
+  const index = await exemplarIndex(cfg, base);
+  if (index === null) return null;
+  const vec = await embedTexts(cfg, [text]);
+  const probe = vec?.[0];
+  if (probe === undefined) return null;
+  const best = new Map<string, number>();
+  index.vectors.forEach((v, i) => {
+    const kind = index.kinds[i] ?? "";
+    const sim = cosine(probe, v);
+    if (sim > (best.get(kind) ?? -Infinity)) best.set(kind, sim);
+  });
+  const ranked = [...best.entries()].sort((a, b) => b[1] - a[1]);
+  const top = ranked[0];
+  if (top === undefined) return null;
+  const margin = top[1] - (ranked[1]?.[1] ?? -1);
+  if (top[1] < cfg.intentMinSimilarity) return "refinement";
+  const kind = top[0] as UserIntentKind;
+  if (ACTIONABLE.has(kind) && margin < cfg.intentMinMargin) return "refinement";
+  return kind;
 }
 
 async function interpret(text: string, phase: string, cfg: QuestConfig): Promise<UserIntent> {
@@ -138,24 +191,18 @@ async function interpret(text: string, phase: string, cfg: QuestConfig): Promise
   // The operator's own exact phrases are authoritative and free (no latency).
   if (isFallbackAdvance(trimmed, cfg.steeringPhrases)) return { kind: "advance", cleanText: trimmed, source: "fallback" };
   if (trimmed.length <= MAX_JUDGED_CHARS) {
-    const first = await askIntent(trimmed, phase, cfg, INTENT_OPTIONS);
-    if (first !== null) {
-      if (!ACTIONABLE.has(first)) return { kind: first, cleanText: trimmed, source: "judge" };
-      const second = await askIntent(trimmed, phase, cfg, [...INTENT_OPTIONS].reverse());
-      if (second === first) return { kind: first, cleanText: trimmed, source: "judge" };
-      // Inconsistent under reordering => the judge is guessing; never act on a guess.
-      return { kind: "refinement", cleanText: trimmed, source: "judge" };
-    }
+    const embedded = await classifyByEmbedding(trimmed, cfg);
+    if (embedded !== null) return { kind: embedded, cleanText: trimmed, source: "embed" };
   }
   return fallbackIntent(trimmed, cfg);
 }
 
 /**
  * Interpret one operator message. Memoized per (phase, text) so the several
- * independent message handlers share one judge call and one answer.
+ * independent message handlers share one classification.
  */
 export function interpretUserTurn(text: string, phase: string, cfg: QuestConfig): Promise<UserIntent> {
-  const key = [phase, cfg.judgeMode, cfg.judgeUrl ?? "", cfg.steeringPhrases.join("|"), text].join("\u0000");
+  const key = [phase, cfg.embedUrl ?? cfg.judgeUrl ?? "", cfg.embedMode, cfg.embedModel, cfg.steeringPhrases.join("|"), text].join("\u0000");
   const now = Date.now();
   const hit = memo.get(key);
   if (hit !== undefined && now - hit.at < MEMO_TTL_MS) return hit.value;
