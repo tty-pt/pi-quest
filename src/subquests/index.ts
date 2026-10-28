@@ -9,16 +9,16 @@ import { sendSteer } from "../app/interpreter";
 import { recordAmendment, recordRefinement } from "../domain/quest";
 import { demoteToDrafting } from "../domain/transitions";
 import { draftPath } from "../domain/paths";
+import { isHeading } from "../domain/sections";
 import { hashContent } from "../drafting/plan-text";
 import { appendAmendmentToDoc, appendRequirementToDoc, appendSubQuestBacklogItem } from "../domain/quest-doc";
 import type { Qid } from "../domain/qid";
 import { onUserMessage, type Pi, type PiCtx } from "../hooks/events";
 import { readQuestConfig } from "../config";
-import { evaluateSteeringHeuristic } from "../domain/steering";
+import { interpretUserTurn } from "../domain/intent";
 import { cancelReview } from "../review/tracker";
 import { createChildQuest } from "../surface/tools/subquest";
 import { triageInQuestRequest } from "./scope";
-import { parseUserDirective } from "./triage";
 
 let followUpQueue: Promise<void> = Promise.resolve();
 
@@ -89,12 +89,12 @@ export async function appendFollowUpToDraft(ctx: PiCtx, qid: Qid, followUpText: 
       if (!existsSync(filePath)) return;
       const content = await readFile(filePath, "utf8");
       
-      const headerRegex = /^##\s+follow-up\s+requests\b/im;
+      const lines0 = content.split("\n");
       let updated: string;
       const bullet = `- ${followUpText}`;
-      if (headerRegex.test(content)) {
+      if (lines0.some((l) => isHeading(l, "followups"))) {
         const lines = content.split("\n");
-        const idx = lines.findIndex((l) => /^##\s+follow-up\s+requests\b/i.test(l));
+        const idx = lines.findIndex((l) => isHeading(l, "followups"));
         lines.splice(idx + 1, 0, bullet);
         updated = lines.join("\n");
       } else {
@@ -129,14 +129,9 @@ export function installSubQuests(pi: Pi): void {
       if (trimmed.startsWith("/") || trimmed.length < 3) return;
 
       const config = await readQuestConfig(ctx.cwd);
-      const parsed = parseUserDirective(trimmed);
-      // Pure steering ("go on", "ship it", "continua", "cancel", ...) belongs to the
-      // phase handlers (go/confirm/approve); it is never a requirement or refinement.
-      // Exact matches only, so "add a cancel button" still records as a directive.
-      if (parsed.kind === "refinement") {
-        const steering = evaluateSteeringHeuristic(trimmed);
-        if (steering.action !== "neutral" && steering.confidence >= 0.95) return;
-      }
+      // One shared interpretation (judge-first). Pure steering (advance/abort) belongs
+      // to the phase handlers; it is never a requirement or refinement.
+      const parsed = await interpretUserTurn(trimmed, state.phase, config);
       const triaged = triageInQuestRequest(state.qid, parsed.kind, parsed.cleanText, config.midQuest);
       if (triaged === null) return;
 
@@ -157,7 +152,7 @@ export function installSubQuests(pi: Pi): void {
         // Only an explicit constraint (!rule / must: / natural constraint phrasing)
         // sends active work back to drafting; casual refinements are recorded as
         // amendments but never revoke an approved plan.
-        const demote = parsed.kind === "directive_constraint" &&
+        const demote = parsed.kind === "constraint" &&
           (state.phase === "implementing" || state.phase === "validating");
         if (demote) cancelReview(state.qid);
         updateState((s) => {

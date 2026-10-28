@@ -7,29 +7,19 @@ import {
 } from "../../src/drafting/difficulty.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
 
-Deno.test("difficulty heuristic: accurately classifies trivial, standard, and complex requests", () => {
-  // Trivial tasks
-  strictEqual(evaluateQuestDifficultyHeuristic("Fix typo in README.md"), "trivial");
-  strictEqual(evaluateQuestDifficultyHeuristic("Fix spelling mistake in documentation"), "trivial");
-  strictEqual(evaluateQuestDifficultyHeuristic("Bump version to 1.3.0"), "trivial");
-  strictEqual(evaluateQuestDifficultyHeuristic("Minor cleanup of comments in app.ts"), "trivial");
-  strictEqual(evaluateQuestDifficultyHeuristic("quick fix in header guard"), "trivial");
-
-  // Complex tasks
-  strictEqual(evaluateQuestDifficultyHeuristic("Architectural overhaul of state engine"), "complex");
-  strictEqual(evaluateQuestDifficultyHeuristic("Full migration to web HAL runtime"), "complex");
-  strictEqual(evaluateQuestDifficultyHeuristic("Redesign cross-module communications and rewrite store"), "complex");
+Deno.test("difficulty heuristic: structural signals only, no keyword vocabulary", () => {
+  // Many distinct files => complex.
   strictEqual(
     evaluateQuestDifficultyHeuristic(
       "Update handlers across src/a.ts, src/b.ts, src/c.ts, and src/d.ts to support new interface",
     ),
     "complex",
   );
-
-  // Standard tasks
+  // Wording never changes the tier in any language: keywords are the judge's job.
+  strictEqual(evaluateQuestDifficultyHeuristic("Architectural overhaul of state engine"), "standard");
+  strictEqual(evaluateQuestDifficultyHeuristic("Corrigir erro de digitação no README"), "standard");
+  strictEqual(evaluateQuestDifficultyHeuristic("Fix typo in README.md"), "standard");
   strictEqual(evaluateQuestDifficultyHeuristic("Implement search filter for playlist view"), "standard");
-  strictEqual(evaluateQuestDifficultyHeuristic("Fix memory leak in corm_open when file not found"), "standard");
-  strictEqual(evaluateQuestDifficultyHeuristic("Add pagination support to table view"), "standard");
 });
 
 Deno.test("difficulty judge: parseJevDifficultyChoice parses documented and fallback structures", () => {
@@ -137,10 +127,10 @@ Deno.test("difficulty judge: evaluateQuestDifficulty respects mode, offline fall
   // 2. Pure heuristic mode
   const heurCfg: QuestConfig = { ...DEFAULT_CONFIG, difficultyMode: "heuristic" };
   const resHeurTrivial = await evaluateQuestDifficulty("Fix typo in README", heurCfg);
-  strictEqual(resHeurTrivial.difficulty, "trivial");
+  strictEqual(resHeurTrivial.difficulty, "standard");
   strictEqual(resHeurTrivial.source, "heuristic");
 
-  const resHeurComplex = await evaluateQuestDifficulty("Architectural overhaul of core", heurCfg);
+  const resHeurComplex = await evaluateQuestDifficulty("Touch src/a.ts src/b.ts src/c.ts src/d.ts", heurCfg);
   strictEqual(resHeurComplex.difficulty, "complex");
   strictEqual(resHeurComplex.source, "heuristic");
 
@@ -153,7 +143,7 @@ Deno.test("difficulty judge: evaluateQuestDifficulty respects mode, offline fall
   };
 
   const resFallback = await evaluateQuestDifficulty("Fix typo in README", downCfg);
-  strictEqual(resFallback.difficulty, "trivial");
+  strictEqual(resFallback.difficulty, "standard");
   strictEqual(resFallback.degraded, true);
   strictEqual(resFallback.source, "heuristic");
 

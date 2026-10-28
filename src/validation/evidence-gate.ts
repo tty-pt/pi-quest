@@ -1,7 +1,7 @@
 // HIGH_LEVEL: #validation — evidence-gated completion checks.
 import { unfinishedChildren } from "../domain/children";
 import type { QuestState, VerificationReceipt } from "../domain/quest";
-import type { SubQuestContract } from "../domain/contract";
+import type { LintRule } from "../config";
 import { runSemanticLints } from "./semantic-lint";
 
 export type { VerificationReceipt };
@@ -10,6 +10,7 @@ export interface EvidenceGateOptions {
   getDiffStat?: () => Promise<string>;
   getDiffPatch?: () => Promise<string>;
   getLatestTest?: () => VerificationReceipt | null;
+  lintRules?: readonly LintRule[];
 }
 
 let latestTestReceipt: VerificationReceipt | null = null;
@@ -26,24 +27,7 @@ export function clearTestExecution(): void {
   latestTestReceipt = null;
 }
 
-const TEST_COMMAND_PATTERNS = [
-  /\bmake\b/i,
-  /\bdeno\s+test\b/i,
-  /\bnpm\s+test\b/i,
-  /\btest\.sh\b/i,
-  /\b\.\/test\b/i,
-  /\bcargo\s+test\b/i,
-  /\bpytest\b/i,
-];
-
-export function isTestCommand(command: string, contract?: SubQuestContract): boolean {
-  if (contract?.requiredTestCommands && contract.requiredTestCommands.length > 0) {
-    for (const req of contract.requiredTestCommands) {
-      if (req.trim() && command.trim().includes(req.trim())) return true;
-    }
-  }
-  return TEST_COMMAND_PATTERNS.some((pat) => pat.test(command));
-}
+export { isTestCommand } from "../utils/commands";
 
 export async function assertCompletionEligibility(
   state: QuestState,
@@ -70,7 +54,7 @@ export async function assertCompletionEligibility(
   const getDiffPatch = options.getDiffPatch ?? (async () => "");
   const diffPatch = await getDiffPatch();
   if (diffPatch.trim().length > 0) {
-    const violations = runSemanticLints(diffPatch);
+    const violations = runSemanticLints(diffPatch, options.lintRules ?? []);
     if (violations.length > 0) {
       const summary = violations.map((v) => `[${v.ruleId}] ${v.message}`).join("\n");
       throw new Error(`Cannot claim completion: Semantic boundary violation:\n${summary}`);

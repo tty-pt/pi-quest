@@ -1,3 +1,4 @@
+import { SITE_LINT_RULES } from "../lint-rules.ts";
 import { check } from "../check.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { createQuest, type QuestState } from "../../src/domain/quest.ts";
@@ -196,6 +197,7 @@ diff --git a/mods/song/ux/song.c b/mods/song/ux/song.c
     await assertCompletionEligibility(quest, {
       getDiffStat: async () => "mods/song/ux/song.c | 1 +",
       getDiffPatch: async () => badPatch,
+      lintRules: SITE_LINT_RULES,
     });
   } catch (err) {
     threw = true;
@@ -208,3 +210,15 @@ diff --git a/mods/song/ux/song.c b/mods/song/ux/song.c
 });
 
 
+
+Deno.test("isTestCommand matches runner tokens, not words anywhere in the command line", () => {
+  check(isTestCommand("npm --prefix pkg test"), "npm test with flags");
+  check(isTestCommand("cd x && make -j4"), "make after cd");
+  check(isTestCommand("CI=1 pytest -q"), "env prefix");
+  check(isTestCommand("./test"), "./test script");
+  check(isTestCommand("cargo test --release | tail"), "cargo test in a pipeline");
+  check(!isTestCommand('git commit -m "make it work"'), "make inside a commit message");
+  check(!isTestCommand("echo test"), "the word test alone");
+  check(!isTestCommand("npm install"), "npm install is not a test");
+  check(isTestCommand("./ci-run.sh", undefined, ["./ci-run.sh"]), "operator testCommands extend the set");
+});

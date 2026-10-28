@@ -27,6 +27,7 @@ import {
   MAX_CONSECUTIVE_VALIDATION_FAILS,
 } from "../../src/validation/flow.ts";
 import { fakeCtx, fakePi, barePi } from "../fake-pi.ts";
+import { JUDGE_ON, stubJudgeFetch, writeQuestSettings } from "../judge-stub.ts";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "pi-quest-confirm-"));
@@ -64,7 +65,7 @@ Deno.test("user CONFIRM archives COMPLETED when no validator is available", asyn
   const pi = barePi(); // no reviewer transport: reviewer unavailable
   replaceState(validatingWithStalePlanPass());
   await withDraftFile(cwd);
-  const accepted = await handleConfirmInput(pi, fakeCtx(cwd), "CONFIRM");
+  const accepted = await handleConfirmInput(pi, fakeCtx(cwd), "go");
   check(accepted === true, "CONFIRM accepted");
   // Reaching idle through the COMPLETED gate proves the user acceptance
   // was recorded as the current PASS (the fake exec writes no zip file).
@@ -131,8 +132,15 @@ Deno.test("user steering advances and archives COMPLETED even when reviewer is a
   const pi = fakePi(); // fake reviewer subagent is available
   replaceState(validatingWithStalePlanPass());
   await withDraftFile(cwd);
-  const accepted = await handleConfirmInput(pi, fakeCtx(cwd), "ship it");
-  check(accepted === true, "ship it accepted by human override");
+  writeQuestSettings(cwd, JUDGE_ON);
+  const restore = stubJudgeFetch(() => "advance");
+  let accepted: boolean;
+  try {
+    accepted = await handleConfirmInput(pi, fakeCtx(cwd), "ship it");
+  } finally {
+    restore();
+  }
+  check(accepted === true, "judge-classified steering accepted by human override");
   check(getState().phase === "idle", "quest archived as completed");
   replaceState(IDLE_STATE);
 });

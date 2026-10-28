@@ -113,9 +113,12 @@ Deno.test("jev quest judge: evaluateQuestIntent respects judgeMode off, heuristi
 
   // 2. Heuristic mode
   const heurCfg: QuestConfig = { ...DEFAULT_CONFIG, judgeMode: "heuristic" };
-  const resHeur1 = await evaluateQuestIntent("Fix the corm_open leak in libcorm", heurCfg);
+  // Structural only: a pasted quest document counts; free-form wording is never guessed.
+  const resHeur1 = await evaluateQuestIntent("# Quest: fix the corm_open leak", heurCfg);
   strictEqual(resHeur1.isQuest, true);
   strictEqual(resHeur1.source, "heuristic");
+  const resHeurFree = await evaluateQuestIntent("Fix the corm_open leak in libcorm", heurCfg);
+  strictEqual(resHeurFree.isQuest, false);
 
   const resHeur2 = await evaluateQuestIntent("I spoke to my grandfather under the cherry tree", heurCfg);
   strictEqual(resHeur2.isQuest, false);
@@ -130,7 +133,7 @@ Deno.test("jev quest judge: evaluateQuestIntent respects judgeMode off, heuristi
     judgeFallback: "heuristic",
   };
 
-  const resFallback = await evaluateQuestIntent("Fix the corm_open leak in libcorm", downCfg);
+  const resFallback = await evaluateQuestIntent("# Quest: fix the corm_open leak", downCfg);
   strictEqual(resFallback.isQuest, true);
   strictEqual(resFallback.degraded, true);
   strictEqual(resFallback.source, "heuristic");

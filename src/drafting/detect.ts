@@ -8,7 +8,7 @@ import { ensureDraftFile, listKnownQids } from "../files";
 import { extractRecentConversationContext } from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
-import { classifyUserMessage } from "../subquests/triage";
+import { parseExplicitSyntax } from "../domain/intent";
 import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../config";
 import { evaluateQuestIntent } from "./judge";
 import { evaluateQuestDifficulty } from "./difficulty";
@@ -33,24 +33,13 @@ export function matchTriggerPrefix(
   return { matched: false, objective: trimmed };
 }
 
-// Deprecated legacy heuristic check - kept for explicit opt-in compatibility
-const QUEST_HEADER_PATTERNS = [
-  /^#+\s*Quest\b/i,
-  /\b(?:Objective|Deliverables|Scope change|Problem statement)\s*[:]/i,
-];
-
-const TASK_DIRECTIVE_PATTERN =
-  /^(?:please\s+)?(?:rebuild|fix|implement|add|create|refactor|update|build|test|investigate|debug|diagnose|audit|reconcile|reproduce|port|remove|delete|clean|wire|hook|check|verify|migrate|configure|enhance|optimize|overhaul|resolve|make|author)\b/i;
-
-const CASUAL_OR_NARRATIVE_PATTERN =
-  /^(?:I\s+(?:spoke|talked|went|met|saw|found|felt|prefer|like|hate|dislike|think|told|visited|remember|recalled|was|am)|My\s+(?:grandfather|grandpa|grandmother|grandma|friend|cat|dog|dad|mom|father|mother|family)|Do\s+you\s+(?:remember|recall|know|think))\b/i;
+// Judge-less structural check: only an explicitly pasted quest document counts.
+// Free-form wording is never guessed at; without a judge, use a trigger prefix
+// or /quest.
+const QUEST_HEADER_PATTERN = /^#+\s*Quest\b/i;
 
 export function isQuestLikeRequest(text: string): boolean {
-  const trimmed = text.trim();
-  if (CASUAL_OR_NARRATIVE_PATTERN.test(trimmed)) return false;
-  if (QUEST_HEADER_PATTERNS.some((pat) => pat.test(trimmed))) return true;
-  if (TASK_DIRECTIVE_PATTERN.test(trimmed)) return true;
-  return false;
+  return QUEST_HEADER_PATTERN.test(text.trim());
 }
 
 export async function detectSubstantiveRequest(
@@ -87,17 +76,13 @@ export async function detectSubstantiveRequest(
     return true;
   }
 
-  const kind = classifyUserMessage(trimmed);
-  // Fast filter: explicit acks, confirmations, and short questions are never new quests
-  if (kind === "ack" || kind === "confirmation") return false;
-  if (kind === "question" && trimmed.length < 250) return false;
+  // Explicit chat sigils ("? ", !chat) are never new quests.
+  const explicit = parseExplicitSyntax(trimmed);
+  if (explicit !== null && explicit.kind === "chat") return false;
 
-  // 2. High-confidence fast-path heuristic for explicit imperative directives
-  const isDirective = isQuestLikeRequest(trimmed);
-  let isQuest = isDirective;
-
-  // If not immediately recognized as an imperative directive, evaluate with System One judge
-  if (!isDirective) {
+  // The judge decides (any language); structural header check is the judge-less fallback.
+  let isQuest = isQuestLikeRequest(trimmed);
+  if (!isQuest) {
     const decision = await evaluateQuestIntent(trimmed, cfg, ctx);
     isQuest = decision.isQuest;
   }

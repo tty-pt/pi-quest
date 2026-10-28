@@ -5,7 +5,7 @@ import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer } from "../app/interpreter";
 import { readQuestConfig } from "../config";
 import { recordHumanAnswer } from "../domain/quest";
-import { GO_PATTERN } from "../drafting/reviews";
+import { isFallbackAdvance } from "../domain/intent";
 import type { Pi, PiCtx } from "../hooks/events";
 
 export interface PendingQuestion {
@@ -85,7 +85,8 @@ export function noteLateAnswer(pi: Pi, text: string): boolean {
   const trimmed = text.trim();
   if (trimmed === "") return false;
   if (trimmed.startsWith("/")) return false;
-  if (GO_PATTERN.test(trimmed)) return false;
+  // A bare steering word is approval, not an answer to the pending question.
+  if (isFallbackAdvance(trimmed)) return false;
   if (trimmed.length >= 500) return false;
   if (pending.resolve !== null) {
     const resolve = pending.resolve;

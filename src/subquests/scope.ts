@@ -2,7 +2,7 @@
 // interpreted in context. Borderline cases stay in context: recording is
 // deterministic, routing stays agent judgment via the quest tools.
 // SPEC: B1.2 scope rules (bias to keep).
-import type { MessageKind } from "./triage";
+import type { UserIntentKind } from "../domain/intent";
 import type { MidQuestConfig } from "../config";
 
 export type TriageAction =
@@ -21,18 +21,18 @@ export interface Triage {
 
 export function triageInQuestRequest(
   qid: string,
-  kind: MessageKind,
+  kind: UserIntentKind,
   cleanText?: string,
   config?: MidQuestConfig,
 ): Triage | null {
   if (config && config.mode === "off") return null;
-  if (kind === "question" || kind === "ack" || kind === "confirmation" || kind === "chat_bypass") {
+  if (kind === "question" || kind === "ack" || kind === "chat" || kind === "advance" || kind === "abort") {
     return null;
   }
 
   const text = cleanText ?? "";
 
-  if (kind === "subquest_preempt") {
+  if (kind === "subquest_now") {
     return {
       record: true,
       action: "preempt_subquest",
@@ -41,7 +41,7 @@ export function triageInQuestRequest(
     };
   }
 
-  if (kind === "subquest_queue") {
+  if (kind === "subquest_later") {
     return {
       record: true,
       action: "queue_subquest",
@@ -50,7 +50,7 @@ export function triageInQuestRequest(
     };
   }
 
-  if (kind === "directive_constraint") {
+  if (kind === "constraint") {
     return {
       record: true,
       action: "amend_requirement",

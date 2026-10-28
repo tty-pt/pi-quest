@@ -26,7 +26,7 @@ Every quest executes through three phases:
 
 1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) but may only write to its draft plan (`.pi/quest/future/<qid>.md`). Content changes trigger an independent reviewer. You can reply `go` or `proceed` at any moment to bypass review.
 2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
-3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS archives the finished quest into `.pi/quest/archive/<qid>.zip`. Reply `confirm` or `ship it` at any time to accept immediately.
+3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS archives the finished quest into `.pi/quest/archive/<qid>.zip`. Reply `go` (or *ship it* / *confirm* in any language, interpreted by the judge) at any time to accept immediately.
 
 ### Instant Plan Overlay (`Ctrl+Q`)
 Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable viewer of the active quest document, requirements, and progress.

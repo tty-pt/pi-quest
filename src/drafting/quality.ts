@@ -8,6 +8,7 @@
 import type { QuestDifficulty, QuestKind } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
 import type { QuestConfig } from "../config";
+import { askJudgeChoice, type JudgeQuestion } from "../judge/choice";
 import { resolveCitations } from "./citations";
 import { deliverableBody, type DraftSections } from "./plan-text";
 
@@ -20,8 +21,25 @@ export function countSteps(plan: string): number {
   return plan.split("\n").filter((line) => /^\s*(?:\d+[.)]|[-*+])\s+\S/.test(line)).length;
 }
 
-export function hasVerificationStep(plan: string): boolean {
-  return /\b(tests?|testing|verif(?:y|ies|ied|ication)|assert\w*|validat\w+|lint|smoke|e2e|regression|acceptance)\b/i.test(plan);
+const VERIFICATION_QUESTION: JudgeQuestion = {
+  id: "plan_verification",
+  state: "",
+  instructions:
+    "Does this implementation plan include at least one step that verifies the change (a test, check, build, or other concrete way to prove it works)? The plan may be written in any language.",
+  options: [
+    { key: "yes", description: "The plan contains a concrete verification step" },
+    { key: "no", description: "The plan has no verification step" },
+  ],
+};
+
+/**
+ * true/false from the judge; null when the judge is unavailable. No keyword
+ * matching: an English-only word list would wrongly block plans written in any
+ * other language, and the draft gate must never block on a guess.
+ */
+export async function judgeHasVerificationStep(config: QuestConfig, plan: string): Promise<boolean | null> {
+  const choice = await askJudgeChoice(config, { ...VERIFICATION_QUESTION, state: `Implementation plan:\n${plan.slice(0, 6000)}` });
+  return choice === null ? null : choice === "yes";
 }
 
 export interface QualityResult {
@@ -55,7 +73,7 @@ export async function assessDraftQuality(
   if (kind === "standard") {
     steps = countSteps(body);
     if (steps < tier.steps) gaps.push(`break the plan into at least ${tier.steps} discrete steps as a numbered or bulleted list (have ${steps})`);
-    if (tier.requireVerification && !hasVerificationStep(body)) {
+    if (tier.requireVerification && (await judgeHasVerificationStep(config, body)) === false) {
       gaps.push("add a verification step (a test or check that proves the change)");
     }
   }

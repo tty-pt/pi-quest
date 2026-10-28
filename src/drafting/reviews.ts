@@ -32,8 +32,7 @@ import {
   parseDraftSections,
   reviewMaterial,
 } from "./plan-text";
-import { evaluateSteeringIntent } from "../domain/steering";
-export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
+import { interpretUserTurn } from "../domain/intent";
 
 import {
   bumpReviewCountAndReboot as doBumpReviewCountAndReboot,
@@ -252,14 +251,15 @@ export async function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy)
 }
 
 export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
-  // Natural language steering: advance intent (or GO_PATTERN) promotes a draft.
+  // Advance intent (judge-first; one fallback word) promotes a draft.
   // It is never served from a tool result — a quest_ask_human default is absence,
   // not approval, and so can never promote a draft.
-  const config = await readQuestConfig(ctx.cwd);
-  const steering = await evaluateSteeringIntent(text, "drafting", config);
-  if (steering.action !== "advance" && !GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;
+  const config = await readQuestConfig(ctx.cwd);
+  const intent = await interpretUserTurn(text, "drafting", config);
+  if (intent.kind !== "advance") return false;
+  if (getState().phase !== "drafting") return false;
   return await approveDraft(pi, ctx, state.qid, "user");
 }
 

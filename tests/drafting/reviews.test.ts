@@ -13,7 +13,6 @@ import { fakeCtx, fakePi } from "../fake-pi.ts";
 import type { FakePi, SentMessage } from "../fake-pi.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import {
-  GO_PATTERN,
   MAX_REVIEW_RETRIES,
   MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
@@ -76,15 +75,6 @@ Deno.test("draft thresholds accept configured counts", () => {
   const sections = parseDraftSections("## Requirements\n- one\n\n## Implementation Plan\nplan\n");
   check(meetsReviewThresholds(sections, { requirements: 1, evidence: 0 }), "custom counts honored");
   check(!meetsReviewThresholds(sections, { requirements: 5, evidence: 7 }), "custom counts enforced");
-});
-
-Deno.test("go pattern matches approval and nothing else", () => {
-  for (const text of ["go", "Go", "  go. ", "approve", "approved", "lgtm", "ship it!"]) {
-    check(GO_PATTERN.test(text), `"${text}" is approval`);
-  }
-  for (const text of ["go on", "going well", "good", "stop", ""]) {
-    check(!GO_PATTERN.test(text), `"${text}" is not approval`);
-  }
 });
 
 Deno.test("content hash is stable hex", () => {

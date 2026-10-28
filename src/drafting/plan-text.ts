@@ -2,6 +2,7 @@
 // Pure plan-text operations over the draft file: hashing, section splicing,
 // parsing, maturity thresholds, and the review-count marker that forces a
 // re-review by slightly altering the plan.
+import { isHeading, sectionKeyOf, type SectionKey } from "../domain/sections";
 import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
 import type { QuestDifficulty, QuestKind, QuestState } from "../domain/quest";
@@ -26,12 +27,9 @@ export function hashContent(content: string): string {
 // Generic ##-section splices: replace the named section's body, or append a
 // fresh section when absent. Both the plan and the analysis deliverable reuse
 // it so their splice semantics stay byte-identical.
-function spliceSection(text: string, match: string, label: string, body: string): string {
+function spliceSection(text: string, key: SectionKey, label: string, body: string): string {
   const lines = text.split("\n");
-  const start = lines.findIndex((line) => {
-    const header = line.match(/^##\s+(.+?)\s*$/i);
-    return header !== null && header[1].toLowerCase().includes(match);
-  });
+  const start = lines.findIndex((line) => isHeading(line, key));
   if (start === -1) {
     const base = text.endsWith("\n") ? text : `${text}\n`;
     return `${base}\n## ${label}\n\n${body.trim()}\n`;
@@ -47,7 +45,7 @@ function spliceSection(text: string, match: string, label: string, body: string)
 }
 
 export function splicePlanSection(text: string, plan: string): string {
-  return spliceSection(text, "implementation plan", "Implementation Plan", plan);
+  return spliceSection(text, "plan", "Implementation Plan", plan);
 }
 
 export function spliceAnalysisSection(text: string, analysis: string): string {
@@ -55,14 +53,14 @@ export function spliceAnalysisSection(text: string, analysis: string): string {
 }
 
 export function spliceSubquestsSection(text: string, subquests: string): string {
-  return spliceSection(text, "sub-quest", "Sub-Quests", subquests);
+  return spliceSection(text, "subquests", "Sub-Quests", subquests);
 }
 
 export function spliceAmendmentsSection(text: string, amendments: string[]): string {
   const body = amendments.length > 0
     ? amendments.map((a) => `- ${a}`).join("\n")
     : "<!-- No amendments recorded -->";
-  return spliceSection(text, "amendment", "Amendments", body);
+  return spliceSection(text, "amendments", "Amendments", body);
 }
 
 export function parseDraftSections(text: string): DraftSections {
@@ -77,16 +75,12 @@ export function parseDraftSections(text: string): DraftSections {
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
     if (header) {
-      const name = header[1].toLowerCase();
-      if (name.includes("requirement")) section = "requirements";
-      else if (name.includes("evidence")) section = "evidence";
-      else if (name.includes("analysis")) section = "analysis";
-      else if (name.includes("sub-quest") || name.includes("subquest")) section = "subquests";
-      else if (name.includes("implementation plan")) section = "plan";
-      else if (name.includes("amendment")) section = "amendments";
+      const key = sectionKeyOf(header[1]);
       // Pre-draft investigation recorded via recordRefinement is research:
       // its bullets fold into the evidence list so it counts toward the bar.
-      else if (name.includes("findings") && name.includes("pre-draft")) section = "evidence";
+      if (key === "requirements" || key === "evidence" || key === "analysis" || key === "plan" || key === "amendments") section = key;
+      else if (key === "subquests") section = "subquests";
+      else if (key === "predraft") section = "evidence";
       else section = null;
       continue;
     }

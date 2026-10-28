@@ -33,6 +33,19 @@ export type JudgeProtocol = "auto" | "systemzero" | "systemone";
 export type JudgeFallback = "heuristic" | "skip";
 export type ReviewPolicy = "strict" | "balanced" | "off";
 
+export interface LintRule {
+  id: string;
+  /** Regex source matched against the changed file path (all files when absent). */
+  filePattern?: string;
+  /** Files matching this regex source are exempt. */
+  excludeFilePattern?: string;
+  /** Added lines matching this regex source are exempt (sanctioned forms). */
+  excludeLinePattern?: string;
+  /** Regex source matched against each added line. */
+  linePattern: string;
+  message: string;
+}
+
 export type MidQuestMode = "hybrid" | "autonomous" | "interactive" | "off";
 export type SubQuestAction = "queue_backlog" | "preempt_now" | "ask_human";
 
@@ -108,6 +121,12 @@ export interface QuestConfig {
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
   triggerPrefixes: string[];
+  /** Operator-owned exact messages (any language) that advance a quest when the judge is unavailable. */
+  steeringPhrases: string[];
+  /** Operator-declared command prefixes that count as test/build evidence (in addition to built-ins). */
+  testCommands: string[];
+  /** Repo-local semantic diff lint rules (none ship by default). */
+  lintRules: LintRule[];
   autoStartAuren?: boolean;
   autoDownloadModels?: "auto" | "ask" | "never";
   midQuest: MidQuestConfig;
@@ -154,11 +173,40 @@ export const DEFAULT_CONFIG: QuestConfig = {
   judgeFallback: "heuristic",
   judgeTimeoutMs: 2000,
   triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
+  steeringPhrases: [],
+  testCommands: [],
+  lintRules: [],
   autoStartAuren: true,
   autoDownloadModels: "ask",
   midQuest: DEFAULT_MID_QUEST_CONFIG,
   router: DEFAULT_ROUTER_CONFIG,
 };
+
+function stringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim());
+}
+
+function parseLintRules(raw: unknown): LintRule[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LintRule[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r["id"] !== "string" || typeof r["linePattern"] !== "string" || typeof r["message"] !== "string") continue;
+    const optional = ["filePattern", "excludeFilePattern", "excludeLinePattern"] as const;
+    try {
+      new RegExp(r["linePattern"]);
+      for (const k of optional) if (typeof r[k] === "string") new RegExp(r[k] as string);
+    } catch {
+      continue;
+    }
+    const rule: LintRule = { id: r["id"], message: r["message"], linePattern: r["linePattern"] };
+    for (const k of optional) if (typeof r[k] === "string") rule[k] = r[k] as string;
+    out.push(rule);
+  }
+  return out;
+}
 
 function getEnv(key: string): string | undefined {
   if (typeof process !== "undefined" && process?.env) {
@@ -472,6 +520,9 @@ export function loadConfig(raw: unknown): QuestConfig {
     midQuest,
     router: loadRouterConfig(record),
     ...judge,
+    steeringPhrases: stringList(record["steeringPhrases"]),
+    testCommands: stringList(record["testCommands"]),
+    lintRules: parseLintRules(record["lintRules"]),
   };
 }
 

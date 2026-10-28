@@ -11,6 +11,7 @@ import type { Qid } from "../../src/domain/qid.ts";
 import { triageInQuestRequest } from "../../src/subquests/scope.ts";
 import { installSubQuests } from "../../src/subquests/index.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
+import { JUDGE_OFF, JUDGE_ON, stubJudgeFetch, writeQuestSettings } from "../judge-stub.ts";
 
 Deno.test("triage records refinements with routing guidance", () => {
   const triaged = triageInQuestRequest("abc123", "refinement");
@@ -24,29 +25,29 @@ Deno.test("triage records refinements with routing guidance", () => {
 Deno.test("triage leaves non-refinements to the agent", () => {
   check(triageInQuestRequest("abc123", "question") === null, "questions pass through");
   check(triageInQuestRequest("abc123", "ack") === null, "acks pass through");
-  check(triageInQuestRequest("abc123", "confirmation") === null, "approvals pass through");
-  check(triageInQuestRequest("abc123", "chat_bypass") === null, "chat_bypass passes through");
+  check(triageInQuestRequest("abc123", "advance") === null, "approvals pass through");
+  check(triageInQuestRequest("abc123", "chat") === null, "chat_bypass passes through");
 });
 
 Deno.test("triage handles directives and subquest actions", () => {
-  const preempt = triageInQuestRequest("abc123", "subquest_preempt", "fix memory leak");
+  const preempt = triageInQuestRequest("abc123", "subquest_now", "fix memory leak");
   check(preempt !== null && preempt.record, "preempt recorded");
   check(preempt!.action === "preempt_subquest", "action preempt_subquest");
   check(preempt!.steer.includes("Spawning immediate sub-quest"), "preempt steer text");
 
-  const queue = triageInQuestRequest("abc123", "subquest_queue", "export csv");
+  const queue = triageInQuestRequest("abc123", "subquest_later", "export csv");
   check(queue !== null && queue.record, "queue recorded");
   check(queue!.action === "queue_subquest", "action queue_subquest");
   check(queue!.steer.includes("Queued sub-quest"), "queue steer text");
 
-  const rule = triageInQuestRequest("abc123", "directive_constraint", "port 8080");
+  const rule = triageInQuestRequest("abc123", "constraint", "port 8080");
   check(rule !== null && rule.record, "rule recorded");
   check(rule!.action === "amend_requirement", "action amend_requirement");
   check(rule!.steer.includes("Recorded user constraint"), "rule steer text");
 });
 
 Deno.test("triage respects midQuest mode off", () => {
-  const off = triageInQuestRequest("abc123", "directive_constraint", "port 8080", {
+  const off = triageInQuestRequest("abc123", "constraint", "port 8080", {
     mode: "off",
     subquestAction: "queue_backlog",
     autoAmendRequirements: false,
@@ -138,7 +139,7 @@ Deno.test("autoAmendRequirements: false leaves action as refinement and does not
     replaceState(implementing);
 
     await mkdir(join(cwd, ".pi"), { recursive: true });
-    await writeFile(join(cwd, ".pi/settings.json"), JSON.stringify({ "pi-quest": { midQuest: { autoAmendRequirements: false } } }), "utf8");
+    await writeFile(join(cwd, ".pi/settings.json"), JSON.stringify({ "pi-quest": { ...JUDGE_OFF, midQuest: { autoAmendRequirements: false } } }), "utf8");
 
     const filePath = join(cwd, draftPath(qid));
     await mkdir(dirname(filePath), { recursive: true });
@@ -159,8 +160,9 @@ Deno.test("autoAmendRequirements: false leaves action as refinement and does not
   }
 });
 
-async function implementingHarness(qidText: string) {
+async function implementingHarness(qidText: string, settings: Record<string, unknown> = JUDGE_OFF) {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-steer-go-"));
+  writeQuestSettings(cwd, settings);
   const pi = fakePi();
   installSubQuests(pi);
   const qid = qidText as Qid;
@@ -173,21 +175,53 @@ async function implementingHarness(qidText: string) {
   return { cwd, pi, ctx: fakeCtx(cwd), handler: pi.eventHandlers["input"]![0] };
 }
 
-Deno.test("pure steering in implementing never records an amendment or demotes", async () => {
-  const phrases = ["Go on", "go on!", "ship it", "Carry on", "keep going", "continua", "vai em frente", "cancel"];
-  for (const phrase of phrases) {
-    const h = await implementingHarness("1xGoOn");
-    try {
-      await h.handler({ text: phrase }, h.ctx);
-      const after = getState();
-      check(after.phase === "implementing", `"${phrase}" keeps implementing`);
-      check(after.amendments.length === 0, `"${phrase}" records no amendment`);
-      check(after.refinements.length === 0, `"${phrase}" records no refinement`);
-      check(after.draft?.approvedBy === "user", `"${phrase}" keeps approval`);
-    } finally {
-      replaceState(IDLE_STATE);
-      rmSync(h.cwd, { recursive: true, force: true });
+Deno.test("judge-classified steering in implementing never records an amendment or demotes (any language)", async () => {
+  const phrases = ["Go on", "ship it", "Carry on", "continua", "vai em frente", "cancel", "ok bora lá"];
+  const restore = stubJudgeFetch((_id, state) => (state.includes("cancel") ? "abort" : "advance"));
+  try {
+    for (const phrase of phrases) {
+      const h = await implementingHarness("1xGoOn", JUDGE_ON);
+      try {
+        await h.handler({ text: phrase }, h.ctx);
+        const after = getState();
+        check(after.phase === "implementing", `"${phrase}" keeps implementing`);
+        check(after.amendments.length === 0, `"${phrase}" records no amendment`);
+        check(after.refinements.length === 0, `"${phrase}" records no refinement`);
+        check(after.draft?.approvedBy === "user", `"${phrase}" keeps approval`);
+      } finally {
+        replaceState(IDLE_STATE);
+        rmSync(h.cwd, { recursive: true, force: true });
+      }
     }
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("judge off: only the single fallback word steers; other phrasing is a harmless refinement", async () => {
+  const h = await implementingHarness("1xGoFb");
+  try {
+    await h.handler({ text: "go" }, h.ctx);
+    check(getState().refinements.length === 0, "bare go is steering, not a refinement");
+    await h.handler({ text: "Go on" }, h.ctx);
+    const after = getState();
+    check(after.phase === "implementing", "unrecognized phrase never demotes");
+    check(after.draft?.approvedBy === "user", "approval kept");
+    check(after.refinements.length === 1, "recorded as a plain refinement");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(h.cwd, { recursive: true, force: true });
+  }
+});
+
+Deno.test("operator steeringPhrases extend the judge-less fallback (locale words live in settings, not code)", async () => {
+  const h = await implementingHarness("1xGoPh", { ...JUDGE_OFF, steeringPhrases: ["vai em frente"] });
+  try {
+    await h.handler({ text: "Vai em frente!" }, h.ctx);
+    check(getState().refinements.length === 0, "operator phrase is steering");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(h.cwd, { recursive: true, force: true });
   }
 });
 

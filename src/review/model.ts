@@ -9,6 +9,7 @@
 // a registry never registered — the flow therefore also retries the
 // suffix-stripped variant instead of failing.
 import type { PiCtx } from "../hooks/events";
+import { isProviderSideFailure, isRetryableProviderError } from "../utils/provider-error.ts";
 
 // Thinking levels of the delegation contract. Validated here, never chosen:
 // absent means inherit.
@@ -75,6 +76,7 @@ export function resolveReviewThinking(): string | undefined {
   return THINKING_LEVELS.has(level) ? level : undefined;
 }
 
+
 export type ReviewTimeoutLayer =
   | "subagent_bridge_deadline"
   | "child_process_deadline"
@@ -83,38 +85,14 @@ export type ReviewTimeoutLayer =
 
 export function classifyTimeoutLayer(errMessage: string): ReviewTimeoutLayer {
   const msg = (errMessage || "").toLowerCase();
-  if (msg.includes("bridge") || msg.includes("event bridge")) return "subagent_bridge_deadline";
-  if (msg.includes("process") || msg.includes("killed") || msg.includes("sigterm") ||
-    msg.includes("sigkill") || msg.includes("spawn")) return "child_process_deadline";
-  if (msg.includes("model") || msg.includes("provider") || msg.includes("rate limit") ||
-    msg.includes("context") || msg.includes("429") || msg.includes("504") ||
-    msg.includes("quota")) return "provider_model_timeout";
+  if (/\bevent bridge\b|\bbridge\b/.test(msg)) return "subagent_bridge_deadline";
+  if (/\b(?:killed|sigterm|sigkill|spawn)\b|child process/.test(msg)) return "child_process_deadline";
+  if (isProviderSideFailure(msg)) return "provider_model_timeout";
   return "quest_journal_deadline";
 }
 
 export function isModelResolutionOrProviderError(errMessage: string): boolean {
-  const msg = (errMessage || "").toLowerCase();
-  return (
-    (msg.includes("model") &&
-      (msg.includes("not found") || msg.includes("cannot find") || msg.includes("unknown"))) ||
-    msg.includes("unknown provider") ||
-    msg.includes("provider_model_timeout") ||
-    msg.includes("rate limit") ||
-    msg.includes("429") ||
-    msg.includes("504") ||
-    msg.includes("503") ||
-    msg.includes("529") ||
-    msg.includes("overloaded") ||
-    msg.includes("capacity") ||
-    msg.includes("quota") ||
-    msg.includes("401") ||
-    msg.includes("403") ||
-    msg.includes("unauthorized") ||
-    msg.includes("forbidden") ||
-    msg.includes("permission_error") ||
-    msg.includes("oauth_not_allowed") ||
-    msg.includes("authentication")
-  );
+  return isRetryableProviderError(errMessage || "");
 }
 
 export interface ReviewModelCandidate {

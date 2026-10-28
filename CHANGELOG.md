@@ -5,6 +5,21 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-29
+
+### Changed (breaking)
+- **Judge-first operator intent, no natural-language word lists in code.** One `interpretUserTurn()` (`src/domain/intent.ts`) classifies each operator message once (memoized per message), via one judge call, into advance / abort / constraint / sub-quest / question / ack / refinement. Draft approval, plan-revision adoption, validation confirmation, late-answer handling and mid-quest triage all consume that single result. Removed: `ADVANCE_PHRASES` / `ABORT_PHRASES` (EN + PT, and their substring matching that returned *before* the judge), the `triage.ts` confirm/ack/question/sub-quest/constraint vocabularies, `GO_PATTERN` / `APPROVE_PATTERN` / `CONFIRM_PATTERN`, and the English verb / "My grandfather|cat|dog" quest-detection regexes.
+- **Judge-less fallback is one word.** With the judge off or unreachable, only the exact message `go` (plus operator-owned `steeringPhrases` in settings) advances a quest; every other phrasing becomes a recorded refinement that cannot advance, abort or archive. Sigils (`!rule`, `!sq`, `!later`, `!chat`, `? `) keep working. Free-form text no longer opens a quest without a judge: use a trigger prefix or `/quest`.
+- **Judge answers must equal a declared label.** The new `askJudgeChoice()` seam (`src/judge/choice.ts`) replaces three duplicated Jev fetch/parse blocks; substring synonyms (`task`, `chat`, `minor`, `epic`, ...) are gone. `judgeMode: "systemone"` now forces the systemone protocol, and a SystemZero reply with no decision/choice falls through to systemone instead of reading as "conversation".
+- **Difficulty fallback is structural** (4+ distinct file paths => complex, else standard); the keyword lists are removed. **Plan verification** is a judge yes/no question and is advisory (never blocks promotion) when no judge is available.
+- **Setbacks key on exit status only.** Output text is never scraped, fixing the false "Test/build command failed" on a passing run whose output says `0 failed`. `isTestCommand` now matches runner tokens (`npm test`, `make`, `pytest`, ...) per command segment, not a word anywhere in the line; add runners with `testCommands`.
+- **One provider-error classifier** (`src/utils/provider-error.ts`) shared by review retries and the router: status codes on word boundaries and API error codes only; generic words (`model`, `process`, `context`) no longer match.
+- **Repo-specific lint rules moved to config.** `semantic-lint` ships only the conflict-marker check; the site's UX / XY rules now live in the repo's `.pi/settings.json` under `pi-quest.lintRules`.
+- **Section headings** are recognized through one registry (`src/domain/sections.ts`) by title prefix at a word boundary instead of "contains word".
+
+### Added
+- Settings: `steeringPhrases`, `testCommands`, `lintRules`.
+
 ## [1.6.0] - 2026-10-28
 
 ### Added

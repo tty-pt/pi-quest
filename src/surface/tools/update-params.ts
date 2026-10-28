@@ -3,6 +3,7 @@
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { readQuestConfig } from "../../config.ts";
 import { getState, replaceState, updateState } from "../../app/store.ts";
 import { emitNow, sendSteer } from "../../app/interpreter.ts";
 import {
@@ -116,7 +117,9 @@ export async function claimForValidation(
       }
       return "";
     };
+    const lintRules = (await readQuestConfig(ctx.cwd)).lintRules;
     await assertCompletionEligibility(state, {
+      lintRules,
       getDiffStat: () => runGitDiff("--stat"),
       getDiffPatch: () => runGitDiff(),
       getLatestTest: () => state.lastTestReceipt ?? getLatestTestExecution(),

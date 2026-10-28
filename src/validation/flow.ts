@@ -23,9 +23,8 @@ import { setDocStatus } from "../quest-doc";
 import { parseDraftSections } from "../drafting/plan-text";
 import { extractQuestTranscript } from "../durability/transcript";
 import { getLatestTestExecution } from "./evidence-gate";
-import { evaluateSteeringIntent } from "../domain/steering";
+import { interpretUserTurn } from "../domain/intent";
 
-export const CONFIRM_PATTERN = /^\s*confirm(?:ed)?\s*[.!]*$/i;
 
 async function approvedPlan(ctx: PiCtx, state: QuestState): Promise<string> {
   if (state.qid === null) return "(none)";
@@ -314,11 +313,12 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
 }
 
 export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
-  const config = await readQuestConfig(ctx.cwd);
-  const steering = await evaluateSteeringIntent(text, "validating", config);
-  if (steering.action !== "advance" && !CONFIRM_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "validating" || state.qid === null) return false;
+  const config = await readQuestConfig(ctx.cwd);
+  const intent = await interpretUserTurn(text, "validating", config);
+  if (intent.kind !== "advance") return false;
+  if (getState().phase !== "validating") return false;
   if (hasInFlight(state.qid)) {
     cancelReview(state.qid);
   }
