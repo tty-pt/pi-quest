@@ -92,7 +92,27 @@ When an `analysis` quest concludes and validates, `pi-quest` automatically archi
 
 ---
 
-## 3. Zero-Config Bring-Up & Diagnostics
+## 4. Reviewer Failover & Cooldown Architecture
+
+When a quest enters peer review (in drafting, mid-flight plan revision, or validation), `pi-quest` guarantees that external provider rate limits or quota depletion cannot stall the agent:
+
+- **Automated Fallback Chain**:
+  The review runner dynamically enriches candidate models in prioritized order:
+  1. Configured target model (e.g. `anthropic/claude-sonnet-5-5:low`).
+  2. Thinking-stripped model (e.g. `anthropic/claude-sonnet-5-5`).
+  3. Explicit fallbacks in `roles.reviewer` / `roles.validator`.
+  4. Router default model (`config.router.default`, e.g. `antigravity/gemini-3.8-flash`).
+  5. Active session model (`ctx.model`).
+  6. `{ label: "inherit" }` (omitting the model flag entirely so `pi-subagents` uses its ambient default).
+- **Provider-Level Rate-Limit Skipping & 15m Cooldown**:
+  When a candidate model fails with HTTP `429`, quota exhaustion, or capacity errors (`isRateLimitOrQuotaError`):
+  - Records a 15-minute cooldown on the model key, its stripped variant, and the provider prefix (`provider:<prov>`, e.g. `provider:anthropic`).
+  - All subsequent candidate models under the same provider namespace are immediately skipped without wasting network requests or timing out.
+  - The reviewer immediately fails over to an independent provider (e.g. `antigravity/gemini-3.8-flash`) or `{ label: "inherit" }`, returning a timely verdict.
+
+---
+
+## 5. Zero-Config Bring-Up & Diagnostics
 
 `pi-quest` operates with zero manual configuration:
 - **Automatic Daemon Start**: Automatically detects and launches `axil-auren` on port 4242 for local intent evaluation.
@@ -108,7 +128,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 ---
 
-## 4. The Agent's Tools
+## 6. The Agent's Tools
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
@@ -121,7 +141,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 ---
 
-## 5. Slash Commands Reference
+## 7. Slash Commands Reference
 
 | Command | Shortcut | Description |
 | :--- | :--- | :--- |
@@ -133,7 +153,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 ---
 
-## 6. Development & Testing
+## 8. Development & Testing
 
 ```bash
 npm --prefix .pi/extensions/pi-quest test    # Run full test suite (500+ unit & integration tests)

@@ -127,6 +127,7 @@ Research, reads and test runs are never blocked; the only writable file is the d
 ### 3. Review
 - **standard / trivial**: review is bypassed. Once the plan is authored and meets the bar, the quest promotes to implementing and the agent is told "Draft review bypassed under policy 'balanced'". No subagent runs. If the draft is below the bar (too few requirements/evidence, requirements not mapped into the plan, or an empty plan), nothing promotes, but the agent is woken with the draft profile listing what is missing; saving re-checks. Keep `## ` headings out of the plan body (use `###`).
 - **complex**: a reviewer subagent runs on `roles.reviewer` (with its model chain as above). PASS promotes. FAIL returns findings; saving the revised plan boots a fresh review. A launch failure retries up to 3 times with exponential backoff (4s base); two consecutive FAIL verdicts pause the loop and ask the operator, who may reply `go`.
+- **Rate-limit failover & provider cooldowns**: If any reviewer model encounters HTTP `429`, quota exhaustion, or capacity errors (`isRateLimitOrQuotaError`), `pi-quest` places a 15-minute cooldown on the model, its base variant, and its provider namespace (`provider:<prov>`). Subsequent candidates belonging to that provider are immediately skipped, failing over seamlessly across the chain: target model $\rightarrow$ `roles.reviewer` $\rightarrow$ router default (`config.router.default`) $\rightarrow$ session model $\rightarrow$ `{ label: "inherit" }`.
 - `go` (or `go on`, `proceed`, ...) promotes at any time.
 
 ### 4. Implementing

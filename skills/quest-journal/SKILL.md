@@ -66,6 +66,10 @@ quest id (`future/<qid>.md`); there are no slugs.
   - **Two-strike safety pause:** if a review or validation is rejected 2 consecutive
     times, the automated review loop automatically pauses to prevent thrashing and
     prompts the human operator for guidance.
+  - **Reviewer failover & cooldowns:** if the designated reviewer hits provider rate limits
+    (429) or quota exhaustion, `pi-quest` cools down that provider for 15 minutes, skips
+    sibling models under the same provider, and fails over across the fallback chain (to the
+    router default, session model, or ambient inherit), preventing stalls.
   - **Human operator steering:** the operator is the supreme authority. Natural
     phrasing (`go`, `proceed`, `start coding` in drafting; `ship it`, `confirm`,
     `looks good` in validation) bypasses automated reviews and advances immediately.

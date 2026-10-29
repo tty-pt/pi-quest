@@ -5,13 +5,30 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.9.1] - 2026-10-29
 
 ### Added
-- **Fine-grained quest kind classification via embeddings** (`POST /v1/classify`). When a quest is opened via trigger prefix or detected free-form request, `evaluateQuestKind` classifies the objective into specialized kinds: `feature`, `bugfix`, `refactor`, `docs`, `analysis`, or `standard` (`src/drafting/kind-exemplars.ts`).
-- **Completion eligibility relaxed for documentation quests**. `assertCompletionEligibility` recognizes `docs` quests, requiring non-empty modified file diffs (markdown/documentation) while relaxing binary test runner command execution requirements.
+- **Automated reviewer rate-limit failover and fallback chains** (`src/review/model.ts`, `src/review/flow.ts`).
+  - `reviewModelCandidates` automatically extends configured reviewer models with the router's default model (`config.router.default`, e.g. `antigravity/gemini-3.8-flash`), the active session model (`resolveDefaultReviewModel(ctx)`), and `{ label: "inherit" }` as the ultimate safety floor.
+  - Suffix-stripped variants and de-duplication are preserved throughout the fallback candidate chain.
+  - Wired `routerDefault`, `sessionModel`, and `cooldownMs` across all review triggers: `bootDraftReview` (`src/drafting/reviews.ts`), `ensureValidationFlow` (`src/validation/flow.ts`), and `bootPlanRevisionReview` (`src/implementing/plan-revision.ts`).
+- **Provider-level cooldown tracking & rate-limit skipping** (`src/review/flow.ts`).
+  - Added in-memory review cooldown tracker (`recordModelCooldown`, `isModelInCooldown`, `clearReviewCooldowns`) defaulting to 15 minutes.
+  - When any reviewer model hits HTTP `429`, quota exhaustion, or capacity errors (`isRateLimitOrQuotaError`), the model, its base variant, and the provider prefix (`provider:<prov>`) are placed on cooldown.
+  - Subsequent candidates sharing the same provider namespace are immediately skipped without wasting network requests or timing out, failing over directly to distinct providers.
+- **Compound advance steering and trailing directive attachment** (`src/domain/intent.ts`).
+  - When the operator sends an approval followed by trailing instructions (e.g. `"go. Make sure to also update the docs."`), `parseLeadingAdvance` detects the predetermined advance word (`"go"`), promotes the quest immediately from `drafting` to `implementing`, and extracts the trailing sentence as an active directive injected into turn context.
+- **Conversational brainstorming vs quest intent differentiation** (`src/drafting/quest-exemplars.ts`).
+  - Added technical inquiry, collaborative thinking, and brainstorming exemplars to `conversation` in `QUEST_EXEMPLARS` to ensure questions (*"Let's think this through"*, *"Can you explain how this module works?"*) never accidentally trigger quest creation.
+- **Fine-grained quest kind classification via embeddings** (`POST /v1/classify`, `src/drafting/kind-exemplars.ts`).
+  - `evaluateQuestKind` classifies objectives into `feature`, `bugfix`, `refactor`, `docs`, `analysis`, or `standard`.
+  - `assertCompletionEligibility` relaxes binary test commands for `docs` quests (requiring non-empty documentation diffs).
+- **Analysis quest direct-to-validating auto-claim & handoff bridge** (`src/drafting/promotion.ts`, `src/views/quest-view.ts`).
+  - Review PASS on an `analysis` quest auto-claims completion and moves directly to validation, skipping implementation scaffolding.
+  - On conclusion, generates an implementation handoff prompt to seamlessly seed follow-up implementation quests.
 
 ### Fixed
+- **Reviewer rate-limit stall and manual intervention trap.** Resolved the condition where an exhausted Claude model in `roles.reviewer` caused review retries to repeatedly hammer the same rate-limited provider or stall awaiting human `"go"`.
 - **A stale draft-review verdict no longer strands a draft.** When a reviewer verdict arrived for a superseded revision and nothing was in flight, `bootDraftReview` returned silently: no promotion, no new review, no wake. It now re-boots one review for the current file (then wakes the agent instead of looping). A PASS that cannot promote steers the agent instead of returning silently. The cause of the originally reported stall is unproven; this closes the one silent path found.
 
 ## [1.9.0] - 2026-10-28
