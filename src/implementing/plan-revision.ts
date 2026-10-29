@@ -102,6 +102,8 @@ export async function bootPlanRevisionReview(
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "reviewer"),
+    routerDefault: config.router.default,
+    cooldownMs: config.router.cooldownMs,
     maxDurationMs: Math.min(config.reviewMaxDurationMs, 300000),
     inactivityLimitMs: Math.min(config.reviewInactivityMs, 60000),
   });

@@ -13,11 +13,14 @@ import type { QuestState } from "../domain/quest";
 import { recordReviewResult } from "../domain/quest";
 import { createRunner, isReviewerAvailable } from "./runner";
 import {
+  extractProvider,
   isModelResolutionOrProviderError,
   resolveDefaultReviewModel,
   resolveReviewThinking,
   reviewModelCandidates,
+  stripThinkingSuffix,
 } from "./model";
+import { isRateLimitOrQuotaError } from "../utils/provider-error.ts";
 import { parseReviewText, type ParsedReview } from "./verdicts";
 import {
   cancelReview,
@@ -41,6 +44,10 @@ export interface FlowArgs {
   runnerTool?: string;
   model?: string;
   fallbackModels?: readonly string[];
+  routerDefault?: string | string[];
+  sessionModel?: string;
+  appendInherit?: boolean;
+  cooldownMs?: number;
   thinking?: string;
   maxDurationMs?: number;
   inactivityLimitMs?: number;
@@ -54,6 +61,29 @@ export function reviewerAvailable(pi: Pi): boolean {
 // wait — the verdict (which resumes work) arrives separately as a new turn.
 // Never resumed from here: this path uses sendSteer, never sendWake.
 const noticedReviews = new Set<string>();
+const reviewCooldowns = new Map<string, number>();
+
+export function isModelInCooldown(modelKey: string, now = Date.now()): boolean {
+  const expiresAt = reviewCooldowns.get(modelKey.toLowerCase());
+  if (!expiresAt) return false;
+  if (expiresAt <= now) {
+    reviewCooldowns.delete(modelKey.toLowerCase());
+    return false;
+  }
+  return true;
+}
+
+export function recordModelCooldown(modelKey: string, durationMs = 900000, now = Date.now()): void {
+  reviewCooldowns.set(modelKey.toLowerCase(), now + durationMs);
+}
+
+export function clearReviewCooldowns(): void {
+  reviewCooldowns.clear();
+}
+
+export function getReviewCooldowns(): ReadonlyMap<string, number> {
+  return reviewCooldowns;
+}
 
 export function reviewRunningNotice(qid: string): string {
   return `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`;
@@ -94,18 +124,39 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
   if (!isReviewerAvailable(pi, runnerTool)) return { status: "no-runner" };
   // Ordered candidates: the resolved target first (it may carry a thinking
   // suffix the child registry never registered), then the suffix-stripped
-  // variant, then the operator fallback. Neither model nor thinking is sent
-  // unless resolved — omission means inherit.
+  // variant, then configured role fallbacks, then router default, session model, and inherit.
   const targetModel = args.model ?? resolveDefaultReviewModel(ctx);
+  const sessionModel = args.sessionModel;
   const thinking = args.thinking ?? resolveReviewThinking();
-  const candidates = reviewModelCandidates(targetModel, args.fallbackModels ?? []);
+  const appendInherit = args.appendInherit ?? (args.routerDefault !== undefined || args.sessionModel !== undefined);
+  const candidates = reviewModelCandidates(targetModel, args.fallbackModels ?? [], {
+    routerDefault: args.routerDefault,
+    sessionModel,
+    appendInherit,
+  });
   const controller = new AbortController();
   trackReview(qid, target, () => controller.abort());
   if (shouldNoticeReview(qid, target)) sendSteer(pi, reviewRunningNotice(qid));
+
+  const cooldownMs = args.cooldownMs ?? 900000;
+  const now = Date.now();
+
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
     // A superseding boot owns the quest now; stop instead of launching stale.
     if (i > 0 && !isCurrentReview(qid, target)) return { status: "aborted" };
+
+    // If candidate or its provider is on active rate-limit/auth cooldown, skip it
+    // unless this is the final safety candidate.
+    if (candidate.model) {
+      const modelKey = candidate.model.toLowerCase();
+      const prov = extractProvider(candidate.model);
+      const isCooling = isModelInCooldown(modelKey, now) || (prov !== "" && isModelInCooldown(`provider:${prov}`, now));
+      if (isCooling && i + 1 < candidates.length) {
+        continue;
+      }
+    }
+
     const runner = createRunner({
       pi,
       ctx,
@@ -125,6 +176,27 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
     } catch (err) {
       if (controller.signal.aborted) return { status: "aborted" };
       const detail = err instanceof Error ? err.message : String(err);
+
+      // On rate limit or quota exhaustion, record cooldown for this model and its base variant
+      if (isRateLimitOrQuotaError(detail)) {
+        if (candidate.model) {
+          const modelKey = candidate.model.toLowerCase();
+          recordModelCooldown(modelKey, cooldownMs, now);
+          const stripped = stripThinkingSuffix(candidate.model).toLowerCase();
+          if (stripped !== modelKey) {
+            recordModelCooldown(stripped, cooldownMs, now);
+          }
+        }
+      }
+
+      // On provider-wide auth failure, cooldown provider prefix
+      if (/\b(?:401|403)\b|unauthori[sz]ed|forbidden|oauth_not_allowed/i.test(detail)) {
+        const prov = extractProvider(candidate.model);
+        if (prov !== "") {
+          recordModelCooldown(`provider:${prov}`, cooldownMs, now);
+        }
+      }
+
       const retryable = isModelResolutionOrProviderError(detail) && i + 1 < candidates.length;
       if (!retryable) {
         if (isCurrentReview(qid, target)) cancelReview(qid);

@@ -126,6 +126,8 @@ export async function bootDraftReview(
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "reviewer"),
+    routerDefault: config.router.default,
+    cooldownMs: config.router.cooldownMs,
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
   });

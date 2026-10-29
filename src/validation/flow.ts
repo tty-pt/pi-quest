@@ -261,6 +261,8 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     runnerTool: config.bindings.reviewRunner.tool,
     ...(validatorModel ? { model: validatorModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "validator"),
+    routerDefault: config.router.default,
+    cooldownMs: config.router.cooldownMs,
     prompt: buildReviewPrompt("validation", qid, target, brief),
   });
   if (outcome.status === "no-runner") {
