@@ -150,11 +150,17 @@ export function embedStrategy(cfg: QuestConfig, examples: readonly Exemplar[], g
 /** Cold model loads can take over a minute; the production 6 s timeout would abort them. */
 export const JUDGE_WARMUP_TIMEOUT_MS = 180_000;
 
-/** Judge strategy: deprecated; returns null. */
+/** Judge strategy executing via askJudgeChoice seam when configured. */
 export function judgeStrategy(cfg: QuestConfig, question: JudgeQuestion, state: (text: string) => string): Strategy {
   return {
-    name: `judge(deprecated)`,
-    classify: () => Promise.resolve(null),
+    name: `judge(${cfg.judgeModel ?? "default"})`,
+    classify: async (text: string) => {
+      const q: JudgeQuestion = {
+        ...question,
+        instructions: state(text),
+      };
+      return await askJudgeChoice(cfg, q);
+    },
     warmup: async () => {},
   };
 }

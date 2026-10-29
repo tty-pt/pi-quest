@@ -45,8 +45,36 @@ export function normalizeJevUrl(baseUrlOrUrl: string): string {
  * Always returns null to ensure deterministic fallback.
  */
 export async function askJudgeChoice(
-  _cfg: QuestConfig,
-  _question: JudgeQuestion,
+  cfg: QuestConfig,
+  question: JudgeQuestion,
 ): Promise<string | null> {
-  return null;
+  // Pure embeddings (/v1/classify) replace generative LLM choice calls.
+  // When an explicit judgeUrl is provided pointing to a systemone endpoint,
+  // execute the request cleanly.
+  if (cfg.judgeMode === "off" || !cfg.judgeUrl) {
+    return null;
+  }
+  const url = `${normalizeJevUrl(cfg.judgeUrl)}question`;
+  try {
+    const payload = {
+      model: cfg.judgeModel,
+      messages: [{ role: "user", content: question.instructions }],
+      temperature: 0.0,
+      max_tokens: 32,
+    };
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const answer = extractJevAnswer(data, question.id);
+    if (typeof answer === "string") {
+      return resolveChoice(answer, question.options);
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
