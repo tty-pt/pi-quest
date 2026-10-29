@@ -33,7 +33,45 @@ Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable
 
 ---
 
-## 2. Model Router (`quest/auto`) & Review Policies
+## 2. Conversational Brainstorming vs. Quest Workflows
+
+`pi-quest` distinguishes between **open conversation / brainstorming** and **task execution directives**:
+
+- **Chat & Brainstorming** (No quest opened, no files locked):
+  - When you ask open-ended questions, explore design ideas, or brainstorm (*"Let's think this through"*, *"Can you explain how this module works?"*, *"What are our options for handling this issue?"*, or prefix with `? ` / `!chat`), the agent answers directly in conversational markdown.
+  - The worktree is **never locked**, and no draft plan is forced upon you.
+- **Quest Directives** (Quest workflow begins):
+  - When you issue an imperative task instruction (*"Fix the bug in the parser"*, *"Implement the new API endpoint"*, *"Refactor the auth handler"*), or use an explicit trigger (`quest:`, `!task`, `/quest`), `pi-quest` opens a quest, generates a draft scaffold, and manages the lifecycle.
+
+### Flexible Operator Steering & Compound Approvals
+
+Promoting a draft or approving a plan revision does not require rigid magic words:
+- **Predetermined Word**: A single word `go` (case- and punctuation-insensitive) advances with zero network dependency.
+- **Multilingual Semantic Assent**: Natural approvals in English and Portuguese (*"proceed"*, *"approved"*, *"looks good"*, *"bora"*, *"aprovado"*, *"vai em frente"*, *"manda bala"*) are evaluated server-side via `POST /v1/classify`.
+- **Compound Approvals**: You can approve and give a trailing directive in one breath:
+  - Example: `"go. Make sure to also update the docs."`
+  - `pi-quest` promotes the quest immediately *and* attaches the trailing instruction as an active directive on the new phase.
+
+### Fine-Grained Quest Kinds
+
+When a quest opens, `pi-quest` automatically classifies its objective into specialized kinds:
+
+| Quest Kind | Goal | Verification & Completion Rules |
+| :--- | :--- | :--- |
+| **`feature`** | New capability or subsystem | Requires code diffs, passing tests, and verification receipt. |
+| **`bugfix`** | Defect remediation | Requires regression test receipt and clean exit code 0. |
+| **`refactor`** | Structural code improvement | Requires zero functional regression, passing tests, and boundary check. |
+| **`docs`** | Documentation & guides | Requires modified files (docs/markdown), but binary test runner commands are relaxed. |
+| **`analysis`** | Pure investigation or design audit | Delivers a written `## Analysis` in the quest file. No code diffs or tests required. |
+| **`standard`** | General development task | Default full lifecycle: plan, review, implement, test verification. |
+
+### Analysis $\rightarrow$ Implementation Handoff
+
+When an `analysis` quest concludes and validates, `pi-quest` automatically archives the analysis and outputs an implementation bridge prompt. You or the agent can immediately start the follow-up implementation quest (e.g. `quest_update_state { objective: "Implement recommendations from analysis <qid>..." }`), carrying forward the approved findings.
+
+---
+
+## 3. Model Router (`quest/auto`) & Review Policies
 
 `pi-quest` registers a virtual model, **`quest/auto`**, that dynamically steers each turn to the optimal physical model:
 

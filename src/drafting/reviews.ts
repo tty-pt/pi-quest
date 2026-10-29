@@ -285,7 +285,14 @@ export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<b
   const intent = await interpretUserTurn(text, "drafting", config);
   if (intent.kind !== "advance") return false;
   if (getState().phase !== "drafting") return false;
-  return await approveDraft(pi, ctx, state.qid, "user");
+  const approved = await approveDraft(pi, ctx, state.qid, "user");
+  if (approved && intent.cleanText && intent.cleanText.trim() !== "") {
+    sendSteer(
+      pi,
+      `[Attached Directive upon approval]: "${intent.cleanText.trim()}". Incorporate this into the implementation phase.`,
+    );
+  }
+  return approved;
 }
 
 async function onWriteResult(pi: Pi, ctx: PiCtx, event: ToolResultEvent): Promise<void> {

@@ -35,6 +35,38 @@ export interface UserIntent {
 /** The single built-in word recognized without a judge (case/punctuation-insensitive, exact message). */
 export const FALLBACK_ADVANCE_WORD = "go";
 
+export function parseLeadingAdvance(
+  text: string,
+  extraPhrases: readonly string[] = [],
+): { isAdvance: boolean; remainder: string } {
+  const trimmed = text.trim();
+  if (trimmed === "") return { isAdvance: false, remainder: "" };
+
+  // Guard against negation on the fallback advance word
+  if (/^(?:don'?t\s+go|do\s+not\s+go)\b/i.test(trimmed)) {
+    return { isAdvance: false, remainder: trimmed };
+  }
+
+  // Exact fallback match
+  if (isFallbackAdvance(trimmed, extraPhrases)) {
+    return { isAdvance: true, remainder: "" };
+  }
+
+  // Check if starts with the single predetermined fallback word ("go") followed by punctuation and trailing directive
+  const candidateWords = [FALLBACK_ADVANCE_WORD, ...extraPhrases];
+  for (const word of candidateWords) {
+    if (!word || word.trim() === "") continue;
+    const escaped = word.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = new RegExp(`^${escaped}[!.,;:]+\\s*(.*)$`, "i").exec(trimmed);
+    if (m && m[1].trim() !== "") {
+      const remainder = m[1].trim().replace(/^(?:and|e|then|depois|also|também|tambem)\s+/i, "").trim();
+      return { isAdvance: true, remainder };
+    }
+  }
+
+  return { isAdvance: false, remainder: trimmed };
+}
+
 /** Messages longer than this are directives, never one-word steering: skip classification. */
 export const MAX_JUDGED_CHARS = 600;
 /** A trailing "?" only means "question" for short messages. */
@@ -56,7 +88,7 @@ const SIGILS: Array<{ re: RegExp; kind: UserIntentKind }> = [
   { re: /^backlog:\s*/i, kind: "subquest_later" },
   { re: /^!(rule|req|constraint)\s+/i, kind: "constraint" },
   { re: /^(must|rule):\s*/i, kind: "constraint" },
-  { re: /^!(chat|talk|ask)\s+/i, kind: "chat" },
+  { re: /^!(chat|ask)\s+/i, kind: "chat" },
   { re: /^chat:\s*/i, kind: "chat" },
 ];
 
@@ -90,7 +122,8 @@ export function isFallbackAdvance(text: string, extraPhrases: readonly string[] 
 
 function fallbackIntent(text: string, cfg: QuestConfig): UserIntent {
   const trimmed = text.trim();
-  if (isFallbackAdvance(trimmed, cfg.steeringPhrases)) return { kind: "advance", cleanText: trimmed, source: "fallback" };
+  const leading = parseLeadingAdvance(trimmed, cfg.steeringPhrases);
+  if (leading.isAdvance) return { kind: "advance", cleanText: leading.remainder, source: "fallback" };
   if (trimmed.endsWith("?") && trimmed.length < MAX_QUESTION_CHARS) return { kind: "question", cleanText: trimmed, source: "fallback" };
   return { kind: "refinement", cleanText: trimmed, source: "fallback" };
 }
@@ -138,8 +171,10 @@ async function interpret(text: string, phase: string, cfg: QuestConfig): Promise
   const trimmed = text.trim();
   const explicit = parseExplicitSyntax(trimmed);
   if (explicit !== null) return explicit;
-  // The operator's own exact phrases are authoritative and free (no latency).
-  if (isFallbackAdvance(trimmed, cfg.steeringPhrases)) return { kind: "advance", cleanText: trimmed, source: "fallback" };
+  // Leading advance check: handles both standalone words ("go", "bora", "proceed")
+  // and compound directives ("go. Make sure to also update the docs.")
+  const leading = parseLeadingAdvance(trimmed, cfg.steeringPhrases);
+  if (leading.isAdvance) return { kind: "advance", cleanText: leading.remainder, source: "fallback" };
   if (trimmed.length <= MAX_JUDGED_CHARS) {
     const embedded = await classifyByEmbedding(trimmed, cfg);
     if (embedded !== null) return { kind: embedded, cleanText: trimmed, source: "embed" };

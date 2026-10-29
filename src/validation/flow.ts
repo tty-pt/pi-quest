@@ -199,9 +199,13 @@ export async function concludeValidationPass(
   // The excerpt must be captured before archive: archiveActiveQuest removes the
   // live draft that carries the delivered analysis.
   const excerpt = await deliveredAnalysisExcerpt(ctx, getState());
+  const isAnalysis = getState().kind === "analysis";
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
   const delivered = excerpt === "" ? "" : `\n\nDELIVERED ANALYSIS:\n${excerpt}`;
-  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).${delivered}`);
+  const handoffHint = isAnalysis
+    ? `\n\nTo begin implementation of the approved analysis, run quest_update_state { objective: "Implement recommendations from analysis ${qid}..." }.`
+    : "";
+  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).${delivered}${handoffHint}`);
   return { archived: true, zipPath: done.zipPath };
 }
 
