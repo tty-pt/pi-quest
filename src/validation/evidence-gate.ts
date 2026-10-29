@@ -51,6 +51,11 @@ export async function assertCompletionEligibility(
     throw new Error("Cannot claim completion: No files have been modified.");
   }
 
+  // Documentation quests require modified files (docs/markdown), but binary test runner execution is not required.
+  if (state.kind === "docs") {
+    return;
+  }
+
   const getDiffPatch = options.getDiffPatch ?? (async () => "");
   const diffPatch = await getDiffPatch();
   if (diffPatch.trim().length > 0) {

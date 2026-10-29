@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Fine-grained quest kind classification via embeddings** (`POST /v1/classify`). When a quest is opened via trigger prefix or detected free-form request, `evaluateQuestKind` classifies the objective into specialized kinds: `feature`, `bugfix`, `refactor`, `docs`, `analysis`, or `standard` (`src/drafting/kind-exemplars.ts`).
+- **Completion eligibility relaxed for documentation quests**. `assertCompletionEligibility` recognizes `docs` quests, requiring non-empty modified file diffs (markdown/documentation) while relaxing binary test runner command execution requirements.
+
 ### Fixed
 - **A stale draft-review verdict no longer strands a draft.** When a reviewer verdict arrived for a superseded revision and nothing was in flight, `bootDraftReview` returned silently: no promotion, no new review, no wake. It now re-boots one review for the current file (then wakes the agent instead of looping). A PASS that cannot promote steers the agent instead of returning silently. The cause of the originally reported stall is unproven; this closes the one silent path found.
 

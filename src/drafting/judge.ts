@@ -5,6 +5,8 @@ import { type QuestConfig } from "../config.ts";
 import { gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
 import { isQuestLikeRequest } from "./detect.ts";
 import { QUEST_EXEMPLARS, QUEST_INTENT_KINDS } from "./quest-exemplars.ts";
+import { KIND_EXEMPLARS, QUEST_KINDS } from "./kind-exemplars.ts";
+import type { QuestKind } from "../domain/quest.ts";
 
 export interface QuestIntentResult {
   isQuest: boolean;
@@ -102,4 +104,37 @@ export async function evaluateQuestIntent(
     degraded: true,
     reason: "Embeddings unavailable; fallback=skip (triggers or /quest required)",
   };
+}
+
+/**
+ * Fine-grained quest kind classification via POST /v1/classify.
+ * Classifies an incoming quest objective into:
+ * "feature", "bugfix", "refactor", "docs", "analysis", or "standard".
+ */
+export async function classifyQuestKindByEmbedding(
+  objective: string,
+  cfg: QuestConfig,
+): Promise<QuestKind | null> {
+  if (cfg.embedMode === "off") return null;
+  const verdict = await nearestExemplar(
+    cfg,
+    mergeExemplars(KIND_EXEMPLARS, {}, QUEST_KINDS),
+    objective,
+  );
+  if (verdict === null) return null;
+  return gate(verdict, {
+    minSimilarity: cfg.intentMinSimilarity,
+    minMargin: 0.05,
+    harmless: "standard",
+    actionable: QUEST_KINDS,
+  }) as QuestKind;
+}
+
+export async function evaluateQuestKind(
+  objective: string,
+  cfg: QuestConfig,
+): Promise<QuestKind> {
+  if (cfg.judgeMode === "off") return "standard";
+  const embedded = await classifyQuestKindByEmbedding(objective, cfg);
+  return embedded ?? "standard";
 }

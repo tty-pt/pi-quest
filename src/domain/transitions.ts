@@ -3,13 +3,14 @@
 import type { ApprovedBy, ArchivedOutcome, QuestKind, QuestState } from "./quest";
 import { markChanged, requirePhase } from "./quest";
 
-export function createDraft(state: QuestState, draftName: string, kind: QuestKind = "standard"): QuestState {
+export function createDraft(state: QuestState, draftName: string, kind?: QuestKind): QuestState {
   requirePhase(state, "provisional");
   if (state.qid === null) throw new Error("cannot draft without a qid");
-  const analysis = kind === "analysis";
+  const effectiveKind = kind ?? state.kind ?? "standard";
+  const analysis = effectiveKind === "analysis";
   return markChanged(state, {
     phase: "drafting",
-    kind,
+    kind: effectiveKind,
     name: draftName,
     draft: {
       name: draftName,
