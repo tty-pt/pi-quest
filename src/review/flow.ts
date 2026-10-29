@@ -177,7 +177,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       if (controller.signal.aborted) return { status: "aborted" };
       const detail = err instanceof Error ? err.message : String(err);
 
-      // On rate limit or quota exhaustion, record cooldown for this model and its base variant
+      // On rate limit or quota exhaustion, record cooldown for this model, its base variant, and its provider
       if (isRateLimitOrQuotaError(detail)) {
         if (candidate.model) {
           const modelKey = candidate.model.toLowerCase();
@@ -185,6 +185,10 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
           const stripped = stripThinkingSuffix(candidate.model).toLowerCase();
           if (stripped !== modelKey) {
             recordModelCooldown(stripped, cooldownMs, now);
+          }
+          const prov = extractProvider(candidate.model);
+          if (prov !== "") {
+            recordModelCooldown(`provider:${prov}`, cooldownMs, now);
           }
         }
       }

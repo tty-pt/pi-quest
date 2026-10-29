@@ -102,7 +102,7 @@ Deno.test("rate_limit_failover: runIsolatedReview skips cooling models and fails
     target: "target_rl_1",
     prompt: "review this",
     model: "anthropic/claude-sonnet-5-5:low",
-    fallbackModels: ["antigravity/gemini-3.8-flash"],
+    fallbackModels: ["anthropic/claude-haiku-3-5", "antigravity/gemini-3.8-flash"],
     routerDefault: "antigravity/gemini-3.8-flash",
   });
 
@@ -117,7 +117,8 @@ Deno.test("rate_limit_failover: runIsolatedReview skips cooling models and fails
     error: "Subagent delegation failed (failed): Quota reached. 429 rate_limit_exceeded",
   });
 
-  // Attempt 2: anthropic/claude-sonnet-5-5 (stripped variant) should be SKIPPED due to cooldown!
+  // Attempt 2: Both anthropic/claude-sonnet-5-5 (stripped variant) and anthropic/claude-haiku-3-5
+  // (sibling model under provider:anthropic) should be SKIPPED due to provider cooldown!
   // Instead, it must fail over directly to antigravity/gemini-3.8-flash!
   await waitForRequests(emitted, 2);
   const req2 = requests(emitted)[1];
@@ -136,9 +137,10 @@ Deno.test("rate_limit_failover: runIsolatedReview skips cooling models and fails
     assert.strictEqual(outcome.review.verdict, "PASS");
   }
 
-  // Confirm anthropic model is marked in cooldown
+  // Confirm anthropic model and provider are marked in cooldown
   assert.strictEqual(isModelInCooldown("anthropic/claude-sonnet-5-5:low"), true);
   assert.strictEqual(isModelInCooldown("anthropic/claude-sonnet-5-5"), true);
+  assert.strictEqual(isModelInCooldown("provider:anthropic"), true);
 
   clearReviewCooldowns();
 });
