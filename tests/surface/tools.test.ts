@@ -563,15 +563,15 @@ Deno.test("quest_update_state infers or overrides difficulty tier", async () => 
   const pi = fakePi();
   const ctx = fakeCtx(tmp());
   try {
-    // 1. Inferred from prompt
-    const created = await applyUpdate(pi, ctx, { objective: "Fix typo in README.md" });
+    // 1. Inferred from prompt (judge-less fallback is structural: many files => complex)
+    const created = await applyUpdate(pi, ctx, { objective: "Update src/a.ts src/b.ts src/c.ts src/d.ts" });
     check(created.applied.length === 1, "quest created");
-    check(getState().difficulty === "trivial", "inferred trivial from typo objective");
+    check(getState().difficulty === "complex", "inferred complex from many file references");
 
     // 2. Explicit update of difficulty
-    const updated = await applyUpdate(pi, ctx, { difficulty: "complex" });
-    check(updated.applied.includes("difficulty updated to complex"), "difficulty updated message");
-    check(getState().difficulty === "complex", "difficulty state updated");
+    const updated = await applyUpdate(pi, ctx, { difficulty: "trivial" });
+    check(updated.applied.includes("difficulty updated to trivial"), "difficulty updated message");
+    check(getState().difficulty === "trivial", "difficulty state updated");
 
     // 3. Invalid difficulty rejected
     const bad = await applyUpdate(pi, ctx, { difficulty: "extreme" });

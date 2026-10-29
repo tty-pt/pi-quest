@@ -1,4 +1,5 @@
 // HIGH_LEVEL: #validation — deterministic zero-token semantic linting over diff patches.
+import type { LintRule } from "../config.ts";
 
 export interface LintViolation {
   ruleId: string;
@@ -41,71 +42,40 @@ export function parseGitDiff(diffText: string): FilePatch[] {
   return patches;
 }
 
-function isSanctionedGuard(text: string): boolean {
-  return /^\s*#\s*ifndef\s+[A-Za-z0-9_]+_C\b/.test(text);
-}
+// Generic, repo-independent rule: unresolved merge conflict markers.
+const CONFLICT_MARKER = /^\s*(<{7}|={7}|>{7})(\s|$)/;
 
-function checkUxPatch(patch: FilePatch, violations: LintViolation[]): void {
-  const isUx = patch.file.includes("/ux/") && patch.file.endsWith(".c");
-  if (!isUx) return;
-
-  const isSiteUi = patch.file.endsWith("site_ui.c");
-
+function applyRule(rule: LintRule, patch: FilePatch, violations: LintViolation[]): void {
+  if (rule.filePattern !== undefined && !new RegExp(rule.filePattern).test(patch.file)) return;
+  if (rule.excludeFilePattern !== undefined && new RegExp(rule.excludeFilePattern).test(patch.file)) return;
+  const line = new RegExp(rule.linePattern);
+  const exempt = rule.excludeLinePattern !== undefined ? new RegExp(rule.excludeLinePattern) : null;
   for (const { text } of patch.addedLines) {
-    const isCompileBranch = /^\s*#\s*(if|ifdef|elif)\b/.test(text) ||
-      (/^\s*#\s*ifndef\b/.test(text) && !isSanctionedGuard(text));
-
-    if (isCompileBranch) {
-      if (isSiteUi && /^\s*#\s*ifndef\s+__wasm__\b/.test(text)) {
-        // Sanctioned aggregator exemption
-      } else {
-        violations.push({
-          ruleId: "no-ux-compile-branch",
-          file: patch.file,
-          message: `UX avoids compile-time branching: forbidden macro branch '${text.trim()}' in ${patch.file}. Use runtime state branching instead.`,
-        });
-      }
-    }
-
-    if (/\b(corm_|source_|axil_|lemma_|hyle_source|XY_)/.test(text)) {
-      violations.push({
-        ruleId: "no-ux-engine-symbols",
-        file: patch.file,
-        message: `Forbidden engine symbol in isomorphic UX: ${patch.file} cannot reference XY_/corm_/source_/axil_/lemma_/hyle_source.`,
-      });
-    }
+    if (!line.test(text)) continue;
+    if (exempt !== null && exempt.test(text)) continue;
+    violations.push({ ruleId: rule.id, file: patch.file, message: rule.message.replace("{file}", patch.file).replace("{line}", text.trim()) });
   }
 }
 
-function checkIncludesAndConflicts(patch: FilePatch, violations: LintViolation[]): void {
-  const isSanctionedAggregator = patch.file.endsWith("site_ui.c") || patch.file.endsWith("list.c");
-
-  for (const { text } of patch.addedLines) {
-    if (/^\s*(<{7}|={7}|>{7})(\s|$)/.test(text)) {
-      violations.push({
-        ruleId: "no-conflict-markers",
-        file: patch.file,
-        message: `Unresolved git conflict markers found in ${patch.file}.`,
-      });
-    }
-
-    if (!isSanctionedAggregator && /^\s*#\s*include\s+["<].*?\.c[">]/.test(text)) {
-      violations.push({
-        ruleId: "no-cross-module-c-include",
-        file: patch.file,
-        message: `Forbidden #include '*.c' in ${patch.file}. Cross-module calls must use XY boundaries.`,
-      });
-    }
-  }
-}
-
-export function runSemanticLints(diffText: string): LintViolation[] {
+/**
+ * Run the built-in conflict-marker check plus the repo's own rules from
+ * settings `pi-quest.lintRules`. No repo-specific policy ships in code.
+ */
+export function runSemanticLints(diffText: string, rules: readonly LintRule[] = []): LintViolation[] {
   const patches = parseGitDiff(diffText);
   const violations: LintViolation[] = [];
 
   for (const patch of patches) {
-    checkUxPatch(patch, violations);
-    checkIncludesAndConflicts(patch, violations);
+    for (const { text } of patch.addedLines) {
+      if (CONFLICT_MARKER.test(text)) {
+        violations.push({
+          ruleId: "no-conflict-markers",
+          file: patch.file,
+          message: `Unresolved git conflict markers found in ${patch.file}.`,
+        });
+      }
+    }
+    for (const rule of rules) applyRule(rule, patch, violations);
   }
 
   return violations;

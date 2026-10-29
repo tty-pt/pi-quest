@@ -5,6 +5,102 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-10-29
+
+### Added
+- **Automated reviewer rate-limit failover and fallback chains** (`src/review/model.ts`, `src/review/flow.ts`).
+  - `reviewModelCandidates` automatically extends configured reviewer models with the router's default model (`config.router.default`, e.g. `antigravity/gemini-3.8-flash`), the active session model (`resolveDefaultReviewModel(ctx)`), and `{ label: "inherit" }` as the ultimate safety floor.
+  - Suffix-stripped variants and de-duplication are preserved throughout the fallback candidate chain.
+  - Wired `routerDefault`, `sessionModel`, and `cooldownMs` across all review triggers: `bootDraftReview` (`src/drafting/reviews.ts`), `ensureValidationFlow` (`src/validation/flow.ts`), and `bootPlanRevisionReview` (`src/implementing/plan-revision.ts`).
+- **Provider-level cooldown tracking & rate-limit skipping** (`src/review/flow.ts`).
+  - Added in-memory review cooldown tracker (`recordModelCooldown`, `isModelInCooldown`, `clearReviewCooldowns`) defaulting to 15 minutes.
+  - When any reviewer model hits HTTP `429`, quota exhaustion, or capacity errors (`isRateLimitOrQuotaError`), the model, its base variant, and the provider prefix (`provider:<prov>`) are placed on cooldown.
+  - Subsequent candidates sharing the same provider namespace are immediately skipped without wasting network requests or timing out, failing over directly to distinct providers.
+- **Compound advance steering and trailing directive attachment** (`src/domain/intent.ts`).
+  - When the operator sends an approval followed by trailing instructions (e.g. `"go. Make sure to also update the docs."`), `parseLeadingAdvance` detects the predetermined advance word (`"go"`), promotes the quest immediately from `drafting` to `implementing`, and extracts the trailing sentence as an active directive injected into turn context.
+- **Conversational brainstorming vs quest intent differentiation** (`src/drafting/quest-exemplars.ts`).
+  - Added technical inquiry, collaborative thinking, and brainstorming exemplars to `conversation` in `QUEST_EXEMPLARS` to ensure questions (*"Let's think this through"*, *"Can you explain how this module works?"*) never accidentally trigger quest creation.
+- **Fine-grained quest kind classification via embeddings** (`POST /v1/classify`, `src/drafting/kind-exemplars.ts`).
+  - `evaluateQuestKind` classifies objectives into `feature`, `bugfix`, `refactor`, `docs`, `analysis`, or `standard`.
+  - `assertCompletionEligibility` relaxes binary test commands for `docs` quests (requiring non-empty documentation diffs).
+- **Embedding-Only Model Provisioning & Redundancy Prevention** (`src/auren-bootstrap.ts`):
+  - In `shouldAutoDownload`, restricted automatic model downloads strictly to models declaring embedding capabilities (`capabilities: ["embed"]`), eliminating downloads of heavy, unused inference/chat/judge models (`qwen`, `olmoe`).
+  - In `run`, verified if any embedding model is already present on disk (`~/.models/`); if present, auto-download is skipped entirely. If absent, only the primary preferred embedding model (`bge-base`, 117 MB) is downloaded.
+- **Non-Blocking Visual Feedback on Downloads & Model Usage** (`src/auren-bootstrap.ts`, `src/index.ts`):
+  - Enriched `describeProgress` to report model identifier and progress percentage (`⬇ bge-base (42%)`).
+  - Added `describeModelStatus` reporting download progress during fetching, active model status (`⚡ bge-base`) when running on port 4242, or clearing when idle.
+  - Wired into reserved status bar key `"quest-judge"` with deduplicated, single-shot informational toasts on download start and completion.
+- **Analysis quest direct-to-validating auto-claim & handoff bridge** (`src/drafting/promotion.ts`, `src/views/quest-view.ts`).
+  - Review PASS on an `analysis` quest auto-claims completion and moves directly to validation, skipping implementation scaffolding.
+  - On conclusion, generates an implementation handoff prompt to seamlessly seed follow-up implementation quests.
+
+### Fixed
+- **Reviewer rate-limit stall and manual intervention trap.** Resolved the condition where an exhausted Claude model in `roles.reviewer` caused review retries to repeatedly hammer the same rate-limited provider or stall awaiting human `"go"`.
+- **A stale draft-review verdict no longer strands a draft.** When a reviewer verdict arrived for a superseded revision and nothing was in flight, `bootDraftReview` returned silently: no promotion, no new review, no wake. It now re-boots one review for the current file (then wakes the agent instead of looping). A PASS that cannot promote steers the agent instead of returning silently. The cause of the originally reported stall is unproven; this closes the one silent path found.
+
+## [1.9.0] - 2026-10-28
+
+### Changed
+- **Quest detection uses embeddings.** `evaluateQuestIntent` first classifies a free-form message by nearest-exemplar embeddings (`questMinMargin` 0.10, floor `intentMinSimilarity` 0.6), then falls back to the judge, then to the structural `# Quest` header / trigger prefix. A quest needs the floor and the margin; anything weaker is conversation. **Measured** (48 EN/PT messages per corpus, `bge-base` vs `olmoe`): held-out corpus B, embeddings 35/48 (73%) with **0 false quests**, judge 35/48 with 11 false quests; pooled over both corpora, 0 vs 21 false quests in 96 messages. Quest recall is modest (17/24 on A, 11/24 on B at the 0.10 margin), accepted because a miss only needs `/quest` or a trigger prefix. The 0.10 margin was tuned on corpus A (a 0.075 margin gave one false quest there), recorded as a hypothesis, and validated unchanged on the fresh corpus B.
+- **Difficulty uses embeddings in `difficultyMode: "auto"`** (`difficultyMinMargin` 0.075; `trivial` and `complex` need the margin, anything unsure is `standard`). **Measured** over three corpora (45 EN/PT requests each): embeddings 73/135 (54%) with **0 wrong "trivial"** verdicts; the judge 59/135 (44%) with **52** wrong "trivial" verdicts (it never answered "standard"; a wrong "trivial" drops plan review). A first hypothesis (margin 0.02, from corpus A) was **falsified** on corpus B (3 wrong "trivial") and discarded; the default 0.075 was then pre-registered and validated on a fresh corpus C (24/45 vs judge 17/45, 0 vs 17 wrong "trivial"). Recall of trivial/complex is low (11/45 and 17/45): embeddings mostly say `standard`, which is the safe direction. An explicit `difficultyMode: "judge"` skips embeddings.
+- **Plan verification stays on the judge (embeddings measured, not adopted).** On 44 plans, embeddings (36/44) would wrongly block 8 of 22 good plans in `enforce` mode; no similarity floor or margin gives full recall with zero false "yes". Finding: on `olmoe` the judge answers "yes" to every plan (0 of 22 missing verification steps found), so the verification gap in `quality.ts` rarely fires today. Recorded as a follow-up (an advisory-only embedding check is a possible later improvement).
+
+### Added
+- Settings `questMinMargin`, `questExemplars`, `difficultyMinMargin`, `difficultyExemplars` (kinds validated and sanitized; any language; merged with the shipped exemplars `src/drafting/quest-exemplars.ts` and `src/drafting/difficulty-exemplars.ts`). Env: `PI_QUEST_QUEST_MIN_MARGIN`, `PI_QUEST_DIFFICULTY_MIN_MARGIN`. `QuestIntentResult.source` and `QuestDifficultyResult.source` gain `"embed"`.
+- `src/judge/nearest.ts`: the generic nearest-exemplar engine (`mergeExemplars`, cached exemplar index, `nearestExemplar`, `gate`) that steering, quest detection and difficulty now share. Behaviour of steering is unchanged (live: 43/48, 0 false actions).
+- A measurement harness for "can embeddings replace the judge here?": `tests/eval/harness.ts` reports accuracy, wrong state-changing verdicts, p50/p95 latency, per-label recall and every miss for both strategies, prints the server and model it ran against, and applies the adoption rule (`gateDecision`). Corpora and live evaluations: `tests/eval/{quest-intent,difficulty,plan-verification,intent}-eval.test.ts` (opt-in, `PI_QUEST_EVAL_JUDGE=1`; their corpus/exemplar disjointness checks run in `npm test`).
+- **`npm test` is now genuinely hermetic.** The suite made one live `GET /v1/models` request to the real auren server on every run (`/quest doctor`'s bring-up and health probe, reached from `tests/surface/plan.test.ts`). The test script now preloads `tests/no-live-network.ts` (refuses non-loopback hosts and port 4242; ephemeral loopback fake servers still work) and sets `PI_QUEST_AUTO_START_AUREN=0`, both asserted by `tests/no_live_network.test.ts`; `PI_QUEST_ALLOW_LIVE=1` lifts the guard. Measured: 0 requests to the live server, suite time unchanged (about 12 s).
+- Documentation: the "What Decides What" matrix in `docs/OPERATOR_GUIDE.md` (decision, decided by, fallback, offline behaviour, measured result).
+
+### Fixed
+- **Measurement harness bug that made the judge look unavailable.** The judge warm-up used the production 6 s timeout; a cold model load takes longer, and the aborted generation left the local server saturated (`session close queue full`), so most judge answers came back unavailable. Strategies now carry their own warm-up (judge: 180 s) and the judge's quality is measured with a 30 s timeout; embedding-only measurements run before judge runs.
+
+## [1.8.0] - 2026-10-28
+
+### Changed
+- **Operator steering is classified by embeddings, not a generative judge.** `interpretUserTurn()` embeds the message through axil-auren `POST /v1/embeddings` (`bge-base`, ~15 ms) and picks the nearest labelled exemplar kind (`src/judge/embed.ts`, `src/domain/intent-exemplars.ts`). State-changing verdicts need cosine similarity >= `intentMinSimilarity` (0.6) and a margin >= `intentMinMargin` (0.075) over the runner-up; anything weaker is a recorded refinement. Held-out evaluation (48 English/Portuguese messages, disjoint from the exemplars): 43/48 correct, 0 false state-changing verdicts; the misses are mostly non-English phrasings. For comparison, permutation-averaged judge questions on `olmoe` recognised 1 of 7 approvals because forward and reversed option orders cancel each other (position bias). The judge tier is removed from steering (it stays for difficulty and plan verification), as is the double-ask-agree rule.
+- **Defaults work out of the box.** `judgeProtocol` defaults to `systemone` and `judgeModel` to `olmoe` (SystemZero scored 3/8 with `qwen`, 6/8 with `olmoe` on a quest-vs-chat check); `judgeTimeoutMs` defaults to 6000. The project `.pi/settings.json` no longer needs to override them. The loader's fallback for an invalid `judgeProtocol` is the default instead of `auto`.
+- pi-mm: `judgeModel` now defaults to `olmoe` (protocol was already `systemone`).
+
+### Added
+- Settings: `embedMode`, `embedUrl`, `embedModel`, `intentMinSimilarity`, `intentMinMargin`, `intentExemplars` (extra exemplars per intent, any language, merged with the shipped ones). Env: `PI_QUEST_EMBED_MODE`, `PI_QUEST_EMBED_URL`, `PI_QUEST_EMBED_MODEL`, `PI_QUEST_INTENT_MIN_MARGIN`, `PI_QUEST_INTENT_MIN_SIMILARITY`.
+- Opt-in live evaluation `tests/eval/intent-eval.test.ts` (`PI_QUEST_EVAL_JUDGE=1`).
+- A failed embeddings endpoint is skipped for 10 s so a dead server cannot stall every message; exemplar vectors are embedded once per server/model in a single batch request.
+- `npm test` is hermetic: it runs with `PI_QUEST_JUDGE_MODE=off PI_QUEST_EMBED_MODE=off`; tests that need the stubs enable them explicitly.
+
+## [1.7.1] - 2026-10-28
+
+### Fixed
+- **A failing judge no longer looks decisive.** `askJudgeChoice` treats a `choice: null` answer and the legacy fabricated answer of older auren builds (first option, confidence exactly 0.90, every other option 0.05) as "judge unavailable". That fabricated answer, not model weakness, is what made every message read as the first option and made the local judge look biased.
+- Settings: `pi-quest` and `pi-mm` now use `judgeProtocol: "systemone"` with `judgeModel: "olmoe"`. SystemZero (`auto` tried it first) scores 3/8 with `qwen` and 6/8 with `olmoe` on a quest-vs-chat check, so it is no longer the default path.
+
+## [1.7.0] - 2026-10-28
+
+### Changed (breaking)
+- **Judge-first operator intent, no natural-language word lists in code.** One `interpretUserTurn()` (`src/domain/intent.ts`) classifies each operator message once (memoized per message), via one judge call, into advance / abort / constraint / sub-quest / question / ack / refinement. Draft approval, plan-revision adoption, validation confirmation, late-answer handling and mid-quest triage all consume that single result. Removed: `ADVANCE_PHRASES` / `ABORT_PHRASES` (EN + PT, and their substring matching that returned *before* the judge), the `triage.ts` confirm/ack/question/sub-quest/constraint vocabularies, `GO_PATTERN` / `APPROVE_PATTERN` / `CONFIRM_PATTERN`, and the English verb / "My grandfather|cat|dog" quest-detection regexes.
+- **Judge-less fallback is one word.** With the judge off or unreachable, only the exact message `go` (plus operator-owned `steeringPhrases` in settings) advances a quest; every other phrasing becomes a recorded refinement that cannot advance, abort or archive. Sigils (`!rule`, `!sq`, `!later`, `!chat`, `? `) keep working. Free-form text no longer opens a quest without a judge: use a trigger prefix or `/quest`.
+- **Judge answers must equal a declared label.** The new `askJudgeChoice()` seam (`src/judge/choice.ts`) replaces three duplicated Jev fetch/parse blocks; substring synonyms (`task`, `chat`, `minor`, `epic`, ...) are gone. `judgeMode: "systemone"` now forces the systemone protocol, and a SystemZero reply with no decision/choice falls through to systemone instead of reading as "conversation".
+- **Difficulty fallback is structural** (4+ distinct file paths => complex, else standard); the keyword lists are removed. **Plan verification** is a judge yes/no question and is advisory (never blocks promotion) when no judge is available.
+- **Setbacks key on exit status only.** Output text is never scraped, fixing the false "Test/build command failed" on a passing run whose output says `0 failed`. `isTestCommand` now matches runner tokens (`npm test`, `make`, `pytest`, ...) per command segment, not a word anywhere in the line; add runners with `testCommands`.
+- **One provider-error classifier** (`src/utils/provider-error.ts`) shared by review retries and the router: status codes on word boundaries and API error codes only; generic words (`model`, `process`, `context`) no longer match.
+- **Repo-specific lint rules moved to config.** `semantic-lint` ships only the conflict-marker check; the site's UX / XY rules now live in the repo's `.pi/settings.json` under `pi-quest.lintRules`.
+- **Section headings** are recognized through one registry (`src/domain/sections.ts`) by title prefix at a word boundary instead of "contains word".
+
+### Added
+- Settings: `steeringPhrases`, `testCommands`, `lintRules`.
+
+## [1.6.0] - 2026-10-28
+
+### Added
+- **Array-valued role models (`roles.reviewer`, `roles.validator`)**: these keys now accept a string (primary only) or an ordered array. The first entry is the primary model; the remaining entries form the fallback chain used on provider/model/rate-limit and auth/permission errors (`401`, `403`, `permission_error`, `oauth_not_allowed`).
+
+### Fixed
+- **"Go on" no longer sends an implementing quest back to draft**: bare steering messages ("go on", "carry on", "keep going", "ship it", "let's go", PT "continua"/"vai em frente", and abort phrases like "cancel") are no longer recorded as refinements/amendments mid-quest; they are left to the phase handlers. Matching is exact, so "add a cancel button" is still recorded. Note: nothing acts on abort phrases while implementing yet; they are simply ignored by mid-quest triage.
+- **Mid-quest demotion is limited to explicit constraints**: only `!rule` / `must:` / natural constraint phrasing returns implementing or validating work to drafting. Plain refinements are recorded as amendments but keep the approved plan, and an in-flight review is cancelled only when a demotion happens.
+
+### Removed
+- **`roles.reviewerFallback` and `roles.validatorFallback`**: no longer read by the config loader or the runtime. Place fallback models as trailing entries in `roles.reviewer` / `roles.validator`. This is a breaking change with no compatibility shim, hence the minor bump.
+
 ## [1.5.0] - 2026-10-27
 
 ### Added

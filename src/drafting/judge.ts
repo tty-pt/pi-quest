@@ -1,240 +1,69 @@
-// HIGH_LEVEL: #drafting — intelligent Jev System One classification
+// HIGH_LEVEL: #drafting — pure embedding classification
 // for determining whether incoming user input constitutes genuine quest material.
-import { type QuestConfig, resolveRoleModel } from "../config.ts";
-import { isQuestLikeRequest } from "./detect.ts";
-
-export function normalizeJevUrl(baseUrlOrUrl: string): string {
-  const trimmed = baseUrlOrUrl.trim();
-  if (trimmed.includes("/systemone")) {
-    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
-  }
-  return `${trimmed.replace(/\/+$/, "")}/api/v1/systemone/`;
-}
-
-export function parseJevQuestChoice(data: unknown): "quest" | "conversation" {
-  if (typeof data !== "object" || data === null) {
-    throw new Error("Jev response must be an object");
-  }
-  const rec = data as Record<string, unknown>;
-  let answerVal: unknown;
-
-  // 1. Primary documented path: answers.quest_intent.choice
-  if (typeof rec.answers === "object" && rec.answers !== null && !Array.isArray(rec.answers)) {
-    const ansObj = rec.answers as Record<string, unknown>;
-    const questAction = ansObj["quest_intent"] ?? ansObj["action"] ?? Object.values(ansObj)[0];
-    if (typeof questAction === "object" && questAction !== null) {
-      const objVal = questAction as Record<string, unknown>;
-      answerVal = objVal["choice"] ?? objVal["answer"] ?? objVal["value"];
-    } else {
-      answerVal = questAction;
-    }
-  }
-
-  // 2. Defensive fallback: array answers
-  if (answerVal === undefined && Array.isArray(rec.answers)) {
-    const list = rec.answers;
-    if (list.length === 0) {
-      throw new Error("Jev response contains empty answers list");
-    }
-    const matched = list.find(
-      (a: unknown) =>
-        typeof a === "object" && a !== null &&
-        ((a as Record<string, unknown>).id === "quest_intent" || (a as Record<string, unknown>).question_id === "quest_intent"),
-    );
-    if (matched && typeof matched === "object") {
-      const matchRec = matched as Record<string, unknown>;
-      answerVal = matchRec.choice ?? matchRec.answer ?? matchRec.value;
-    } else if (typeof list[0] === "string") {
-      answerVal = list[0];
-    } else if (typeof list[0] === "object" && list[0] !== null) {
-      const firstRec = list[0] as Record<string, unknown>;
-      answerVal = firstRec.choice ?? firstRec.answer ?? firstRec.value;
-    }
-  }
-
-  if (typeof answerVal !== "string") {
-    throw new Error(`Jev response missing choice answer: ${JSON.stringify(data).slice(0, 100)}`);
-  }
-
-  const normalized = answerVal.trim().toLowerCase();
-  if (
-    normalized === "quest" ||
-    normalized.startsWith("quest") ||
-    normalized.includes("software task") ||
-    normalized.includes("instruction") ||
-    normalized.includes("directive") ||
-    normalized.includes("task")
-  ) {
-    return "quest";
-  }
-  if (
-    normalized === "conversation" ||
-    normalized.startsWith("conversation") ||
-    normalized.includes("dialogue") ||
-    normalized.includes("chat")
-  ) {
-    return "conversation";
-  }
-
-  throw new Error(`Invalid Jev quest choice answer: '${answerVal}' (expected 'quest' or 'conversation')`);
-}
-
-export function normalizeSystemZeroUrl(baseUrlOrUrl: string): string {
-  const trimmed = baseUrlOrUrl.trim();
-  if (trimmed.includes("/systemzero")) {
-    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
-  }
-  return `${trimmed.replace(/\/+$/, "").replace(/\/api\/v1\/systemone$/, "").replace(/\/v1$/, "")}/api/v1/systemzero/`;
-}
-
-export async function callSystemZeroQuestJudge(prompt: string, cfg: QuestConfig): Promise<"quest" | "conversation"> {
-  if (!cfg.judgeUrl) {
-    throw new Error("Judge URL not configured");
-  }
-  const endpoint = normalizeSystemZeroUrl(cfg.judgeUrl);
-  const controller = new AbortController();
-  const timeoutMs = cfg.judgeTimeoutMs || 2000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const payload = {
-    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "default",
-    prompt: `Determine whether the following user message is an instruction or directive to start a software engineering task or quest (such as fixing a bug, adding a feature, implementing code, building, refactoring, or auditing), versus conversational chat, questions, or greetings.\nUser Message: ${prompt}\nAnswer [y/n]:`,
-    threshold: 0.5,
-  };
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (cfg.judgeKey && cfg.judgeKey.trim() !== "") {
-    headers["Authorization"] = `Bearer ${cfg.judgeKey.trim()}`;
-  }
-
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`SystemZero HTTP error ${res.status}: ${res.statusText}${errText ? ` - ${errText.slice(0, 100)}` : ""}`);
-    }
-
-    const data = await res.json() as Record<string, unknown>;
-    const decision = data["decision"];
-    if (typeof decision === "boolean") {
-      return decision ? "quest" : "conversation";
-    }
-    const choice = String(data["choice"] || "").trim().toLowerCase();
-    return (choice === "y" || choice === "yes" || choice === "quest") ? "quest" : "conversation";
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export async function callJevQuestJudge(prompt: string, cfg: QuestConfig): Promise<"quest" | "conversation"> {
-  if (!cfg.judgeUrl) {
-    throw new Error("Jev judge URL not configured");
-  }
-  const endpoint = normalizeJevUrl(cfg.judgeUrl);
-  const controller = new AbortController();
-  const timeoutMs = cfg.judgeTimeoutMs || 2000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const payload = {
-    model: resolveRoleModel(cfg, "judge") || cfg.judgeModel || "qwen",
-    state: `User: ${prompt}`,
-    questions: {
-      quest_intent: {
-        type: "choice",
-        instructions:
-          "Determine whether the user message is an instruction or directive to start a new software engineering quest/task (such as fixing a bug, adding a feature, implementing code, building, refactoring, or auditing), versus casual conversational dialogue, questions, or greetings.",
-        criteria: {
-          quest: "Direct instruction or request to perform a software task, fix, implementation, investigation, or quest",
-          conversation: "Casual conversation, narrative statement, memory probe, greeting, or general question",
-        },
-      },
-    },
-  };
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (cfg.judgeKey && cfg.judgeKey.trim() !== "") {
-    headers["Authorization"] = `Bearer ${cfg.judgeKey.trim()}`;
-  }
-
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`Jev service HTTP error ${res.status}: ${res.statusText}${errText ? ` - ${errText.slice(0, 100)}` : ""}`);
-    }
-
-    const data = await res.json();
-    return parseJevQuestChoice(data);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 import type { PiCtx } from "../hooks/events.ts";
-
-export interface JudgeHealthReport {
-  ok: boolean;
-  endpoint: string;
-  latencyMs: number;
-  models?: string[];
-  error?: string;
-}
-
-export async function checkJudgeHealth(cfg: QuestConfig): Promise<JudgeHealthReport> {
-  const rawUrl = cfg.judgeUrl ? cfg.judgeUrl.trim() : "http://127.0.0.1:4242";
-  const base = rawUrl.replace(/\/+$/, "").replace(/\/api\/v1\/systemone$/, "").replace(/\/v1$/, "");
-  const start = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.min(cfg.judgeTimeoutMs || 2000, 3000));
-
-  try {
-    const res = await fetch(`${base}/v1/models`, {
-      method: "GET",
-      headers: cfg.judgeKey ? { Authorization: `Bearer ${cfg.judgeKey.trim()}` } : {},
-      signal: controller.signal,
-    });
-    const latencyMs = Date.now() - start;
-
-    if (!res.ok) {
-      return { ok: false, endpoint: base, latencyMs, error: `HTTP ${res.status}: ${res.statusText}` };
-    }
-
-    const data = await res.json().catch(() => ({}));
-    const models = Array.isArray(data?.data)
-      ? data.data.map((m: { id?: string }) => m.id).filter((id: unknown): id is string => typeof id === "string")
-      : undefined;
-
-    return { ok: true, endpoint: base, latencyMs, models };
-  } catch (err: unknown) {
-    const latencyMs = Date.now() - start;
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, endpoint: base, latencyMs, error: msg };
-  } finally {
-    clearTimeout(timer);
-  }
-}
+import { type QuestConfig } from "../config.ts";
+import { gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
+import { isQuestLikeRequest } from "./detect.ts";
+import { QUEST_EXEMPLARS, QUEST_INTENT_KINDS } from "./quest-exemplars.ts";
+import { KIND_EXEMPLARS, QUEST_KINDS } from "./kind-exemplars.ts";
+import type { QuestKind } from "../domain/quest.ts";
 
 export interface QuestIntentResult {
   isQuest: boolean;
-  source: "llm" | "heuristic" | "trigger";
+  source: "embed" | "heuristic" | "llm";
   degraded?: boolean;
   reason?: string;
+}
+
+export const QUEST_INTENT_QUESTION = {
+  id: "quest_intent",
+  state: "",
+  instructions:
+    "Determine whether the user message is an instruction or directive to start a new software engineering quest/task.",
+  options: [
+    { key: "quest", description: "Direct instruction or request to perform a task" },
+    { key: "conversation", description: "Casual conversation, greeting, or question" },
+  ],
+};
+
+export async function checkJudgeHealth(cfg: QuestConfig): Promise<{
+  ok: boolean;
+  endpoint: string;
+  latencyMs?: number;
+  models?: string[];
+  error?: string;
+}> {
+  const endpoint = (cfg.embedUrl ?? cfg.judgeUrl ?? "http://127.0.0.1:4242").replace(/\/+$/, "");
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`${endpoint}/v1/models`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return { ok: false, endpoint, error: `HTTP ${res.status}` };
+    const data = await res.json() as { data?: Array<{ id?: string }> };
+    const latencyMs = Math.round(performance.now() - t0);
+    const models = (data.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+    return { ok: true, endpoint, latencyMs, models };
+  } catch (err) {
+    return { ok: false, endpoint, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Embedding verdict for the request's intent, or null when embeddings are unavailable.
+ * `quest` needs `intentMinSimilarity` AND `questMinMargin` over conversation; anything
+ * weaker is conversation, so a doubtful request never opens an accidental quest
+ * (held-out: 0 false quests in 96 messages where the generative judge opened 21).
+ */
+export async function classifyQuestByEmbedding(prompt: string, cfg: QuestConfig): Promise<"quest" | "conversation" | null> {
+  if (cfg.embedMode === "off") return null;
+  const examples = mergeExemplars(QUEST_EXEMPLARS, cfg.questExemplars, QUEST_INTENT_KINDS);
+  const verdict = await nearestExemplar(cfg, examples, prompt);
+  if (verdict === null) return null;
+  return gate(verdict, {
+    minSimilarity: cfg.intentMinSimilarity,
+    minMargin: cfg.questMinMargin,
+    harmless: "conversation",
+    actionable: new Set(["quest"]),
+  }) as "quest" | "conversation";
 }
 
 export async function evaluateQuestIntent(
@@ -253,65 +82,59 @@ export async function evaluateQuestIntent(
     return { isQuest, source: "heuristic", reason: isQuest ? "Matched quest heuristic" : "Did not match quest heuristic" };
   }
 
-  // 3. Auto / System One with missing endpoint
-  if (!cfg.judgeUrl || cfg.judgeUrl.trim() === "") {
-    if (cfg.judgeFallback === "heuristic") {
-      const isQuest = isQuestLikeRequest(prompt);
-      return { isQuest, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=heuristic" };
-    }
-    return { isQuest: false, source: "heuristic", degraded: true, reason: "Judge unconfigured; fallback=skip" };
-  }
-
-  // 4. Call judge via configured protocol (auto | systemzero | systemone)
-  try {
-    let choice: "quest" | "conversation";
-    let usedProtocol = cfg.judgeProtocol;
-    const url = cfg.judgeUrl || "";
-
-    if (cfg.judgeProtocol === "systemzero" || url.includes("/systemzero")) {
-      choice = await callSystemZeroQuestJudge(prompt, cfg);
-      usedProtocol = "systemzero";
-    } else if (cfg.judgeProtocol === "systemone" || url.includes("/systemone")) {
-      choice = await callJevQuestJudge(prompt, cfg);
-      usedProtocol = "systemone";
-    } else {
-      // "auto": Try systemzero first, fall back to systemone on error
-      try {
-        choice = await callSystemZeroQuestJudge(prompt, cfg);
-        usedProtocol = "systemzero";
-      } catch {
-        choice = await callJevQuestJudge(prompt, cfg);
-        usedProtocol = "systemone";
-      }
-    }
-
-    const isQuest = choice === "quest";
-
+  // 3. Embeddings decide when available: deterministic, ~15 ms, and 0 false quests on held-out corpora.
+  const embedded = await classifyQuestByEmbedding(prompt, cfg);
+  if (embedded !== null) {
     return {
-      isQuest,
-      source: "llm",
-      reason: isQuest
-        ? `Classified as quest by ${usedProtocol}`
-        : `Classified as conversation by ${usedProtocol}`,
-    };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-
-    if (cfg.judgeFallback === "heuristic") {
-      const isQuest = isQuestLikeRequest(prompt);
-      return {
-        isQuest,
-        source: "heuristic",
-        degraded: true,
-        reason: `Judge failed (${msg}); fallback=heuristic`,
-      };
-    }
-
-    return {
-      isQuest: false,
-      source: "heuristic",
-      degraded: true,
-      reason: `Judge failed (${msg}); fallback=skip (triggers or /quest required)`,
+      isQuest: embedded === "quest",
+      source: "embed",
+      reason: embedded === "quest" ? "Nearest quest exemplar (embeddings)" : "Nearest conversation exemplar or below the quest gate (embeddings)",
     };
   }
+
+  // 4. Deterministic offline fallback (exact structural trigger or skip)
+  if (cfg.judgeFallback === "heuristic") {
+    const isQuest = isQuestLikeRequest(prompt);
+    return { isQuest, source: "heuristic", degraded: true, reason: "Embeddings unavailable; fallback=heuristic" };
+  }
+
+  return {
+    isQuest: false,
+    source: "heuristic",
+    degraded: true,
+    reason: "Embeddings unavailable; fallback=skip (triggers or /quest required)",
+  };
+}
+
+/**
+ * Fine-grained quest kind classification via POST /v1/classify.
+ * Classifies an incoming quest objective into:
+ * "feature", "bugfix", "refactor", "docs", "analysis", or "standard".
+ */
+export async function classifyQuestKindByEmbedding(
+  objective: string,
+  cfg: QuestConfig,
+): Promise<QuestKind | null> {
+  if (cfg.embedMode === "off") return null;
+  const verdict = await nearestExemplar(
+    cfg,
+    mergeExemplars(KIND_EXEMPLARS, {}, QUEST_KINDS),
+    objective,
+  );
+  if (verdict === null) return null;
+  return gate(verdict, {
+    minSimilarity: cfg.intentMinSimilarity,
+    minMargin: 0.05,
+    harmless: "standard",
+    actionable: QUEST_KINDS,
+  }) as QuestKind;
+}
+
+export async function evaluateQuestKind(
+  objective: string,
+  cfg: QuestConfig,
+): Promise<QuestKind> {
+  if (cfg.judgeMode === "off") return "standard";
+  const embedded = await classifyQuestKindByEmbedding(objective, cfg);
+  return embedded ?? "standard";
 }

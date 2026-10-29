@@ -1,5 +1,8 @@
 import { check } from "../check.ts";
-import { runSemanticLints } from "../../src/validation/semantic-lint.ts";
+import { runSemanticLints as run } from "../../src/validation/semantic-lint.ts";
+import { SITE_LINT_RULES } from "../lint-rules.ts";
+
+const runSemanticLints = (diff: string) => run(diff, SITE_LINT_RULES);
 
 Deno.test("semantic lint rejects #ifdef in isomorphic UX", () => {
   const diff = `
@@ -95,4 +98,25 @@ diff --git a/mods/song/ux/song.c b/mods/song/ux/song.c
   const violations = runSemanticLints(diff);
   check(violations.length === 1, "forbidden engine symbol rejected");
   check(violations[0].ruleId === "no-ux-engine-symbols", "ruleId matches");
+});
+
+Deno.test("semantic lint ships no repo-specific rules: only conflict markers without config", () => {
+  const diff = `
+diff --git a/mods/song/ux/song.c b/mods/song/ux/song.c
+--- a/mods/song/ux/song.c
++++ b/mods/song/ux/song.c
+@@ -10,2 +10,4 @@
++#ifdef __wasm__
++#include "../other/file.c"
+`;
+  check(run(diff).length === 0, "no built-in site rules");
+  const conflict = `
+diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,1 +1,3 @@
++<<<<<<< HEAD
+`;
+  const v = run(conflict);
+  check(v.length === 1 && v[0].ruleId === "no-conflict-markers", "conflict markers always rejected");
 });

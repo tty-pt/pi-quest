@@ -220,9 +220,9 @@ export function onToolResult(pi: Pi, handler: (e: ToolResultEvent, ctx: PiCtx) =
   });
 }
 
-export function onUserMessage(pi: Pi, handler: (text: string, ctx: PiCtx) => void): void {
+export function onUserMessage(pi: Pi, handler: (text: string, ctx: PiCtx) => void | Promise<void>): void {
   pi.on("input", (event, ctx) => {
-    handler(event.text, ctx);
+    return handler(event.text, ctx);
   });
 }
 

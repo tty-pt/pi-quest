@@ -3,6 +3,7 @@
 // it honest on claims and demotes.
 // Pure string helpers over the quest document; file I/O lives in the
 // adapters (quest-doc.ts at src root), never here.
+import { isHeading } from "./sections";
 import type { HandbackReceipt } from "./contract";
 
 export interface DocStatus {
@@ -20,7 +21,7 @@ function sectionEnd(lines: string[], header: number): number {
 export function parseDocStatus(text: string): DocStatus {
   const status: DocStatus = { phase: null, complete: false };
   const lines = text.split("\n");
-  const header = lines.findIndex((line) => /^##\s+status\b/i.test(line));
+  const header = lines.findIndex((line) => isHeading(line, "status"));
   if (header === -1) return status;
   const end = sectionEnd(lines, header);
   for (let i = header + 1; i < end; i += 1) {
@@ -37,7 +38,7 @@ export function parseDocStatus(text: string): DocStatus {
 // header, and a missing header appends the whole section.
 export function upsertDocStatus(text: string, phase: string, complete: boolean): string {
   const lines = text.split("\n");
-  const header = lines.findIndex((line) => /^##\s+status\b/i.test(line));
+  const header = lines.findIndex((line) => isHeading(line, "status"));
   const phaseLine = `- Phase: ${phase}`;
   const completeLine = `- Complete: ${complete ? "true" : "false"}`;
   if (header === -1) {
@@ -91,13 +92,13 @@ export function reconcileDocContent(text: string, receipt: HandbackReceipt): str
   const receiptLine = `- [${mark}] Sub-Quest ${receipt.childQid} (${receipt.status}): ${receipt.findings}${testInfo}`;
 
   // 3. Insert into ## Sub-Quests if present, or append
-  const headerIdx = lines.findIndex((l) => /^##\s+Sub-Quests\b/i.test(l));
+  const headerIdx = lines.findIndex((l) => isHeading(l, "subquests"));
   if (headerIdx !== -1) {
     lines.splice(headerIdx + 1, 0, receiptLine);
     return lines.join("\n");
   }
 
-  const endIdx = lines.findIndex((l) => /^##\s+Implementation Plan\b/i.test(l));
+  const endIdx = lines.findIndex((l) => isHeading(l, "plan"));
   if (endIdx !== -1) {
     lines.splice(endIdx, 0, `## Sub-Quests\n\n${receiptLine}\n`);
     return lines.join("\n");
@@ -131,7 +132,7 @@ function insertBeforeSectionEnd(lines: string[], header: number, item: string): 
 
 export function appendRequirementToDoc(text: string, requirementText: string): string {
   const lines = text.split("\n");
-  const header = lines.findIndex((l) => /^##\s+requirements\b/i.test(l));
+  const header = lines.findIndex((l) => isHeading(l, "requirements"));
   const nextR = findMaxSequenceNumber(lines, "R") + 1;
   const newReq = `- R${nextR}: [User Directive] ${requirementText.trim()}`;
 
@@ -154,12 +155,12 @@ export function appendSubQuestBacklogItem(
     : " [tests: make test]";
   const sqLine = `- [ ] SQ${nextSQ}: ${goal.trim()}${pathsTag}${testsTag}`;
 
-  const header = lines.findIndex((l) => /^##\s+sub-quests\b/i.test(l));
+  const header = lines.findIndex((l) => isHeading(l, "subquests"));
   if (header !== -1) {
     return insertBeforeSectionEnd(lines, header, sqLine).join("\n");
   }
 
-  const planIdx = lines.findIndex((l) => /^##\s+implementation plan\b/i.test(l));
+  const planIdx = lines.findIndex((l) => isHeading(l, "plan"));
   if (planIdx !== -1) {
     lines.splice(planIdx, 0, `## Sub-Quests\n\n${sqLine}\n`);
     return lines.join("\n");
@@ -170,11 +171,11 @@ export function appendSubQuestBacklogItem(
 
 export function appendAmendmentToDoc(text: string, change: string, reason: string): string {
   const lines = text.split("\n");
-  const header = lines.findIndex((l) => /^##\s+amendments\b/i.test(l));
+  const header = lines.findIndex((l) => isHeading(l, "amendments"));
   const bullet = `- ${change.trim()} (${reason.trim()})`;
 
   if (header === -1) {
-    const reqHeader = lines.findIndex((l) => /^##\s+requirements\b/i.test(l));
+    const reqHeader = lines.findIndex((l) => isHeading(l, "requirements"));
     if (reqHeader !== -1) {
       lines.splice(reqHeader, 0, `## Amendments\n\n${bullet}\n`);
       return lines.join("\n");

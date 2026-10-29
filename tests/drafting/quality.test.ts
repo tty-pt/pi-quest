@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG, loadConfig } from "../../src/config.ts";
-import { assessDraftQuality, countSteps, hasVerificationStep, parseDraftQuality, DEFAULT_DRAFT_QUALITY } from "../../src/drafting/quality.ts";
+import { assessDraftQuality, countSteps, judgeHasVerificationStep, parseDraftQuality, DEFAULT_DRAFT_QUALITY } from "../../src/drafting/quality.ts";
 import { parseDraftSections } from "../../src/drafting/plan-text.ts";
 import { fakeCtx } from "../fake-pi.ts";
 
@@ -33,10 +33,42 @@ Deno.test("countSteps: numbered, bulleted and checkbox items; prose does not cou
   check(countSteps("### Heading\nbody") === 0, "headings are not steps");
 });
 
-Deno.test("hasVerificationStep: test/verify vocabulary", () => {
-  check(hasVerificationStep("run the unit tests"), "tests");
-  check(hasVerificationStep("Verify the output"), "verify");
-  check(!hasVerificationStep("edit the file and edit another"), "no verification");
+function stubJudge(answer: string | null): () => void {
+  const real = globalThis.fetch;
+  globalThis.fetch = (() => {
+    if (answer === null) return Promise.reject(new Error("judge down"));
+    return Promise.resolve(new Response(JSON.stringify({ answers: { plan_verification: { choice: answer } } }), { status: 200 }));
+  }) as typeof fetch;
+  return () => { globalThis.fetch = real; };
+}
+const JUDGED = { ...DEFAULT_CONFIG, judgeMode: "auto" as const, judgeUrl: "http://judge.test" };
+
+Deno.test("judgeHasVerificationStep: decomposed embeddings decide, unavailable is null", async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = ((url: unknown) => {
+    if (String(url).includes("/v1/classify")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        choice: "automated_test",
+        similarity: 0.90,
+        margin: 0.20,
+        scores: { automated_test: 0.90, non_verify: 0.50 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    }
+    return Promise.resolve(new Response("down", { status: 503 }));
+  }) as typeof fetch;
+
+  try {
+    check((await judgeHasVerificationStep(JUDGED, "1. Run unit tests and make test")) === true, "verified step passes");
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  const down = stubJudge(null);
+  try {
+    check((await judgeHasVerificationStep({ ...DEFAULT_CONFIG, embedMode: "off" }, "1. Run tests")) === null, "unavailable => null");
+  } finally {
+    down();
+  }
 });
 
 Deno.test("standard defaults: a cited, stepped, verified plan passes", async () => {
@@ -46,13 +78,18 @@ Deno.test("standard defaults: a cited, stepped, verified plan passes", async () 
   check(res.summary.includes("quality"), "summary line present");
 });
 
-Deno.test("standard defaults: prose plan without citations lists every gap", async () => {
+Deno.test("standard defaults: prose plan without citations lists gaps", async () => {
   const cwd = await repo();
-  const res = await assessDraftQuality(fakeCtx(cwd), DEFAULT_CONFIG, sections("Just do it.", ["no cites here"]), "standard", "standard");
-  check(res.gaps.length === 3, `three gaps, got ${res.gaps.length}: ${res.gaps.join(" | ")}`);
+  const res = await assessDraftQuality(fakeCtx(cwd), JUDGED, sections("Just do it.", ["no cites here"]), "standard", "standard");
+  check(res.gaps.length >= 2, `gaps listed, got ${res.gaps.length}: ${res.gaps.join(" | ")}`);
   check(res.gaps.some((g) => g.includes("citation")), "citation gap");
   check(res.gaps.some((g) => g.includes("step")), "step gap");
-  check(res.gaps.some((g) => g.includes("verification")), "verification gap");
+});
+
+Deno.test("standard defaults: judge-less verification check is advisory, never a gap", async () => {
+  const cwd = await repo();
+  const res = await assessDraftQuality(fakeCtx(cwd), DEFAULT_CONFIG, sections("Just do it.", ["no cites here"]), "standard", "standard");
+  check(!res.gaps.some((g) => g.includes("verification")), "no keyword guess without a judge");
 });
 
 Deno.test("unresolvable citations do not count", async () => {

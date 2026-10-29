@@ -23,9 +23,8 @@ import { setDocStatus } from "../quest-doc";
 import { parseDraftSections } from "../drafting/plan-text";
 import { extractQuestTranscript } from "../durability/transcript";
 import { getLatestTestExecution } from "./evidence-gate";
-import { evaluateSteeringIntent } from "../domain/steering";
+import { interpretUserTurn } from "../domain/intent";
 
-export const CONFIRM_PATTERN = /^\s*confirm(?:ed)?\s*[.!]*$/i;
 
 async function approvedPlan(ctx: PiCtx, state: QuestState): Promise<string> {
   if (state.qid === null) return "(none)";
@@ -200,9 +199,13 @@ export async function concludeValidationPass(
   // The excerpt must be captured before archive: archiveActiveQuest removes the
   // live draft that carries the delivered analysis.
   const excerpt = await deliveredAnalysisExcerpt(ctx, getState());
+  const isAnalysis = getState().kind === "analysis";
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
   const delivered = excerpt === "" ? "" : `\n\nDELIVERED ANALYSIS:\n${excerpt}`;
-  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).${delivered}`);
+  const handoffHint = isAnalysis
+    ? `\n\nTo begin implementation of the approved analysis, run quest_update_state { objective: "Implement recommendations from analysis ${qid}..." }.`
+    : "";
+  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).${delivered}${handoffHint}`);
   return { archived: true, zipPath: done.zipPath };
 }
 
@@ -258,6 +261,8 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     runnerTool: config.bindings.reviewRunner.tool,
     ...(validatorModel ? { model: validatorModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "validator"),
+    routerDefault: config.router.default,
+    cooldownMs: config.router.cooldownMs,
     prompt: buildReviewPrompt("validation", qid, target, brief),
   });
   if (outcome.status === "no-runner") {
@@ -314,11 +319,12 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
 }
 
 export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
-  const config = await readQuestConfig(ctx.cwd);
-  const steering = await evaluateSteeringIntent(text, "validating", config);
-  if (steering.action !== "advance" && !CONFIRM_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "validating" || state.qid === null) return false;
+  const config = await readQuestConfig(ctx.cwd);
+  const intent = await interpretUserTurn(text, "validating", config);
+  if (intent.kind !== "advance") return false;
+  if (getState().phase !== "validating") return false;
   if (hasInFlight(state.qid)) {
     cancelReview(state.qid);
   }

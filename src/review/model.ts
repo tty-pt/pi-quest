@@ -9,6 +9,7 @@
 // a registry never registered — the flow therefore also retries the
 // suffix-stripped variant instead of failing.
 import type { PiCtx } from "../hooks/events";
+import { isProviderSideFailure, isRetryableProviderError } from "../utils/provider-error.ts";
 
 // Thinking levels of the delegation contract. Validated here, never chosen:
 // absent means inherit.
@@ -75,6 +76,7 @@ export function resolveReviewThinking(): string | undefined {
   return THINKING_LEVELS.has(level) ? level : undefined;
 }
 
+
 export type ReviewTimeoutLayer =
   | "subagent_bridge_deadline"
   | "child_process_deadline"
@@ -83,31 +85,14 @@ export type ReviewTimeoutLayer =
 
 export function classifyTimeoutLayer(errMessage: string): ReviewTimeoutLayer {
   const msg = (errMessage || "").toLowerCase();
-  if (msg.includes("bridge") || msg.includes("event bridge")) return "subagent_bridge_deadline";
-  if (msg.includes("process") || msg.includes("killed") || msg.includes("sigterm") ||
-    msg.includes("sigkill") || msg.includes("spawn")) return "child_process_deadline";
-  if (msg.includes("model") || msg.includes("provider") || msg.includes("rate limit") ||
-    msg.includes("context") || msg.includes("429") || msg.includes("504") ||
-    msg.includes("quota")) return "provider_model_timeout";
+  if (/\bevent bridge\b|\bbridge\b/.test(msg)) return "subagent_bridge_deadline";
+  if (/\b(?:killed|sigterm|sigkill|spawn)\b|child process/.test(msg)) return "child_process_deadline";
+  if (isProviderSideFailure(msg)) return "provider_model_timeout";
   return "quest_journal_deadline";
 }
 
 export function isModelResolutionOrProviderError(errMessage: string): boolean {
-  const msg = (errMessage || "").toLowerCase();
-  return (
-    (msg.includes("model") &&
-      (msg.includes("not found") || msg.includes("cannot find") || msg.includes("unknown"))) ||
-    msg.includes("unknown provider") ||
-    msg.includes("provider_model_timeout") ||
-    msg.includes("rate limit") ||
-    msg.includes("429") ||
-    msg.includes("504") ||
-    msg.includes("503") ||
-    msg.includes("529") ||
-    msg.includes("overloaded") ||
-    msg.includes("capacity") ||
-    msg.includes("quota")
-  );
+  return isRetryableProviderError(errMessage || "");
 }
 
 export interface ReviewModelCandidate {
@@ -115,12 +100,32 @@ export interface ReviewModelCandidate {
   label: string;
 }
 
+export interface ReviewModelCandidateOptions {
+  routerDefault?: string | string[];
+  sessionModel?: string;
+  appendInherit?: boolean;
+}
+
+export function extractProvider(model?: string): string {
+  if (!model) return "";
+  const trimmed = model.trim();
+  const slashIdx = trimmed.indexOf("/");
+  if (slashIdx > 0) return trimmed.substring(0, slashIdx).toLowerCase();
+  return "";
+}
+
 // Ordered launch candidates: the resolved target first (it may carry a
 // thinking suffix the child registry never registered), then the
 // suffix-stripped variant, then the operator fallback. An empty target yields
 // a single inherit attempt (no `model` field is sent), plus the fallback when
 // one is configured.
-export function reviewModelCandidates(targetModel: string, fallbackModels: readonly string[] = []): ReviewModelCandidate[] {
+// When options (routerDefault, sessionModel, appendInherit) are provided,
+// robust fallbacks are appended to ensure rate-limited models never halt the review.
+export function reviewModelCandidates(
+  targetModel: string,
+  fallbackModels: readonly string[] = [],
+  options?: ReviewModelCandidateOptions,
+): ReviewModelCandidate[] {
   const target = targetModel.trim();
   const candidates: ReviewModelCandidate[] = target === ""
     ? [{ label: "inherit" }]
@@ -149,5 +154,38 @@ export function reviewModelCandidates(targetModel: string, fallbackModels: reado
       candidates.push({ model: fallback, label: fallback });
     }
   }
+
+  // Auto-append router default model(s) if provided
+  if (options?.routerDefault) {
+    const defaults = Array.isArray(options.routerDefault) ? options.routerDefault : [options.routerDefault];
+    for (const rd of defaults) {
+      if (typeof rd !== "string") continue;
+      const trimmed = rd.trim();
+      if (trimmed === "") continue;
+      if (!candidates.some((c) => c.model === trimmed)) candidates.push({ model: trimmed, label: trimmed });
+      const rdStripped = stripThinkingSuffix(trimmed);
+      if (rdStripped !== "" && rdStripped !== trimmed && !candidates.some((c) => c.model === rdStripped)) {
+        candidates.push({ model: rdStripped, label: rdStripped });
+      }
+    }
+  }
+
+  // Auto-append active session model if provided and different
+  if (options?.sessionModel) {
+    const sm = options.sessionModel.trim();
+    if (sm !== "") {
+      if (!candidates.some((c) => c.model === sm)) candidates.push({ model: sm, label: sm });
+      const smStripped = stripThinkingSuffix(sm);
+      if (smStripped !== "" && smStripped !== sm && !candidates.some((c) => c.model === smStripped)) {
+        candidates.push({ model: smStripped, label: smStripped });
+      }
+    }
+  }
+
+  // Auto-append inherit fallback as safety floor when requested
+  if (options?.appendInherit && !candidates.some((c) => c.label === "inherit")) {
+    candidates.push({ label: "inherit" });
+  }
+
   return candidates;
 }

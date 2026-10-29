@@ -13,7 +13,6 @@ import { fakeCtx, fakePi } from "../fake-pi.ts";
 import type { FakePi, SentMessage } from "../fake-pi.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import {
-  GO_PATTERN,
   MAX_REVIEW_RETRIES,
   MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
@@ -76,15 +75,6 @@ Deno.test("draft thresholds accept configured counts", () => {
   const sections = parseDraftSections("## Requirements\n- one\n\n## Implementation Plan\nplan\n");
   check(meetsReviewThresholds(sections, { requirements: 1, evidence: 0 }), "custom counts honored");
   check(!meetsReviewThresholds(sections, { requirements: 5, evidence: 7 }), "custom counts enforced");
-});
-
-Deno.test("go pattern matches approval and nothing else", () => {
-  for (const text of ["go", "Go", "  go. ", "approve", "approved", "lgtm", "ship it!"]) {
-    check(GO_PATTERN.test(text), `"${text}" is approval`);
-  }
-  for (const text of ["go on", "going well", "good", "stop", ""]) {
-    check(!GO_PATTERN.test(text), `"${text}" is not approval`);
-  }
 });
 
 Deno.test("content hash is stable hex", () => {
@@ -760,6 +750,55 @@ Deno.test("balanced e2e: saving a standard plan promotes without leaving the too
     check(hasInFlight(d.qid) === false, "no in-flight review left behind");
     const verdict = hooks[0]({ type: "tool_call", toolCallId: "1", toolName: "bash", input: { command: "ls" } }, fakeCtx(d.cwd)) as { block?: boolean; reason?: string } | undefined;
     check(!(verdict?.block === true && String(verdict.reason).includes("PLAN_REVISION_REVIEW")), "tools not locked by a phantom revision review");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("a stale PASS verdict with no review in flight re-boots the review instead of stalling", async () => {
+  const d = await draftFailureSetup("stal01" as Qid);
+  const bus = retryBus();
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    // A newer boot took over and then vanished: the tracker holds no entry for
+    // the target this verdict answers, and nothing is in flight.
+    // The race: the verdict lands, then the supersede cancels the tracker
+    // entry before the flow settles it.
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\n\nSolid." },
+    });
+    cancelReview(d.qid);
+    check(!hasInFlight(d.qid), "nothing in flight after the supersede");
+    await booted;
+    await new Promise((r) => setTimeout(r, 20));
+    const stillDrafting = getState().phase === "drafting";
+    const rebooted = requests(bus.emitted).length >= 2;
+    const woke = wakes(bus.pi).length > 0;
+    check(!stillDrafting || rebooted || woke, "a stale verdict must re-boot a review or wake the agent, never stall silently");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("a stale verdict leaves a genuinely newer in-flight review alone", async () => {
+  const d = await draftFailureSetup("stal02" as Qid);
+  const bus = retryBus();
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    await waitForRequests(bus.emitted, 1);
+    const firstRequest = requests(bus.emitted)[0]["requestId"];
+    trackReview(d.qid, "newer-target", () => {});
+    bus.feed({ requestId: firstRequest, status: "completed", result: { kind: "text", text: "VERDICT: PASS\n\nOk." } });
+    await booted;
+    await new Promise((r) => setTimeout(r, 20));
+    check(requests(bus.emitted).length === 1, "no extra review booted while a newer one is in flight");
+    check(hasInFlight(d.qid), "the newer review stays tracked");
+    check(getState().phase === "drafting", "a stale PASS never promotes");
   } finally {
     cancelReview(d.qid);
     replaceState(IDLE_STATE);

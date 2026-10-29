@@ -18,7 +18,7 @@ import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
 import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview } from "../review/flow";
-import { cancelReview, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
+import { cancelReview, hasInFlight, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { noteDraftUpdated } from "../durability/status";
 import { handleDraftEdit } from "./edits";
 import {
@@ -32,8 +32,7 @@ import {
   parseDraftSections,
   reviewMaterial,
 } from "./plan-text";
-import { evaluateSteeringIntent } from "../domain/steering";
-export const GO_PATTERN = /^\s*(go|approve(?:d)?|lgtm|ship it)\s*[.!]*\s*$/i;
+import { interpretUserTurn } from "../domain/intent";
 
 import {
   bumpReviewCountAndReboot as doBumpReviewCountAndReboot,
@@ -71,6 +70,24 @@ async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | nu
 }
 
 const userPathSteered = new Set<string>();
+const staleRecovered = new Set<string>();
+
+// A verdict for a superseded target is normally harmless: the save that
+// superseded it booted its own review. When nothing is in flight any more the
+// draft would sit unreviewed with nothing to wake the agent, so re-boot once
+// for the current file content, then wake the agent instead of looping.
+async function recoverStaleVerdict(pi: Pi, ctx: PiCtx, qid: Qid, target: string): Promise<void> {
+  const state = getState();
+  if (state.phase !== "drafting" || state.qid !== qid || state.draft === null) return;
+  if (hasInFlight(qid) || state.draft.approvedBy !== null) return;
+  const key = `${qid}:${target}`;
+  if (staleRecovered.has(key)) {
+    sendWake(pi, `A draft review verdict for ${qid} arrived for a superseded revision and no review is running. Save the draft to boot a fresh review, or a live user may reply "go".`);
+    return;
+  }
+  staleRecovered.add(key);
+  await maybeBootDraftReview(pi, ctx);
+}
 
 export async function bootDraftReview(
   pi: Pi,
@@ -109,6 +126,8 @@ export async function bootDraftReview(
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "reviewer"),
+    routerDefault: config.router.default,
+    cooldownMs: config.router.cooldownMs,
     maxDurationMs: config.reviewMaxDurationMs,
     inactivityLimitMs: config.reviewInactivityMs,
   });
@@ -126,7 +145,11 @@ export async function bootDraftReview(
     noteReviewLaunchFailed(pi, ctx, config, qid, target, outcome.detail, userPathSteered, bootDraftReview);
     return;
   }
-  if (outcome.status !== "verdict" || !outcome.settled) return;
+  if (outcome.status !== "verdict") return;
+  if (!outcome.settled) {
+    await recoverStaleVerdict(pi, ctx, qid, target);
+    return;
+  }
   if (outcome.review.verdict === "PASS") {
     clearDraftReviewRetry(qid);
     clearReviewVerdictFails(qid);
@@ -137,7 +160,10 @@ export async function bootDraftReview(
     // Route by kind: standard quests promote to implementing; analysis quests
     // auto-claim straight to validating (D3) unless sub-quests still run.
     const message = await promoteAfterPass(pi, ctx, qid, "review");
-    if (message === null) return;
+    if (message === null) {
+      sendSteer(pi, `Reviewer PASS recorded for ${qid}, but the quest did not promote (it is no longer an unapproved draft). Check its phase; a live user "go" promotes a draft.`);
+      return;
+    }
     const advisories = outcome.review.advisories.trim();
     sendWake(pi, `${message}${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     return;
@@ -205,6 +231,9 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
     }
     return;
   }
+  // Nothing to review until a plan is authored; booting here would fail and
+  // leave an unretryable empty-plan review (bumpReviewCount is a no-op).
+  if (!hasAuthoredText(deliverableBody(sections, state.kind))) return;
   supersedeReviewThenBootFresh(state.qid, target, () => {
     void bootDraftReview(pi, ctx, target, config);
   });
@@ -249,15 +278,23 @@ export async function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy)
 }
 
 export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
-  // Natural language steering: advance intent (or GO_PATTERN) promotes a draft.
+  // Advance intent (judge-first; one fallback word) promotes a draft.
   // It is never served from a tool result — a quest_ask_human default is absence,
   // not approval, and so can never promote a draft.
-  const config = await readQuestConfig(ctx.cwd);
-  const steering = await evaluateSteeringIntent(text, "drafting", config);
-  if (steering.action !== "advance" && !GO_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return false;
-  return await approveDraft(pi, ctx, state.qid, "user");
+  const config = await readQuestConfig(ctx.cwd);
+  const intent = await interpretUserTurn(text, "drafting", config);
+  if (intent.kind !== "advance") return false;
+  if (getState().phase !== "drafting") return false;
+  const approved = await approveDraft(pi, ctx, state.qid, "user");
+  if (approved && intent.cleanText && intent.cleanText.trim() !== "") {
+    sendSteer(
+      pi,
+      `[Attached Directive upon approval]: "${intent.cleanText.trim()}". Incorporate this into the implementation phase.`,
+    );
+  }
+  return approved;
 }
 
 async function onWriteResult(pi: Pi, ctx: PiCtx, event: ToolResultEvent): Promise<void> {

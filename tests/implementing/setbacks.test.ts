@@ -14,27 +14,27 @@ function bash(command: string, text: string, isError: boolean, details?: unknown
   };
 }
 
-Deno.test("setbacks catch test and build failures", () => {
-  const hit = detectSetback(bash("deno test", "FAILED foo_test", false));
+Deno.test("setbacks key on exit status, not on words in the output", () => {
+  const hit = detectSetback(bash("deno test", "FAILED foo_test", true));
   check(hit !== null && hit.reason.includes("Test/build"), "test failure recorded");
   check(hit !== null && hit.evidence[0].includes("FAILED"), "evidence kept");
+  const nonZero = detectSetback(bash("make -j4", "boom", false, { exitCode: 2 }));
+  check(nonZero !== null && nonZero.reason.includes("Test/build"), "non-zero exit code recorded");
   const err = detectSetback(bash("rm -rf dist", "", true));
   check(err !== null && err.reason.includes("Command failed"), "error exit recorded");
 });
 
-Deno.test("setbacks ignore investigative noise", () => {
-  check(detectSetback(bash("grep -r foo .", "", true, { exitCode: 1 })) === null, "grep exit 1 ignored");
-  check(detectSetback(bash("ls empty", "", true)) === null, "empty ls ignored");
-  check(detectSetback(bash("cat file", "hello", false)) === null, "clean probe ignored");
-  const real = detectSetback(bash("cat missing", "cat: cannot open missing", true));
-  check(real !== null, "real cat error recorded");
+Deno.test("setbacks never read a passing run as failed (the '0 failed' false positive)", () => {
+  check(detectSetback(bash("npm test", "519 passed, 0 failed", false, { exitCode: 0 })) === null, "0 failed is a pass");
+  check(detectSetback(bash("npm test | grep failed", "test names containing failed ... ok", false)) === null, "words in output ignored");
+  check(detectSetback(bash("make -j4", "4 errors generated.", false)) === null, "output text alone is not a failure");
 });
 
-Deno.test("setbacks catch build error counts", () => {
-  const make = detectSetback(bash("make -j4", "4 errors generated.\nmake: Error 1", false));
-  check(make !== null && make.reason.includes("Test/build"), "error counts recorded");
-  const clean = detectSetback(bash("make -j4", "0 errors, build clean", false));
-  check(clean === null, "zero errors ignored");
+Deno.test("setbacks ignore no-match exit status of search commands", () => {
+  check(detectSetback(bash("grep -r foo .", "", true, { exitCode: 1 })) === null, "grep exit 1 ignored");
+  check(detectSetback(bash("cat file", "hello", false)) === null, "clean probe ignored");
+  check(detectSetback(bash("cat missing", "cat: missing: No such file", true, { exitCode: 1 })) !== null, "cat exit 1 is a real error");
+  check(detectSetback(bash("grep foo x", "grep: x: error", true, { exitCode: 2 })) !== null, "grep exit 2 is a real error");
 });
 
 Deno.test("setbacks catch failed file writes and ignore the rest", () => {

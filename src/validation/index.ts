@@ -2,6 +2,7 @@
 // HIGH_LEVEL: #validation — validator archives on PASS, demotes on FAIL.
 // SPEC: B1.5 (completion + slim archive).
 import { getState, updateState } from "../app/store";
+import { readQuestConfig } from "../config";
 import type { VerificationReceipt } from "../domain/quest";
 import type { Pi } from "../hooks/events";
 import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
@@ -18,11 +19,12 @@ export function installValidation(pi: Pi): void {
   onUserMessage(pi, (text, ctx) => {
     void handleConfirmInput(pi, ctx, text);
   });
-  onToolResult(pi, (event, _ctx) => {
+  onToolResult(pi, async (event, ctx) => {
     if (event.toolName === "bash" && typeof event.input["command"] === "string") {
       const command = event.input["command"];
       const state = getState();
-      if (isTestCommand(command, state.contract)) {
+      const config = await readQuestConfig(ctx.cwd);
+      if (isTestCommand(command, state.contract, config.testCommands)) {
         const text = Array.isArray(event.content)
           ? event.content.map((c) => c.text ?? "").join("\n")
           : "";

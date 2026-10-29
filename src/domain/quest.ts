@@ -19,7 +19,8 @@ export type ArchivedOutcome = "COMPLETED" | "FAILED" | "ABANDONED";
 
 // HIGH_LEVEL: #modes — kind is immutable per quest; "analysis" swaps the
 // deliverable (## Analysis) for the implementation plan in the same flow.
-export type QuestKind = "standard" | "analysis";
+// Specialized kinds ("bugfix", "feature", "refactor", "docs") adapt evidence and verification requirements.
+export type QuestKind = "standard" | "analysis" | "bugfix" | "feature" | "refactor" | "docs";
 
 export type QuestDifficulty = "trivial" | "standard" | "complex";
 
@@ -207,6 +208,7 @@ export function createQuest(
   qid: string,
   parentQid: Qid | null = null,
   difficulty: QuestDifficulty = "standard",
+  kind: QuestKind = "standard",
 ): QuestState {
   if (!isQid(qid)) throw new Error(`invalid qid: ${qid}`);
   return markChanged(IDLE_STATE, {
@@ -214,6 +216,7 @@ export function createQuest(
     qid,
     parentQid,
     difficulty,
+    kind,
     objective: request,
     pendingRootRequest: request,
     exactNextAction: "Establish quest identity: investigate, then record findings.",
@@ -222,6 +225,10 @@ export function createQuest(
 
 export function setQuestDifficulty(state: QuestState, difficulty: QuestDifficulty): QuestState {
   return markChanged(state, { difficulty });
+}
+
+export function setQuestKind(state: QuestState, kind: QuestKind): QuestState {
+  return markChanged(state, { kind });
 }
 
 // Promotion requires recorded research alongside the actionable plan:

@@ -1,5 +1,6 @@
 // HIGH_LEVEL: #configurations — virtual model routing engine with fallback and quota cooldown.
 import { getState } from "../app/store";
+import { isRateLimitOrQuotaError } from "../utils/provider-error";
 import { parseModelSpec, resolveMatrixCell } from "./matrix";
 import type {
   ModelRoute,
@@ -9,21 +10,7 @@ import type {
   RouterState,
 } from "./types";
 
-export function isRateLimitOrQuotaError(message?: string): boolean {
-  if (!message) return false;
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("rate limit") ||
-    lower.includes("rate_limit") ||
-    lower.includes("quota") ||
-    lower.includes("overloaded") ||
-    lower.includes("429") ||
-    lower.includes("capacity") ||
-    lower.includes("credit") ||
-    lower.includes("exceeded") ||
-    lower.includes("exhausted")
-  );
-}
+export { isRateLimitOrQuotaError };
 
 export function cleanExpiredCooldowns(cooldowns: Record<string, number>, now = Date.now()): Record<string, number> {
   const next: Record<string, number> = {};

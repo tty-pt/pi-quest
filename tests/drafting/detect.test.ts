@@ -68,49 +68,45 @@ Deno.test("detection ignores casual narrative statements and memory probes", asy
   replaceState(IDLE_STATE);
 });
 
-Deno.test("detection uses Jev System One judge to classify quest intent", async () => {
-  let simulatedChoice: "quest" | "conversation" = "quest";
-
-  const server = Deno.serve({ port: 0 }, async () => {
-    return new Response(JSON.stringify({
-      model: "qwen",
-      answers: {
-        quest_intent: {
-          type: "choice",
-          choice: simulatedChoice,
-          confidence: 0.99,
-        },
-      },
-    }), {
-      headers: { "Content-Type": "application/json" },
-    });
+Deno.test("detection uses embeddings to classify quest intent", async () => {
+  const server = Deno.serve({ port: 0 }, async (req) => {
+    const url = new URL(req.url);
+    if (url.pathname.includes("/v1/classify")) {
+      const body = await req.json();
+      const choice = body.text.includes("Optimize") ? "quest" : "conversation";
+      return new Response(JSON.stringify({
+        choice,
+        similarity: 0.95,
+        margin: 0.35,
+        scores: { quest: choice === "quest" ? 0.95 : 0.40, conversation: choice === "conversation" ? 0.95 : 0.40 },
+        model: "bge-base",
+      }), { headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("not found", { status: 404 });
   });
 
   const port = server.addr.port;
   const cfg: QuestConfig = {
     ...DEFAULT_CONFIG,
-    judgeMode: "systemone",
-    judgeUrl: `http://127.0.0.1:${port}`,
-    judgeModel: "qwen",
+    embedUrl: `http://127.0.0.1:${port}`,
+    embedModel: "bge-base",
   };
 
   try {
-    // 1. When Jev returns quest
+    // 1. When embeddings return quest
     replaceState(IDLE_STATE);
     const pi1 = fakePi();
     const ctx1 = fakeCtx(tmp());
-    simulatedChoice = "quest";
     const resQuest = await detectSubstantiveRequest(pi1, ctx1, "Optimize database checkpoints", cfg);
-    check(resQuest, "quest created by Jev decision");
+    check(resQuest, "quest created by embedding decision");
     check(getState().phase === "provisional", "phase is provisional");
 
-    // 2. When Jev returns conversation
+    // 2. When embeddings return conversation
     replaceState(IDLE_STATE);
     const pi2 = fakePi();
     const ctx2 = fakeCtx(tmp());
-    simulatedChoice = "conversation";
     const resConv = await detectSubstantiveRequest(pi2, ctx2, "My grandfather visited yesterday", cfg);
-    check(!resConv, "conversation ignored by Jev decision");
+    check(!resConv, "conversation ignored by embedding decision");
     check(getState().phase === "idle", "phase remains idle");
     replaceState(IDLE_STATE);
   } finally {

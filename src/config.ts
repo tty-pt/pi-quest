@@ -13,6 +13,7 @@ export interface DraftThresholds {
   evidence: number;
 }
 
+export type EmbedMode = "auto" | "off";
 export type DifficultyMode = "auto" | "judge" | "heuristic" | "off";
 
 export type DifficultyThresholds = Record<QuestDifficulty, DraftThresholds>;
@@ -32,6 +33,19 @@ export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
 export type JudgeProtocol = "auto" | "systemzero" | "systemone";
 export type JudgeFallback = "heuristic" | "skip";
 export type ReviewPolicy = "strict" | "balanced" | "off";
+
+export interface LintRule {
+  id: string;
+  /** Regex source matched against the changed file path (all files when absent). */
+  filePattern?: string;
+  /** Files matching this regex source are exempt. */
+  excludeFilePattern?: string;
+  /** Added lines matching this regex source are exempt (sanctioned forms). */
+  excludeLinePattern?: string;
+  /** Regex source matched against each added line. */
+  linePattern: string;
+  message: string;
+}
 
 export type MidQuestMode = "hybrid" | "autonomous" | "interactive" | "off";
 export type SubQuestAction = "queue_backlog" | "preempt_now" | "ask_human";
@@ -57,9 +71,11 @@ export interface RoleModels {
   validator?: string;
   judge?: string;
   // Ordered fallback models tried after the primary role model when a launch
-  // fails with a provider/model/rate-limit error.
-  reviewerFallback?: string[];
-  validatorFallback?: string[];
+  // fails with a provider/model/rate-limit error. Derived from the tail of
+  // roles.reviewer / roles.validator; the legacy *Fallback settings keys are no
+  // longer read.
+  reviewerChain?: string[];
+  validatorChain?: string[];
 }
 
 export const DEFAULT_TRIGGER_PREFIXES: string[] = [
@@ -105,7 +121,38 @@ export interface QuestConfig {
   judgeKey?: string;
   judgeFallback: JudgeFallback;
   judgeTimeoutMs: number;
+  /** "auto" classifies operator steering by embedding similarity; "off" skips embeddings (judge / fallback only). */
+  embedMode: EmbedMode;
+  /** Embeddings server base URL; defaults to the judge URL. */
+  embedUrl?: string;
+  embedModel: string;
+  /** Best-vs-runner-up cosine margin an actionable verdict (advance, abort, constraint, sub-task) must clear. */
+  intentMinMargin: number;
+  /** Minimum cosine similarity to the nearest exemplar for any verdict; below it the message is a refinement. */
+  intentMinSimilarity: number;
+  /** Operator exemplars per intent kind (any language), merged with the shipped defaults. */
+  intentExemplars: Record<string, string[]>;
+  /**
+   * Best-vs-runner-up cosine margin a message must clear to OPEN a quest by embeddings. Higher than
+   * `intentMinMargin` because a false quest is costlier than a missed one (use /quest or a trigger).
+   */
+  questMinMargin: number;
+  /** Operator exemplars for quest detection (kinds `quest` / `conversation`), merged with the shipped ones. */
+  questExemplars: Record<string, string[]>;
+  /**
+   * Best-vs-runner-up cosine margin a `trivial` or `complex` embedding verdict must clear; anything
+   * weaker is `standard`. A wrong `trivial` drops plan review, so this is a safety gate.
+   */
+  difficultyMinMargin: number;
+  /** Operator exemplars for difficulty (kinds `trivial` / `standard` / `complex`), merged with the shipped ones. */
+  difficultyExemplars: Record<string, string[]>;
   triggerPrefixes: string[];
+  /** Operator-owned exact messages (any language) that advance a quest when the judge is unavailable. */
+  steeringPhrases: string[];
+  /** Operator-declared command prefixes that count as test/build evidence (in addition to built-ins). */
+  testCommands: string[];
+  /** Repo-local semantic diff lint rules (none ship by default). */
+  lintRules: LintRule[];
   autoStartAuren?: boolean;
   autoDownloadModels?: "auto" | "ask" | "never";
   midQuest: MidQuestConfig;
@@ -145,18 +192,72 @@ export const DEFAULT_CONFIG: QuestConfig = {
   planRevisionMaxDurationMs: 300000,
   planEditor: null,
   judgeMode: "auto",
-  judgeProtocol: "auto",
+  judgeProtocol: "systemone",
   judgeUrl: undefined,
-  judgeModel: "qwen",
+  judgeModel: "olmoe",
   judgeKey: undefined,
   judgeFallback: "heuristic",
-  judgeTimeoutMs: 2000,
+  judgeTimeoutMs: 6000,
+  embedMode: "auto",
+  embedUrl: undefined,
+  embedModel: "bge-base",
+  intentMinMargin: 0.075,
+  intentMinSimilarity: 0.6,
+  intentExemplars: {},
+  questMinMargin: 0.1,
+  questExemplars: {},
+  difficultyMinMargin: 0.075,
+  difficultyExemplars: {},
   triggerPrefixes: DEFAULT_TRIGGER_PREFIXES,
+  steeringPhrases: [],
+  testCommands: [],
+  lintRules: [],
   autoStartAuren: true,
   autoDownloadModels: "ask",
   midQuest: DEFAULT_MID_QUEST_CONFIG,
   router: DEFAULT_ROUTER_CONFIG,
 };
+
+function stringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim());
+}
+
+function unitInterval(raw: unknown, fallback: number): number {
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
+}
+
+function parseExemplars(raw: unknown): Record<string, string[]> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [kind, list] of Object.entries(raw)) {
+    const items = stringList(list);
+    if (items.length > 0) out[kind] = items;
+  }
+  return out;
+}
+
+function parseLintRules(raw: unknown): LintRule[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LintRule[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r["id"] !== "string" || typeof r["linePattern"] !== "string" || typeof r["message"] !== "string") continue;
+    const optional = ["filePattern", "excludeFilePattern", "excludeLinePattern"] as const;
+    try {
+      new RegExp(r["linePattern"]);
+      for (const k of optional) if (typeof r[k] === "string") new RegExp(r[k] as string);
+    } catch {
+      continue;
+    }
+    const rule: LintRule = { id: r["id"], message: r["message"], linePattern: r["linePattern"] };
+    for (const k of optional) if (typeof r[k] === "string") rule[k] = r[k] as string;
+    out.push(rule);
+  }
+  return out;
+}
 
 function getEnv(key: string): string | undefined {
   if (typeof process !== "undefined" && process?.env) {
@@ -190,7 +291,7 @@ function loadJudgeConfig(record: Record<string, unknown>): {
   const judgeProtocol: JudgeProtocol =
     rawJudgeProto === "systemzero" || rawJudgeProto === "systemone" || rawJudgeProto === "auto"
       ? rawJudgeProto
-      : "auto";
+      : DEFAULT_CONFIG.judgeProtocol;
 
   const rawJudgeUrl =
     record["judgeUrl"] ??
@@ -369,31 +470,32 @@ export function loadConfig(raw: unknown): QuestConfig {
     ? (record["roles"] as Record<string, unknown>)
     : {};
 
+  // roles.reviewer / roles.validator accept a model string or an ordered list:
+  // the first entry is the primary, the rest are fallbacks tried before the
+  // separate *Fallback list.
+  const reviewerList = parseModelList(rawRoles["reviewer"]);
   const reviewerModel =
-    typeof rawRoles["reviewer"] === "string" && rawRoles["reviewer"].trim() !== ""
-      ? rawRoles["reviewer"].trim()
-      : typeof record["reviewerModel"] === "string" && record["reviewerModel"].trim() !== ""
+    reviewerList[0] ??
+    (typeof record["reviewerModel"] === "string" && record["reviewerModel"].trim() !== ""
       ? record["reviewerModel"].trim()
-      : getEnv("PI_QUEST_REVIEWER_MODEL") ?? getEnv("PI_REVIEW_MODEL");
+      : getEnv("PI_QUEST_REVIEWER_MODEL") ?? getEnv("PI_REVIEW_MODEL"));
 
+  const validatorList = parseModelList(rawRoles["validator"]);
   const validatorModel =
-    typeof rawRoles["validator"] === "string" && rawRoles["validator"].trim() !== ""
-      ? rawRoles["validator"].trim()
-      : typeof record["validatorModel"] === "string" && record["validatorModel"].trim() !== ""
+    validatorList[0] ??
+    (typeof record["validatorModel"] === "string" && record["validatorModel"].trim() !== ""
       ? record["validatorModel"].trim()
-      : getEnv("PI_QUEST_VALIDATOR_MODEL") ?? getEnv("PI_VALIDATOR_MODEL");
+      : getEnv("PI_QUEST_VALIDATOR_MODEL") ?? getEnv("PI_VALIDATOR_MODEL"));
 
   const judgeModelOverride =
-    typeof rawRoles["judge"] === "string" && rawRoles["judge"].trim() !== ""
-      ? rawRoles["judge"].trim()
-      : judge.judgeModel;
+    parseModelList(rawRoles["judge"])[0] ?? judge.judgeModel;
 
   const roles: RoleModels = {
     reviewer: reviewerModel,
     validator: validatorModel,
     judge: judgeModelOverride,
-    reviewerFallback: parseModelList(rawRoles["reviewerFallback"]),
-    validatorFallback: parseModelList(rawRoles["validatorFallback"]),
+    reviewerChain: dedupe(reviewerList.slice(1)),
+    validatorChain: dedupe(validatorList.slice(1)),
   };
 
   // Align judge.judgeModel with roles.judge if set
@@ -469,6 +571,37 @@ export function loadConfig(raw: unknown): QuestConfig {
     midQuest,
     router: loadRouterConfig(record),
     ...judge,
+    embedMode: (record["embedMode"] ?? getEnv("PI_QUEST_EMBED_MODE")) === "off" ? "off" : "auto",
+    embedUrl: (() => {
+      const raw = record["embedUrl"] ?? getEnv("PI_QUEST_EMBED_URL") ?? judge.judgeUrl ?? "http://127.0.0.1:4242";
+      return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : "http://127.0.0.1:4242";
+    })(),
+    embedModel: (() => {
+      const raw = record["embedModel"] ?? getEnv("PI_QUEST_EMBED_MODEL");
+      return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : DEFAULT_CONFIG.embedModel;
+    })(),
+    intentMinMargin: unitInterval(record["intentMinMargin"] ?? getEnv("PI_QUEST_INTENT_MIN_MARGIN"), DEFAULT_CONFIG.intentMinMargin),
+    intentMinSimilarity: unitInterval(
+      record["intentMinSimilarity"] ?? getEnv("PI_QUEST_INTENT_MIN_SIMILARITY"),
+      DEFAULT_CONFIG.intentMinSimilarity,
+    ),
+    intentExemplars: parseExemplars(record["intentExemplars"]),
+    questMinMargin: unitInterval(record["questMinMargin"] ?? getEnv("PI_QUEST_QUEST_MIN_MARGIN"), DEFAULT_CONFIG.questMinMargin),
+    difficultyMinMargin: unitInterval(
+      record["difficultyMinMargin"] ?? getEnv("PI_QUEST_DIFFICULTY_MIN_MARGIN"),
+      DEFAULT_CONFIG.difficultyMinMargin,
+    ),
+    difficultyExemplars: Object.fromEntries(
+      Object.entries(parseExemplars(record["difficultyExemplars"])).filter(([kind]) =>
+        kind === "trivial" || kind === "standard" || kind === "complex"
+      ),
+    ),
+    questExemplars: Object.fromEntries(
+      Object.entries(parseExemplars(record["questExemplars"])).filter(([kind]) => kind === "quest" || kind === "conversation"),
+    ),
+    steeringPhrases: stringList(record["steeringPhrases"]),
+    testCommands: stringList(record["testCommands"]),
+    lintRules: parseLintRules(record["lintRules"]),
   };
 }
 
@@ -488,8 +621,12 @@ function parseModelList(raw: unknown): string[] {
     .filter((m) => m !== "");
 }
 
+function dedupe(items: string[]): string[] {
+  return [...new Set(items)];
+}
+
 export function resolveRoleFallbacks(cfg: QuestConfig, role: "reviewer" | "validator"): string[] {
-  return (role === "reviewer" ? cfg.roles.reviewerFallback : cfg.roles.validatorFallback) ?? [];
+  return (role === "reviewer" ? cfg.roles.reviewerChain : cfg.roles.validatorChain) ?? [];
 }
 
 export function resolveRoleModel(

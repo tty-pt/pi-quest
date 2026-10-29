@@ -7,15 +7,18 @@ import { join, dirname, basename } from "node:path";
 import { getState, updateState } from "../app/store";
 import { sendSteer } from "../app/interpreter";
 import { recordAmendment, recordRefinement } from "../domain/quest";
+import { demoteToDrafting } from "../domain/transitions";
 import { draftPath } from "../domain/paths";
+import { isHeading } from "../domain/sections";
 import { hashContent } from "../drafting/plan-text";
 import { appendAmendmentToDoc, appendRequirementToDoc, appendSubQuestBacklogItem } from "../domain/quest-doc";
 import type { Qid } from "../domain/qid";
 import { onUserMessage, type Pi, type PiCtx } from "../hooks/events";
 import { readQuestConfig } from "../config";
+import { interpretUserTurn } from "../domain/intent";
+import { cancelReview } from "../review/tracker";
 import { createChildQuest } from "../surface/tools/subquest";
 import { triageInQuestRequest } from "./scope";
-import { parseUserDirective } from "./triage";
 
 let followUpQueue: Promise<void> = Promise.resolve();
 
@@ -86,12 +89,12 @@ export async function appendFollowUpToDraft(ctx: PiCtx, qid: Qid, followUpText: 
       if (!existsSync(filePath)) return;
       const content = await readFile(filePath, "utf8");
       
-      const headerRegex = /^##\s+follow-up\s+requests\b/im;
+      const lines0 = content.split("\n");
       let updated: string;
       const bullet = `- ${followUpText}`;
-      if (headerRegex.test(content)) {
+      if (lines0.some((l) => isHeading(l, "followups"))) {
         const lines = content.split("\n");
-        const idx = lines.findIndex((l) => /^##\s+follow-up\s+requests\b/i.test(l));
+        const idx = lines.findIndex((l) => isHeading(l, "followups"));
         lines.splice(idx + 1, 0, bullet);
         updated = lines.join("\n");
       } else {
@@ -126,7 +129,9 @@ export function installSubQuests(pi: Pi): void {
       if (trimmed.startsWith("/") || trimmed.length < 3) return;
 
       const config = await readQuestConfig(ctx.cwd);
-      const parsed = parseUserDirective(trimmed);
+      // One shared interpretation (judge-first). Pure steering (advance/abort) belongs
+      // to the phase handlers; it is never a requirement or refinement.
+      const parsed = await interpretUserTurn(trimmed, state.phase, config);
       const triaged = triageInQuestRequest(state.qid, parsed.kind, parsed.cleanText, config.midQuest);
       if (triaged === null) return;
 
@@ -144,9 +149,25 @@ export function installSubQuests(pi: Pi): void {
       }
 
       if (triaged.action === "amend_requirement") {
-        updateState((s) => recordAmendment(recordRefinement(s, parsed.cleanText), parsed.cleanText, "User mid-quest directive"));
+        // Only an explicit constraint (!rule / must: / natural constraint phrasing)
+        // sends active work back to drafting; casual refinements are recorded as
+        // amendments but never revoke an approved plan.
+        const demote = parsed.kind === "constraint" &&
+          (state.phase === "implementing" || state.phase === "validating");
+        if (demote) cancelReview(state.qid);
+        updateState((s) => {
+          const next = recordAmendment(recordRefinement(s, parsed.cleanText), parsed.cleanText, "User mid-quest directive");
+          if (!demote || (next.phase !== "implementing" && next.phase !== "validating")) return next;
+          const nextAction = next.kind === "analysis"
+            ? `Revise ## Analysis in the draft file to incorporate amendment "${parsed.cleanText}", then save.`
+            : `Revise ## Implementation Plan in the draft file to incorporate amendment "${parsed.cleanText}", then save.`;
+          return demoteToDrafting(next, nextAction);
+        });
         void appendRequirementAndAmendmentToDraft(ctx, state.qid, parsed.cleanText, "User mid-quest directive");
-        sendSteer(pi, triaged.steer);
+        const steerMessage = demote
+          ? `Recorded amendment on quest ${state.qid}: "${parsed.cleanText}". Quest returned to draft mode — update the plan in the quest doc to reflect this amendment, then save to trigger review (or reply 'go' to proceed).`
+          : triaged.steer;
+        sendSteer(pi, steerMessage);
         return;
       }
 

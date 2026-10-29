@@ -8,6 +8,8 @@
 import type { QuestDifficulty, QuestKind } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
 import type { QuestConfig } from "../config";
+import { mergeExemplars, nearestExemplar } from "../judge/nearest";
+import { VERIFICATION_EXEMPLARS, VERIFY_CLUSTERS } from "./verification-exemplars";
 import { resolveCitations } from "./citations";
 import { deliverableBody, type DraftSections } from "./plan-text";
 
@@ -20,8 +22,41 @@ export function countSteps(plan: string): number {
   return plan.split("\n").filter((line) => /^\s*(?:\d+[.)]|[-*+])\s+\S/.test(line)).length;
 }
 
-export function hasVerificationStep(plan: string): boolean {
-  return /\b(tests?|testing|verif(?:y|ies|ied|ication)|assert\w*|validat\w+|lint|smoke|e2e|regression|acceptance)\b/i.test(plan);
+/**
+ * Decomposed step evaluation: extracts steps and classifies them against fine-grained
+ * verification categories via in-memory server-side or local nearest-exemplar embeddings.
+ * S_verify = max(sim in verify clusters)
+ * S_other = max(sim in non_verify clusters)
+ * step_margin = S_verify - S_other
+ */
+export async function evaluateVerificationDecomposed(config: QuestConfig, plan: string): Promise<boolean | null> {
+  const steps = plan
+    .split("\n")
+    .map((l) => /^\s*(?:\d+[.)]|[-*+])\s+(\S.*)$/.exec(l)?.[1]?.trim() ?? "")
+    .filter((s) => s !== "");
+
+  if (steps.length === 0) return null;
+
+  const examples = mergeExemplars(VERIFICATION_EXEMPLARS, {});
+  let anyEvaluated = false;
+
+  for (const step of steps) {
+    const verdict = await nearestExemplar(config, examples, step);
+    if (!verdict) continue;
+    anyEvaluated = true;
+    if (VERIFY_CLUSTERS.has(verdict.kind) && verdict.similarity >= 0.50 && verdict.margin >= 0.05) {
+      return true;
+    }
+  }
+
+  return anyEvaluated ? false : null;
+}
+
+/**
+ * true/false from decomposed classification; null when embeddings are unavailable (advisory, never blocks).
+ */
+export async function judgeHasVerificationStep(config: QuestConfig, plan: string): Promise<boolean | null> {
+  return await evaluateVerificationDecomposed(config, plan);
 }
 
 export interface QualityResult {
@@ -55,7 +90,7 @@ export async function assessDraftQuality(
   if (kind === "standard") {
     steps = countSteps(body);
     if (steps < tier.steps) gaps.push(`break the plan into at least ${tier.steps} discrete steps as a numbered or bulleted list (have ${steps})`);
-    if (tier.requireVerification && !hasVerificationStep(body)) {
+    if (tier.requireVerification && (await judgeHasVerificationStep(config, body)) === false) {
       gaps.push("add a verification step (a test or check that proves the change)");
     }
   }

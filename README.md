@@ -26,14 +26,52 @@ Every quest executes through three phases:
 
 1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) but may only write to its draft plan (`.pi/quest/future/<qid>.md`). Content changes trigger an independent reviewer. You can reply `go` or `proceed` at any moment to bypass review.
 2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
-3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS archives the finished quest into `.pi/quest/archive/<qid>.zip`. Reply `confirm` or `ship it` at any time to accept immediately.
+3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS archives the finished quest into `.pi/quest/archive/<qid>.zip`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately.
 
 ### Instant Plan Overlay (`Ctrl+Q`)
 Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable viewer of the active quest document, requirements, and progress.
 
 ---
 
-## 2. Model Router (`quest/auto`) & Review Policies
+## 2. Conversational Brainstorming vs. Quest Workflows
+
+`pi-quest` distinguishes between **open conversation / brainstorming** and **task execution directives**:
+
+- **Chat & Brainstorming** (No quest opened, no files locked):
+  - When you ask open-ended questions, explore design ideas, or brainstorm (*"Let's think this through"*, *"Can you explain how this module works?"*, *"What are our options for handling this issue?"*, or prefix with `? ` / `!chat`), the agent answers directly in conversational markdown.
+  - The worktree is **never locked**, and no draft plan is forced upon you.
+- **Quest Directives** (Quest workflow begins):
+  - When you issue an imperative task instruction (*"Fix the bug in the parser"*, *"Implement the new API endpoint"*, *"Refactor the auth handler"*), or use an explicit trigger (`quest:`, `!task`, `/quest`), `pi-quest` opens a quest, generates a draft scaffold, and manages the lifecycle.
+
+### Flexible Operator Steering & Compound Approvals
+
+Promoting a draft or approving a plan revision does not require rigid magic words:
+- **Predetermined Word**: A single word `go` (case- and punctuation-insensitive) advances with zero network dependency.
+- **Multilingual Semantic Assent**: Natural approvals in English and Portuguese (*"proceed"*, *"approved"*, *"looks good"*, *"bora"*, *"aprovado"*, *"vai em frente"*, *"manda bala"*) are evaluated server-side via `POST /v1/classify`.
+- **Compound Approvals**: You can approve and give a trailing directive in one breath:
+  - Example: `"go. Make sure to also update the docs."`
+  - `pi-quest` promotes the quest immediately *and* attaches the trailing instruction as an active directive on the new phase.
+
+### Fine-Grained Quest Kinds
+
+When a quest opens, `pi-quest` automatically classifies its objective into specialized kinds:
+
+| Quest Kind | Goal | Verification & Completion Rules |
+| :--- | :--- | :--- |
+| **`feature`** | New capability or subsystem | Requires code diffs, passing tests, and verification receipt. |
+| **`bugfix`** | Defect remediation | Requires regression test receipt and clean exit code 0. |
+| **`refactor`** | Structural code improvement | Requires zero functional regression, passing tests, and boundary check. |
+| **`docs`** | Documentation & guides | Requires modified files (docs/markdown), but binary test runner commands are relaxed. |
+| **`analysis`** | Pure investigation or design audit | Delivers a written `## Analysis` in the quest file. No code diffs or tests required. |
+| **`standard`** | General development task | Default full lifecycle: plan, review, implement, test verification. |
+
+### Analysis $\rightarrow$ Implementation Handoff
+
+When an `analysis` quest concludes and validates, `pi-quest` automatically archives the analysis and outputs an implementation bridge prompt. You or the agent can immediately start the follow-up implementation quest (e.g. `quest_update_state { objective: "Implement recommendations from analysis <qid>..." }`), carrying forward the approved findings.
+
+---
+
+## 3. Model Router (`quest/auto`) & Review Policies
 
 `pi-quest` registers a virtual model, **`quest/auto`**, that dynamically steers each turn to the optimal physical model:
 
@@ -54,12 +92,34 @@ Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable
 
 ---
 
-## 3. Zero-Config Bring-Up & Diagnostics
+## 4. Reviewer Failover & Cooldown Architecture
+
+When a quest enters peer review (in drafting, mid-flight plan revision, or validation), `pi-quest` guarantees that external provider rate limits or quota depletion cannot stall the agent:
+
+- **Automated Fallback Chain**:
+  The review runner dynamically enriches candidate models in prioritized order:
+  1. Configured target model (e.g. `anthropic/claude-sonnet-5-5:low`).
+  2. Thinking-stripped model (e.g. `anthropic/claude-sonnet-5-5`).
+  3. Explicit fallbacks in `roles.reviewer` / `roles.validator`.
+  4. Router default model (`config.router.default`, e.g. `antigravity/gemini-3.8-flash`).
+  5. Active session model (`ctx.model`).
+  6. `{ label: "inherit" }` (omitting the model flag entirely so `pi-subagents` uses its ambient default).
+- **Provider-Level Rate-Limit Skipping & 15m Cooldown**:
+  When a candidate model fails with HTTP `429`, quota exhaustion, or capacity errors (`isRateLimitOrQuotaError`):
+  - Records a 15-minute cooldown on the model key, its stripped variant, and the provider prefix (`provider:<prov>`, e.g. `provider:anthropic`).
+  - All subsequent candidate models under the same provider namespace are immediately skipped without wasting network requests or timing out.
+  - The reviewer immediately fails over to an independent provider (e.g. `antigravity/gemini-3.8-flash`) or `{ label: "inherit" }`, returning a timely verdict.
+
+---
+
+## 5. Zero-Config Bring-Up & Diagnostics
 
 `pi-quest` operates with zero manual configuration:
 - **Automatic Daemon Start**: Automatically detects and launches `axil-auren` on port 4242 for local intent evaluation.
+- **Embedding-Only Model Provisioning & Visual Status**: Automatically downloads only the required fast embedding model (`bge-base`, 117 MB). Unused inference/chat models (`qwen`, `olmoe`) are never downloaded. Non-blocking download progress (`⬇ bge-base (42%)`) and active model status (`⚡ bge-base`) appear in the status bar under `quest-judge`.
 - **Proactive Dependency Checks**: On `session_start`, checks core C engine versions and alerts with remediation steps if anything is outdated.
 - **Deterministic Trigger Words**: Starting a prompt with `quest:`, `task:`, `fix:`, or `feat:` starts the quest instantly with 0ms latency.
+- **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/classify` (~10–20 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` falls back to deterministic local heuristics (explicit trigger words, `/quest`, structural path counts) without invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
 
 ### Diagnostic Command
 ```text
@@ -69,7 +129,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 ---
 
-## 4. The Agent's Tools
+## 6. The Agent's Tools
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
@@ -82,7 +142,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 ---
 
-## 5. Slash Commands Reference
+## 7. Slash Commands Reference
 
 | Command | Shortcut | Description |
 | :--- | :--- | :--- |
@@ -94,7 +154,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 ---
 
-## 6. Development & Testing
+## 8. Development & Testing
 
 ```bash
 npm --prefix .pi/extensions/pi-quest test    # Run full test suite (500+ unit & integration tests)

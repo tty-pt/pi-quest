@@ -3,13 +3,14 @@
 import type { ApprovedBy, ArchivedOutcome, QuestKind, QuestState } from "./quest";
 import { markChanged, requirePhase } from "./quest";
 
-export function createDraft(state: QuestState, draftName: string, kind: QuestKind = "standard"): QuestState {
+export function createDraft(state: QuestState, draftName: string, kind?: QuestKind): QuestState {
   requirePhase(state, "provisional");
   if (state.qid === null) throw new Error("cannot draft without a qid");
-  const analysis = kind === "analysis";
+  const effectiveKind = kind ?? state.kind ?? "standard";
+  const analysis = effectiveKind === "analysis";
   return markChanged(state, {
     phase: "drafting",
-    kind,
+    kind: effectiveKind,
     name: draftName,
     draft: {
       name: draftName,
@@ -73,13 +74,18 @@ export function demoteToImplementing(state: QuestState): QuestState {
 
 // Validating FAIL sends analysis quests back to drafting: the analysis is a
 // draft-like artifact, and implementing would lock the quest doc (D1/D3).
-export function demoteToDrafting(state: QuestState): QuestState {
-  requirePhase(state, "validating");
+// Mid-quest amendments during active work (implementing or validating) also
+// return quests to drafting so the plan can be revised and re-approved.
+export function demoteToDrafting(state: QuestState, exactNextAction?: string): QuestState {
+  requirePhase(state, "validating", "implementing");
+  const defaultAction = exactNextAction ?? (state.kind === "analysis"
+    ? "Revise the delivered analysis to address the findings, then save."
+    : "Revise the draft plan to address findings, then save.");
   return markChanged(state, {
     phase: "drafting",
     draft: state.draft === null ? null : { ...state.draft, outstandingFindings: true, approvedBy: null },
     activeReview: null,
-    exactNextAction: "Revise the delivered analysis to address the findings, then save.",
+    exactNextAction: defaultAction,
   });
 }
 

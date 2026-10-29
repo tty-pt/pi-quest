@@ -18,9 +18,9 @@ import { runIsolatedReview, shouldNoticeReview } from "../review/flow";
 import { cancelReview, hasInFlight, isCurrentReview } from "../review/tracker";
 import { hashContent, parseDraftSections, reviewMaterial, splicePlanSection } from "../drafting/plan-text";
 import { diffPlans } from "../drafting/plan-diff";
+import { interpretUserTurn } from "../domain/intent";
 import { noteDraftUpdated } from "../durability/status";
 
-export const APPROVE_PATTERN = /^\s*approve(?:\s+revision)?\s*[.!]*\s*$/i;
 
 // A failed plan-revision review re-boots the SAME staged target (no marker
 // bump — the revision already has a strict diff baseline and binding), capped
@@ -102,6 +102,8 @@ export async function bootPlanRevisionReview(
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "reviewer"),
+    routerDefault: config.router.default,
+    cooldownMs: config.router.cooldownMs,
     maxDurationMs: Math.min(config.reviewMaxDurationMs, 300000),
     inactivityLimitMs: Math.min(config.reviewInactivityMs, 60000),
   });
@@ -228,15 +230,17 @@ export async function maybeBootPlanRevisionReview(pi: Pi, ctx: PiCtx, note: stri
 // No-reviewer escape hatch: the user adopts the staged revision on their
 // judgment. Agents cannot self-approve — this only fires on user input.
 export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
-  if (!APPROVE_PATTERN.test(text)) return false;
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return false;
+  // Nothing staged and nothing in flight => nothing to approve: skip interpretation entirely.
+  const staged = state.draft.contentHash !== null && state.draft.contentHash !== state.draft.approvedPlanHash;
+  if (!staged && !hasInFlight(state.qid)) return false;
+  const intent = await interpretUserTurn(text, state.phase, await readQuestConfig(ctx.cwd));
+  if (intent.kind !== "advance") return false;
   if (hasInFlight(state.qid)) {
     cancelReview(state.qid);
   }
-  if (state.draft.contentHash === null || state.draft.contentHash === state.draft.approvedPlanHash) {
-    return true;
-  }
+  if (!staged) return true;
   const content = await readPlanFile(ctx, state);
   if (content === null) return false;
   const sections = parseDraftSections(content);

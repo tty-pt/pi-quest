@@ -6,7 +6,7 @@
  * which may not be installed on minimal systems or containers.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
@@ -37,7 +37,7 @@ const PC_ALIASES: Record<EngineName, string[]> = {
   libsepal: ["sepal.pc", "sepallib.pc", "libsepal.pc"],
   liblemma: ["lemma.pc", "liblemma.pc"],
   libjoint: ["joint.pc", "libjoint.pc"],
-  "axil-auren": ["auren.pc", "axil-auren.pc", "axil-qllm.pc", "libaxil-auren.pc"],
+  "axil-auren": ["auren.pc", "axil-auren.pc", "libaxil-auren.pc"],
 };
 
 export type VersionSource = "pkgconfig" | "git" | "daemon" | "fallback";

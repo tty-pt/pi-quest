@@ -147,7 +147,15 @@ export async function archiveActiveQuest(
   }
   replaceState({ ...archived, phase: "idle", qid: null, parentQid: null, snapshotPending: true });
   emitNow(pi);
-  sendSteer(pi, `Quest ${qid} archived as ${outcome} (${zipPath}). No active quest.`);
+  if (archived.kind === "analysis" && outcome === "COMPLETED") {
+    sendSteer(
+      pi,
+      `Analysis quest ${qid} concluded and archived (${zipPath}). ` +
+      `To proceed with implementing the approved findings, call quest_update_state { objective: "Implement recommendations from analysis ${qid}..." } or ask the operator to confirm implementation.`,
+    );
+  } else {
+    sendSteer(pi, `Quest ${qid} archived as ${outcome} (${zipPath}). No active quest.`);
+  }
   return { archivedQid: qid, zipPath, returnedToParent: null };
 }
 
