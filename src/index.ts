@@ -54,22 +54,31 @@ export default function install(pi: Pi): void {
 
         if (cfg.embedMode === "off") return;
         if (cfg.embedUrl && !cfg.embedUrl.includes("4242")) return;
-        const { ensureAuren } = await import("./auren-bootstrap");
+        const { ensureAuren, describeModelStatus } = await import("./auren-bootstrap");
         const confirmFn = ctx.ui ? (m: string) => ctx.ui!.confirm("pi-quest: local model", m) : undefined;
         const told = new Set<string>();
+        const tell = (key: string, text: string, level: "info" | "warning" = "info") => {
+          if (typeof ctx.ui?.notify !== "function" || told.has(key)) return;
+          told.add(key);
+          ctx.ui.notify(text, level);
+        };
         void ensureAuren({
           cwd: ctx.cwd,
           settings: { autoStart: cfg.autoStartAuren, autoDownloadModels: cfg.autoDownloadModels },
           confirm: confirmFn,
           onUpdate: (st) => {
-            if (typeof ctx.ui?.notify === "function") {
-              for (const n of st.notices) {
-                if (n.code === "downloading") continue;
-                const k = `${n.code}:${n.message}`;
-                if (told.has(k)) continue;
-                told.add(k);
-                ctx.ui.notify(`[pi-quest] ${n.message} See: ${n.link}`, n.severity);
-              }
+            const statusText = describeModelStatus(st);
+            ctx.ui?.setStatus?.("quest-judge", statusText);
+            if (st.downloads.length > 0) {
+              const dl = st.downloads[0];
+              tell(`download:${dl.id}`, `[pi-quest] Downloading local embedding model "${dl.id}" for fast in-memory classification...`, "info");
+            }
+            if (st.running && st.activeModel) {
+              tell(`active:${st.activeModel}`, `[pi-quest] Local model active: ${st.activeModel} (port 4242, in-memory classification)`, "info");
+            }
+            for (const n of st.notices) {
+              if (n.code === "downloading") continue;
+              tell(`${n.code}:${n.message}`, `[pi-quest] ${n.message} See: ${n.link}`, n.severity);
             }
           },
         });

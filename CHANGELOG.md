@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fine-grained quest kind classification via embeddings** (`POST /v1/classify`, `src/drafting/kind-exemplars.ts`).
   - `evaluateQuestKind` classifies objectives into `feature`, `bugfix`, `refactor`, `docs`, `analysis`, or `standard`.
   - `assertCompletionEligibility` relaxes binary test commands for `docs` quests (requiring non-empty documentation diffs).
+- **Embedding-Only Model Provisioning & Redundancy Prevention** (`src/auren-bootstrap.ts`):
+  - In `shouldAutoDownload`, restricted automatic model downloads strictly to models declaring embedding capabilities (`capabilities: ["embed"]`), eliminating downloads of heavy, unused inference/chat/judge models (`qwen`, `olmoe`).
+  - In `run`, verified if any embedding model is already present on disk (`~/.models/`); if present, auto-download is skipped entirely. If absent, only the primary preferred embedding model (`bge-base`, 117 MB) is downloaded.
+- **Non-Blocking Visual Feedback on Downloads & Model Usage** (`src/auren-bootstrap.ts`, `src/index.ts`):
+  - Enriched `describeProgress` to report model identifier and progress percentage (`⬇ bge-base (42%)`).
+  - Added `describeModelStatus` reporting download progress during fetching, active model status (`⚡ bge-base`) when running on port 4242, or clearing when idle.
+  - Wired into reserved status bar key `"quest-judge"` with deduplicated, single-shot informational toasts on download start and completion.
 - **Analysis quest direct-to-validating auto-claim & handoff bridge** (`src/drafting/promotion.ts`, `src/views/quest-view.ts`).
   - Review PASS on an `analysis` quest auto-claims completion and moves directly to validation, skipping implementation scaffolding.
   - On conclusion, generates an implementation handoff prompt to seamlessly seed follow-up implementation quests.

@@ -116,6 +116,7 @@ When a quest enters peer review (in drafting, mid-flight plan revision, or valid
 
 `pi-quest` operates with zero manual configuration:
 - **Automatic Daemon Start**: Automatically detects and launches `axil-auren` on port 4242 for local intent evaluation.
+- **Embedding-Only Model Provisioning & Visual Status**: Automatically downloads only the required fast embedding model (`bge-base`, 117 MB). Unused inference/chat models (`qwen`, `olmoe`) are never downloaded. Non-blocking download progress (`⬇ bge-base (42%)`) and active model status (`⚡ bge-base`) appear in the status bar under `quest-judge`.
 - **Proactive Dependency Checks**: On `session_start`, checks core C engine versions and alerts with remediation steps if anything is outdated.
 - **Deterministic Trigger Words**: Starting a prompt with `quest:`, `task:`, `fix:`, or `feat:` starts the quest instantly with 0ms latency.
 - **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/classify` (~10–20 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` falls back to deterministic local heuristics (explicit trigger words, `/quest`, structural path counts) without invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
