@@ -18,12 +18,17 @@ const DRAFT_ONE = `## Requirements
 - first requirement
 - second requirement
 
+## Evidence
+- src/a.ts:1
+- src/b.ts:1
+
 ## Implementation Plan
-Do the work in order.
+1. Step one via src/a.ts:1
+2. Step two via src/b.ts:1
+3. Run make test to verify
 `;
 
-const DRAFT_TWO = `${DRAFT_ONE}Then verify the result.
-`;
+const DRAFT_TWO = `${DRAFT_ONE}4. Additional step via src/a.ts:1\n`;
 
 function resumeSteers(pi: FakePi): string[] {
   return pi.sent
@@ -37,6 +42,9 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 
 async function draftingSetup(qid: Qid, content: string): Promise<{ cwd: string; ctx: ReturnType<typeof fakeCtx> }> {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-resume-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src/a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src/b.ts"), "export const b = 2;\n", "utf8");
   const file = join(cwd, draftPath(qid));
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, content, "utf8");

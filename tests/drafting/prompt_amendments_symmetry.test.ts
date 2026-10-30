@@ -155,8 +155,7 @@ Deno.test("prompt_amendments: injectQuestContext includes compliance criteria in
     | { message?: { content?: unknown } }
     | undefined;
   const impContent = String(impInjected?.message?.content ?? "");
-  check(impContent.includes("[Compliance Criteria]"), "implementing context contains compliance criteria");
-  check(impContent.includes("Zero Placeholders"), "implementing context includes validation rules");
+  check(!impContent.includes("[Compliance Criteria]"), "implementing context slims compliance criteria");
 
   replaceState(IDLE_STATE);
 });

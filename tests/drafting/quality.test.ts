@@ -71,6 +71,20 @@ Deno.test("judgeHasVerificationStep: decomposed embeddings decide, unavailable i
   }
 });
 
+Deno.test("judgeHasVerificationStep: regex fast-path matches standard test commands without network", async () => {
+  const down = stubJudge(null);
+  try {
+    const offCfg = { ...DEFAULT_CONFIG, embedMode: "off" as const };
+    check((await judgeHasVerificationStep(offCfg, "1. Run make test")) === true, "make test fast-path");
+    check((await judgeHasVerificationStep(offCfg, "1. Run pytest tests/")) === true, "pytest fast-path");
+    check((await judgeHasVerificationStep(offCfg, "1. Run cargo test")) === true, "cargo test fast-path");
+    check((await judgeHasVerificationStep(offCfg, "1. Run deno test")) === true, "deno test fast-path");
+    check((await judgeHasVerificationStep(offCfg, "1. assert result.status === 200")) === true, "assert fast-path");
+  } finally {
+    down();
+  }
+});
+
 Deno.test("standard defaults: a cited, stepped, verified plan passes", async () => {
   const cwd = await repo();
   const res = await assessDraftQuality(fakeCtx(cwd), DEFAULT_CONFIG, sections(PLAN), "standard", "standard");

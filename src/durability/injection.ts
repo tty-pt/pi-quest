@@ -31,7 +31,7 @@ function contextLine(state: QuestState): string {
     line += `\n[Active Sub-Quests]: ${runningChildren.map((c) => `${c.qid} (${c.brief})`).join(", ")}`;
   }
 
-  if (state.phase === "drafting" || state.phase === "implementing") {
+  if (state.phase === "drafting") {
     const criteria = getReviewCriteriaSummary(state.phase, state.kind);
     line += `\n[Compliance Criteria]\n${criteria}`;
   }
