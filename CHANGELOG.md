@@ -5,6 +5,15 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.3] - 2026-10-30
+
+### Fixed
+- **Daemon unavailability and hung-socket freeze prevention via circuit breaker** (`src/judge/circuit.ts`, `src/judge/embed.ts`, `src/judge/nearest.ts`).
+  - Added shared circuit breaker wrapper `withCircuitBreaker` with in-memory failure backoff (`CIRCUIT_BACKOFF_MS = 30_000`), tight default timeout (`DEFAULT_CLASSIFY_TIMEOUT_MS = 250`), and fail-open handling.
+  - When `axil-auren` is not running or a connection refuses/times out, the circuit breaker immediately trips for that daemon base URL. Subsequent calls within the cooldown window return `null` immediately (measured at ~1 µs, 0 ms overhead) without initiating network or socket requests.
+  - Enforced daemon-wide scope so that `/v1/classify` unavailability prevents redundant connection attempts to `/v1/embeddings`.
+  - Added `tests/judge/circuit_breaker.test.ts` verifying connection refusal fast-fail, timeout abort, and manual/success circuit reset.
+
 ## [1.9.2] - 2026-10-30
 
 ### Added

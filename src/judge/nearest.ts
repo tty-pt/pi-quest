@@ -7,7 +7,15 @@
 // detection, difficulty and any other categorical decision share this one engine;
 // none of them owns a vector, a cache or a cosine of its own.
 import { type QuestConfig } from "../config.ts";
-import { cosine, embedBaseUrl, embedTexts } from "./embed.ts";
+import {
+  cosine,
+  DEFAULT_CLASSIFY_TIMEOUT_MS,
+  embedBaseUrl,
+  embedTexts,
+  isCircuitOpen,
+  recordCircuitFailure,
+  withCircuitBreaker,
+} from "./embed.ts";
 
 export type ExemplarTable = Readonly<Record<string, readonly string[]>>;
 export interface Exemplar {
@@ -95,35 +103,37 @@ async function classifyViaEndpoint(
   }
 
   const url = `${base.replace(/\/+$/, "")}/v1/classify`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const res = await fetchFn(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, text, labels }),
-      signal: controller.signal,
-    });
-    if (!res.ok) return null;
-    const body = await res.json() as {
-      choice?: string;
-      similarity?: number;
-      margin?: number;
-    };
-    if (typeof body.choice === "string" && typeof body.similarity === "number" && typeof body.margin === "number") {
-      return {
-        kind: body.choice,
-        similarity: body.similarity,
-        margin: body.margin,
+  return await withCircuitBreaker(
+    base,
+    async (signal) => {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, text, labels }),
+        signal,
+      });
+      if (res.status >= 500) {
+        recordCircuitFailure(base);
+        return null;
+      }
+      if (!res.ok) return null;
+      const body = await res.json() as {
+        choice?: string;
+        similarity?: number;
+        margin?: number;
       };
-    }
-    return null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+      if (typeof body.choice === "string" && typeof body.similarity === "number" && typeof body.margin === "number") {
+        return {
+          kind: body.choice,
+          similarity: body.similarity,
+          margin: body.margin,
+        };
+      }
+      return null;
+    },
+    { timeoutMs },
+  );
 }
 
 /** Nearest-example verdict for `text`, or null when embeddings are unavailable. */
@@ -131,26 +141,33 @@ export async function nearestExemplar(
   cfg: QuestConfig,
   examples: readonly Exemplar[],
   text: string,
+  fetchFn?: typeof fetch,
 ): Promise<NearestVerdict | null> {
   const base = embedBaseUrl(cfg);
   if (base === null || examples.length === 0) return null;
+  if (isCircuitOpen(base)) return null;
 
   // Try fast in-memory server-side classification endpoint first (<15ms, zero float vectors over TCP)
+  const timeoutMs = Math.min(cfg.judgeTimeoutMs || DEFAULT_CLASSIFY_TIMEOUT_MS, 500);
   const serverChoice = await classifyViaEndpoint(
     base,
     cfg.embedModel,
     examples,
     text,
-    Math.max(cfg.judgeTimeoutMs || 2000, 2000),
+    timeoutMs,
+    fetchFn,
   );
   if (serverChoice !== null) {
     return serverChoice;
   }
 
-  // Graceful fallback to client-side vector batching if endpoint is unsupported/down
+  // Graceful fallback to client-side vector batching if endpoint is unsupported/down,
+  // but if the daemon is offline the circuit breaker has already tripped.
+  if (isCircuitOpen(base)) return null;
+
   const index = await exemplarIndex(cfg, base, examples);
   if (index === null) return null;
-  const vec = await embedTexts(cfg, [text]);
+  const vec = await embedTexts(cfg, [text], { fetchFn });
   const probe = vec?.[0];
   if (probe === undefined) return null;
   const best = new Map<string, number>();
