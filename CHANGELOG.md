@@ -5,6 +5,15 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-10-30
+
+### Added
+- **Corrective bug reports and negative behavioral directives recognition** (`src/drafting/quest-exemplars.ts`, `src/drafting/judge.ts`, `src/drafting/kind-exemplars.ts`).
+  - Expanded `QUEST_EXEMPLARS.quest` with bilingual (EN/PT) exemplars for corrective directives ("You shouldn't draw X as Y, draw Z", "It shouldn't do X, do Y instead"), negative behavioral specifications ("Don't do X, do Y", "When X happens it shouldn't Y"), and rendering/logic bug observations ("The items are showing up as ephemeral objects instead of stones").
+  - Added `isCorrectiveOrBugHeuristic(text)` in `src/drafting/judge.ts` routed through the fallback and heuristic paths of `evaluateQuestIntent`, ensuring corrective directives are recognized deterministically when the classifier server is offline or in heuristic mode (`judgeFallback: "heuristic"`), without pre-empting embedding evaluation when online.
+  - Expanded `KIND_EXEMPLARS.bugfix` in `src/drafting/kind-exemplars.ts` with corrective and negative bug exemplars so detected corrective directives classify accurately as `kind: "bugfix"`.
+  - Added unit test suite in `tests/quest_intent.test.ts` covering mock embeddings, fallback heuristics, negative conversation controls, and kind classification.
+
 ## [1.9.1] - 2026-10-29
 
 ### Added

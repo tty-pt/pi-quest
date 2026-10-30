@@ -22,6 +22,12 @@ export const KIND_EXEMPLARS: Record<string, string[]> = {
     "Corrigir o segmentation fault ao abrir o socket",
     "Consertar o vazamento de memória no loop de eventos",
     "Resolver o bug de concorrência na fila de tarefas",
+    "You shouldn't draw as an ephemeral item something that's supposed to be a stone or a rock. If it is a stone or a rock or a stone, just draw that.",
+    "It shouldn't do X when Y, it should do Z instead",
+    "The items are showing up as ephemeral objects instead of stones",
+    "Não devias desenhar pedras como itens efémeros. Se for uma pedra ou rocha, desenha isso.",
+    "Não devia acontecer X quando Y, devia fazer Z em vez disso.",
+    "As pedras estão a aparecer como itens efémeros em vez de rochas",
   ],
   feature: [
     "Implement WebSocket real-time subscription endpoint",
