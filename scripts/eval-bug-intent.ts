@@ -1,6 +1,6 @@
 import { QUEST_EXEMPLARS } from "../src/drafting/quest-exemplars.ts";
 import { KIND_EXEMPLARS } from "../src/drafting/kind-exemplars.ts";
-import { evaluateQuestIntent, isCorrectiveOrBugHeuristic } from "../src/drafting/judge.ts";
+import { evaluateQuestIntent } from "../src/drafting/judge.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../src/config.ts";
 
 interface Case {
@@ -163,7 +163,7 @@ async function runBenchmark() {
   let convCount = 0;
   const latencies: number[] = [];
 
-  const results: Array<{ text: string; want: string; got: string; ms: number; heuristic: boolean }> = [];
+  const results: Array<{ text: string; want: string; got: string; ms: number }> = [];
 
   for (const c of CASES) {
     const start = performance.now();
@@ -182,14 +182,11 @@ async function runBenchmark() {
       convCount++;
     }
 
-    const heurMatch = isCorrectiveOrBugHeuristic(c.text);
-
     results.push({
       text: c.text,
       want: c.want,
       got,
       ms,
-      heuristic: heurMatch,
     });
   }
 
@@ -209,7 +206,7 @@ async function runBenchmark() {
 
   for (const r of results) {
     const mark = r.got === r.want ? "✓ PASS" : "✗ FAIL";
-    console.log(`[${mark}] [want: ${r.want}, got: ${r.got}] [heur: ${r.heuristic ? "YES" : "NO"}] (${r.ms.toFixed(0)}ms)`);
+    console.log(`[${mark}] [want: ${r.want}, got: ${r.got}] (${r.ms.toFixed(0)}ms)`);
     console.log(`       "${r.text}"\n`);
   }
 }

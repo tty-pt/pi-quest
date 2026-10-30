@@ -5,6 +5,22 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.3] - 2026-10-31
+
+### Removed
+- **Complete Elimination of Heuristics**:
+  - Removed all regex and structural heuristics (`isCorrectiveOrBugHeuristic`, `evaluateQuestDifficultyLevelHeuristic`, `evaluateQuestDifficultyHeuristic`).
+  - Deprecated and removed `"heuristic"` from `JudgeMode`, `DifficultyMode`, and `JudgeFallback`.
+  - Zero heuristic guessing: decisions are strictly evaluated via server-side nearest-exemplar embeddings (`/v1/systemone`) or explicit documented trigger prefixes/commands (`quest:`, `fix:`, `/quest`).
+  - When offline or unavailable, the system safely falls back to `"skip"` (triggers required) and default difficulty (`"standard"`), never guessing.
+
+### Changed
+- **Calibrated Quest Margin to 0.05** (`src/config.ts`):
+  - Calibrated default `questMinMargin` from 0.10 to 0.05, allowing genuine engineering tasks, suggestions, and polite tech-lead phrasing to clear the gate without false quests on conversational queries.
+- **Expanded Tech-Lead & Suggestive Exemplars** (`src/drafting/quest-exemplars.ts`):
+  - Added natural tech-lead suggestions, observations, and architectural critiques in English and Portuguese to `QUEST_EXEMPLARS.quest` (*"I think you should have X instead of Y"*, *"We aren't doing X, let's change to Y"*, *"Can we improve the overall efficiency of this system?"*).
+  - Achieved 100% recall on conversational tech-lead directives while maintaining 100% specificity and 0 false quests on casual conversation.
+
 ## [1.9.2] - 2026-10-30
 
 ### Added

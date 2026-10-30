@@ -105,28 +105,25 @@ Deno.test("operator questExemplars extend the shipped ones", async () => {
   }
 });
 
-Deno.test("embeddings down falls to the structural fallback", async () => {
+Deno.test("embeddings down falls to skip fallback", async () => {
   fresh();
   const bothDown = stubJudgeFetch(() => null);
   try {
-    const r = await evaluateQuestIntent("build me a thing", { ...ON, embedMode: "off", judgeFallback: "heuristic" });
-    check(r.isQuest === false && r.source === "heuristic" && r.degraded === true, "structural fallback, degraded");
-    const header = await evaluateQuestIntent("# Quest: do it", { ...ON, embedMode: "off", judgeFallback: "heuristic" });
-    check(header.isQuest === true, "a pasted quest header still counts");
+    const r = await evaluateQuestIntent("build me a thing", { ...ON, embedMode: "off" });
+    check(r.isQuest === false && r.source === "skip" && r.degraded === true, "skip fallback, degraded");
   } finally {
     bothDown();
     fresh();
   }
 });
 
-Deno.test("judgeMode off or heuristic never calls the embeddings server", async () => {
+Deno.test("judgeMode off never calls the embeddings server", async () => {
   fresh();
   let embedCalls = 0;
   const real = globalThis.fetch;
   globalThis.fetch = (() => { embedCalls += 1; return Promise.resolve(new Response("x", { status: 500 })); }) as typeof fetch;
   try {
     check((await evaluateQuestIntent("fix the thing", { ...ON, judgeMode: "off" })).isQuest === false, "off => no quest");
-    check((await evaluateQuestIntent("# Quest: x", { ...ON, judgeMode: "heuristic" })).isQuest === true, "heuristic header");
     check(embedCalls === 0, `no network, got ${embedCalls} calls`);
   } finally {
     globalThis.fetch = real;

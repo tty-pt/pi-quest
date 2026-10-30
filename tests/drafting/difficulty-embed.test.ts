@@ -97,19 +97,19 @@ Deno.test("operator difficultyExemplars extend the shipped ones", async () => {
   }
 });
 
-Deno.test("embeddings down falls to the structural heuristic", async () => {
+Deno.test("embeddings down falls to default difficulty", async () => {
   fresh();
   const bothDown = stubJudgeFetch(() => null);
   try {
     const r = await evaluateQuestDifficulty("touch a.ts b.ts c.ts d.ts", { ...ON, embedMode: "off" });
-    check(r.difficulty === "complex" && r.source === "heuristic" && r.degraded === true, "structural fallback, degraded");
+    check(r.difficulty === "standard" && r.source === "default" && r.degraded === true, "default fallback, degraded");
   } finally {
     bothDown();
     fresh();
   }
 });
 
-Deno.test("difficultyMode off or heuristic never uses embeddings; auto does", async () => {
+Deno.test("difficultyMode off never uses embeddings; auto does", async () => {
   fresh();
   let embedCalls = 0;
   const real = globalThis.fetch;
@@ -119,8 +119,7 @@ Deno.test("difficultyMode off or heuristic never uses embeddings; auto does", as
   }) as typeof fetch;
   try {
     await evaluateQuestDifficulty("x", { ...ON, difficultyMode: "off" });
-    await evaluateQuestDifficulty("x", { ...ON, difficultyMode: "heuristic" });
-    check(embedCalls === 0, `no embedding calls outside auto, got ${embedCalls}`);
+    check(embedCalls === 0, `no embedding calls when off, got ${embedCalls}`);
     await evaluateQuestDifficulty("x", ON);
     check(embedCalls > 0, "auto consults embeddings first");
   } finally {

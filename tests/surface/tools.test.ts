@@ -583,10 +583,10 @@ Deno.test("quest_update_state infers or overrides difficulty tier", async () => 
   const pi = fakePi();
   const ctx = fakeCtx(tmp());
   try {
-    // 1. Inferred from prompt (judge-less fallback is structural: many files => complex)
+    // 1. Defaults to standard when offline (zero heuristics)
     const created = await applyUpdate(pi, ctx, { objective: "Update src/a.ts src/b.ts src/c.ts src/d.ts" });
     check(created.applied.length === 1, "quest created");
-    check(getState().difficulty === "complex", "inferred complex from many file references");
+    check(getState().difficulty === "standard", "defaults to standard when judge offline");
 
     // 2. Explicit update of difficulty
     const updated = await applyUpdate(pi, ctx, { difficulty: "trivial" });

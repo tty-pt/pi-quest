@@ -126,7 +126,7 @@ Deno.test("embedding defaults work out of the box (bge-base)", () => {
   check(d.embedUrl === "http://127.0.0.1:4242", "local auren by default");
   check(d.intentMinMargin === 0.075 && d.intentMinSimilarity === 0.6, "calibrated intent thresholds");
   check(Object.keys(d.intentExemplars).length === 0, "no operator exemplars by default");
-  check(d.questMinMargin === 0.1, "quest detection margin calibrated on held-out corpus B");
+  check(d.questMinMargin === 0.05, "quest detection margin calibrated to 0.05");
   check(Object.keys(d.questExemplars).length === 0, "no operator quest exemplars by default");
   check(d.difficultyMinMargin === 0.075, "difficulty margin validated on held-out corpus C");
   check(Object.keys(d.difficultyExemplars).length === 0, "no operator difficulty exemplars by default");
@@ -155,5 +155,5 @@ Deno.test("intent and embedding settings are configurable and validated", () => 
   const bad = loadConfig({ intentMinMargin: 5, intentMinSimilarity: -1, embedMode: "maybe" });
   check(bad.embedMode === "auto" || Deno.env.get("PI_QUEST_EMBED_MODE") === "off", "unknown embedMode never means off by itself");
   check(bad.intentMinMargin === 0.075 && bad.intentMinSimilarity === 0.6, "out-of-range thresholds fall back");
-  check(loadConfig({ questMinMargin: 9 }).questMinMargin === 0.1, "out-of-range questMinMargin falls back");
+  check(loadConfig({ questMinMargin: 9 }).questMinMargin === 0.05, "out-of-range questMinMargin falls back");
 });

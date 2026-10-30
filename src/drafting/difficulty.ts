@@ -1,7 +1,7 @@
 // HIGH_LEVEL: #drafting — pure embedding difficulty evaluation.
-// Classifies requests into trivial, standard, or complex using
-// nearest-exemplar embeddings, falling back to deterministic structural rules.
-import { difficultyName, type QuestDifficulty } from "../domain/quest.ts";
+// Classifies requests into trivial, minor, standard, major, or complex using
+// nearest-exemplar embeddings, falling back to deterministic default configuration.
+import type { QuestDifficulty } from "../domain/quest.ts";
 import { type QuestConfig } from "../config.ts";
 import { gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
 import { DIFFICULTY_EXEMPLARS, DIFFICULTY_KINDS } from "./difficulty-exemplars.ts";
@@ -21,28 +21,9 @@ export const DIFFICULTY_QUESTION = {
   ],
 };
 
-/**
- * Structural 5-tier heuristic: evaluates file counts and keywords to determine difficulty level (1..5).
- * Free-form wording is never guessed without embeddings.
- */
-export function evaluateQuestDifficultyLevelHeuristic(prompt: string): number {
-  const trimmed = prompt.trim();
-  const pathMatches = new Set(trimmed.match(/[a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+/g) ?? []);
-  const fileCount = pathMatches.size;
-
-  if (fileCount >= 4 || /\b(?:architecture|redesign|overhaul|migrate database|rewrite core|split into services|protocol overhaul)\b/i.test(trimmed)) {
-    return 5;
-  }
-  return 3;
-}
-
-export function evaluateQuestDifficultyHeuristic(prompt: string): QuestDifficulty {
-  return difficultyName(evaluateQuestDifficultyLevelHeuristic(prompt));
-}
-
 export interface QuestDifficultyResult {
   difficulty: QuestDifficulty;
-  source: "embed" | "heuristic" | "default" | "judge";
+  source: "embed" | "default" | "judge";
   degraded?: boolean;
   reason?: string;
 }
@@ -79,28 +60,17 @@ export async function evaluateQuestDifficulty(
     };
   }
 
-  // 2. Pure heuristic mode (no network)
-  if (cfg.difficultyMode === "heuristic") {
-    const diff = evaluateQuestDifficultyHeuristic(prompt);
-    return {
-      difficulty: diff,
-      source: "heuristic",
-      reason: "Evaluated via local heuristic rules",
-    };
-  }
-
-  // 3. Auto mode: embeddings decide when available (deterministic, ~15 ms).
+  // 2. Auto mode: embeddings decide when available (deterministic, ~15 ms).
   const embedded = await classifyDifficultyByEmbedding(prompt, cfg);
   if (embedded !== null) {
     return { difficulty: embedded, source: "embed", reason: "Nearest difficulty exemplar (embeddings)" };
   }
 
-  // 4. Deterministic offline fallback
-  const diff = evaluateQuestDifficultyHeuristic(prompt);
+  // 3. Fallback: configured default (deterministic)
   return {
-    difficulty: diff,
-    source: "heuristic",
+    difficulty: cfg.defaultDifficulty,
+    source: "default",
     degraded: true,
-    reason: "Embeddings unavailable; fell back to local heuristic",
+    reason: "Embeddings unavailable; fell back to default difficulty",
   };
 }

@@ -10,7 +10,7 @@ import type { QuestKind } from "../domain/quest.ts";
 
 export interface QuestIntentResult {
   isQuest: boolean;
-  source: "embed" | "heuristic" | "llm";
+  source: "embed" | "skip" | "llm";
   degraded?: boolean;
   reason?: string;
 }
@@ -66,29 +66,6 @@ export async function classifyQuestByEmbedding(prompt: string, cfg: QuestConfig)
   }) as "quest" | "conversation";
 }
 
-const CORRECTIVE_DIRECTIVE_PATTERN =
-  /\b(?:you\s+shouldn'?t|it\s+shouldn'?t|should\s+not|don'?t|never)\b[\s\S]*?\b(?:instead|just|rather|should|must|draw|render|display|use|make|fix)\b/i;
-
-const BUG_REPORT_PATTERN =
-  /\b(?:there\s+is\s+a\s+bug|we\s+have\s+a\s+bug|this\s+is\s+a\s+bug)\b|\b(?:showing\s+up|appearing|rendered|drawn)\s+as\b[\s\S]*?\binstead\s+of\b|\b(?:supposed\s+to\s+be)\b[\s\S]*?\b(?:just|instead|not|rather)\b/i;
-
-const PT_CORRECTIVE_DIRECTIVE_PATTERN =
-  /\b(?:não\s+devia[s]?|não\s+deve|não\s+faças|não\s+uses)\b[\s\S]*?\b(?:em\s+vez|faz|desenha|mostra|usa|corrige|apenas|devia|deve)\b/i;
-
-const PT_BUG_REPORT_PATTERN =
-  /\b(?:há\s+um\s+bug|temos\s+um\s+bug|isto\s+é\s+um\s+bug)\b|\b(?:a\s+aparecer|a\s+desenhar|renderizado)\s+como\b[\s\S]*?\bem\s+vez\s+de\b|\b(?:suposto\s+ser)\b[\s\S]*?\b(?:em\s+vez|não)\b/i;
-
-export function isCorrectiveOrBugHeuristic(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length < 10) return false;
-  return (
-    CORRECTIVE_DIRECTIVE_PATTERN.test(trimmed) ||
-    BUG_REPORT_PATTERN.test(trimmed) ||
-    PT_CORRECTIVE_DIRECTIVE_PATTERN.test(trimmed) ||
-    PT_BUG_REPORT_PATTERN.test(trimmed)
-  );
-}
-
 export async function evaluateQuestIntent(
   prompt: string,
   cfg: QuestConfig,
@@ -96,16 +73,10 @@ export async function evaluateQuestIntent(
 ): Promise<QuestIntentResult> {
   // 1. Off mode
   if (cfg.judgeMode === "off") {
-    return { isQuest: false, source: "heuristic", reason: "Judge mode is off" };
+    return { isQuest: false, source: "skip", reason: "Judge mode is off" };
   }
 
-  // 2. Explicit heuristic mode (opt-in legacy)
-  if (cfg.judgeMode === "heuristic") {
-    const isQuest = isQuestLikeRequest(prompt) || isCorrectiveOrBugHeuristic(prompt);
-    return { isQuest, source: "heuristic", reason: isQuest ? "Matched quest heuristic" : "Did not match quest heuristic" };
-  }
-
-  // 3. Embeddings decide when available: deterministic, ~15 ms, and 0 false quests on held-out corpora.
+  // 2. Embeddings decide when available: deterministic, ~15 ms, and 0 false quests on held-out corpora.
   const embedded = await classifyQuestByEmbedding(prompt, cfg);
   if (embedded !== null) {
     return {
@@ -115,15 +86,10 @@ export async function evaluateQuestIntent(
     };
   }
 
-  // 4. Deterministic offline fallback (exact structural trigger or skip)
-  if (cfg.judgeFallback === "heuristic") {
-    const isQuest = isQuestLikeRequest(prompt) || isCorrectiveOrBugHeuristic(prompt);
-    return { isQuest, source: "heuristic", degraded: true, reason: "Embeddings unavailable; fallback=heuristic" };
-  }
-
+  // 3. Offline fallback (triggers or /quest required)
   return {
     isQuest: false,
-    source: "heuristic",
+    source: "skip",
     degraded: true,
     reason: "Embeddings unavailable; fallback=skip (triggers or /quest required)",
   };

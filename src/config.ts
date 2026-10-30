@@ -14,7 +14,7 @@ export interface DraftThresholds {
 }
 
 export type EmbedMode = "auto" | "off";
-export type DifficultyMode = "auto" | "judge" | "heuristic" | "off";
+export type DifficultyMode = "auto" | "judge" | "off";
 
 export type DifficultyThresholds = Record<QuestDifficulty, DraftThresholds>;
 
@@ -31,9 +31,9 @@ export interface InterfaceBindings {
 }
 
 export type StatusStyle = "icon" | "text";
-export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
+export type JudgeMode = "auto" | "systemone" | "off";
 export type JudgeProtocol = "auto" | "systemzero" | "systemone";
-export type JudgeFallback = "heuristic" | "skip";
+export type JudgeFallback = "skip";
 export type ReviewPolicy = "strict" | "balanced" | "off";
 
 export interface LintRule {
@@ -198,7 +198,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   judgeUrl: undefined,
   judgeModel: "olmoe",
   judgeKey: undefined,
-  judgeFallback: "heuristic",
+  judgeFallback: "skip",
   judgeTimeoutMs: 6000,
   embedMode: "auto",
   embedUrl: undefined,
@@ -206,7 +206,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   intentMinMargin: 0.075,
   intentMinSimilarity: 0.6,
   intentExemplars: {},
-  questMinMargin: 0.1,
+  questMinMargin: 0.05,
   questExemplars: {},
   difficultyMinMargin: 0.075,
   difficultyExemplars: {},
@@ -285,7 +285,7 @@ function loadJudgeConfig(record: Record<string, unknown>): {
 } {
   const rawJudgeMode = record["judgeMode"] ?? getEnv("PI_QUEST_JUDGE_MODE") ?? getEnv("PI_MM_JUDGE_MODE");
   const judgeMode: JudgeMode =
-    rawJudgeMode === "auto" || rawJudgeMode === "systemone" || rawJudgeMode === "heuristic" || rawJudgeMode === "off"
+    rawJudgeMode === "auto" || rawJudgeMode === "systemone" || rawJudgeMode === "off"
       ? rawJudgeMode
       : DEFAULT_CONFIG.judgeMode;
 
@@ -317,7 +317,7 @@ function loadJudgeConfig(record: Record<string, unknown>): {
 
   const rawJudgeFallback = record["judgeFallback"] ?? getEnv("PI_QUEST_JUDGE_FALLBACK");
   const judgeFallback: JudgeFallback =
-    rawJudgeFallback === "heuristic" || rawJudgeFallback === "skip"
+    rawJudgeFallback === "skip"
       ? rawJudgeFallback
       : DEFAULT_CONFIG.judgeFallback;
 
@@ -428,7 +428,7 @@ export function loadConfig(raw: unknown): QuestConfig {
 
   const rawDiffMode = record["difficultyMode"] ?? getEnv("PI_QUEST_DIFFICULTY_MODE");
   const difficultyMode: DifficultyMode =
-    rawDiffMode === "auto" || rawDiffMode === "judge" || rawDiffMode === "heuristic" || rawDiffMode === "off"
+    rawDiffMode === "auto" || rawDiffMode === "judge" || rawDiffMode === "off"
       ? rawDiffMode
       : DEFAULT_CONFIG.difficultyMode;
 
