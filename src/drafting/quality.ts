@@ -38,10 +38,10 @@ export async function evaluateVerificationDecomposed(config: QuestConfig, plan: 
   if (steps.length === 0) return null;
 
   const examples = mergeExemplars(VERIFICATION_EXEMPLARS, {});
+  const verdicts = await Promise.all(steps.map((step) => nearestExemplar(config, examples, step)));
   let anyEvaluated = false;
 
-  for (const step of steps) {
-    const verdict = await nearestExemplar(config, examples, step);
+  for (const verdict of verdicts) {
     if (!verdict) continue;
     anyEvaluated = true;
     if (VERIFY_CLUSTERS.has(verdict.kind) && verdict.similarity >= 0.50 && verdict.margin >= 0.05) {

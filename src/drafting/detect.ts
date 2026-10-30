@@ -58,8 +58,10 @@ export async function detectSubstantiveRequest(
   const trigger = matchTriggerPrefix(trimmed, cfg.triggerPrefixes);
   if (trigger.matched) {
     const objective = trigger.objective;
-    const diff = await evaluateQuestDifficulty(objective, cfg);
-    const kind = await evaluateQuestKind(objective, cfg);
+    const [diff, kind] = await Promise.all([
+      evaluateQuestDifficulty(objective, cfg),
+      evaluateQuestKind(objective, cfg),
+    ]);
     const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
     replaceState(createQuest(objective, qid, null, diff.difficulty, kind));
     const context = extractRecentConversationContext(ctx);
@@ -90,8 +92,10 @@ export async function detectSubstantiveRequest(
 
   if (!isQuest) return false;
 
-  const diff = await evaluateQuestDifficulty(trimmed, cfg);
-  const kind = await evaluateQuestKind(trimmed, cfg);
+  const [diff, kind] = await Promise.all([
+    evaluateQuestDifficulty(trimmed, cfg),
+    evaluateQuestKind(trimmed, cfg),
+  ]);
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
   replaceState(createQuest(trimmed, qid, null, diff.difficulty, kind));
   const context = extractRecentConversationContext(ctx);
