@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.9.2] - 2026-10-30
 
 ### Added
+- **Unified `POST /v1/systemone` Decision Integration** (`src/judge/nearest.ts`, `src/judge/choice.ts`):
+  - Updated nearest-exemplar classification to target the unified `POST /v1/systemone` endpoint in `axil-auren`.
+  - Supports both `decision` and `choice` response fields with calibrated confidence scoring.
+  - Cleaned up obsolete `/v1/classify` references while maintaining the fast circuit-breaker protected path (<15ms) and local heuristic fallbacks.
 - **Persistent Idle Status and Sub-Quest Depth Display** (`src/durability/status.ts`):
   - `questStatus` renders `💤 idle [^Q]` in dim styling when no quest is active (`qid: null`), keeping the quest status slot anchored instead of clearing it.
   - Sub-quests display their hierarchy depth appended to the quest identifier (`${icon} ${qid}:${depth} [^Q]`, e.g. `🔨 1xMjwo:1 [^Q]`).
