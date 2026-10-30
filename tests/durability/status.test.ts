@@ -7,7 +7,7 @@ import type { Qid } from "../../src/domain/qid.ts";
 import { noteDraftUpdated, questStatus, refreshStatus } from "../../src/durability/index.ts";
 
 Deno.test("status shows one icon per phase", () => {
-  check(questStatus(IDLE_STATE) === undefined, "idle quest is silent");
+  check(questStatus(IDLE_STATE) === "💤 idle", "idle quest shows 💤 idle");
   const cases = [
     ["provisional", "🔍"],
     ["drafting", "📝"],
@@ -19,13 +19,27 @@ Deno.test("status shows one icon per phase", () => {
     const text = questStatus({ ...IDLE_STATE, phase, qid: "abc123" as Qid });
     check(text === `${icon} abc123`, `${phase} maps to ${icon} without the phase word`);
   }
-  check(questStatus({ ...IDLE_STATE, phase: "idle", qid: null }) === undefined, "no qid stays silent");
+  check(questStatus({ ...IDLE_STATE, phase: "idle", qid: null }) === "💤 idle", "no qid shows 💤 idle");
 });
 
 Deno.test("status text mode puts the phase where the icon goes", () => {
   const text = questStatus({ ...IDLE_STATE, phase: "drafting", qid: "abc123" as Qid }, "text");
   check(text === "drafting abc123", "phase word plus qid");
-  check(questStatus(IDLE_STATE, "text") === undefined, "text mode silent without quest");
+  check(questStatus(IDLE_STATE, "text") === "idle", "text mode shows idle without quest");
+});
+
+Deno.test("status displays sub-quest depth when depth > 0", () => {
+  const root = questStatus({ ...IDLE_STATE, phase: "implementing", qid: "1xMjwo" as Qid, depth: 0 });
+  check(root === "🔨 1xMjwo", "root quest has no depth suffix");
+
+  const child = questStatus({ ...IDLE_STATE, phase: "implementing", qid: "1xMjwo" as Qid, depth: 1 });
+  check(child === "🔨 1xMjwo:1", "child sub-quest shows :1");
+
+  const grandchild = questStatus({ ...IDLE_STATE, phase: "implementing", qid: "1xMjwo" as Qid, depth: 2 });
+  check(grandchild === "🔨 1xMjwo:2", "grandchild sub-quest shows :2");
+
+  const childText = questStatus({ ...IDLE_STATE, phase: "implementing", qid: "1xMjwo" as Qid, depth: 1 }, "text");
+  check(childText === "implementing 1xMjwo:1", "text mode displays depth suffix");
 });
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -105,6 +119,6 @@ Deno.test("blink stays silent without an active quest", async () => {
   });
   noteDraftUpdated(ctx, { intervalMs: 10, windowMs: 25 });
   await sleep(40);
-  check(calls.length > 0, "idle still clears the bar");
-  check(calls.every((text) => text === undefined), "idle never renders the hint");
+  check(calls.length > 0, "idle still asserts status");
+  check(calls.every((text) => text?.includes("💤 idle")), "idle never flashes, stays idle");
 });

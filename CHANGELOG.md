@@ -5,6 +5,33 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-10-30
+
+### Added
+- **Unified `POST /v1/systemone` Decision Integration** (`src/judge/nearest.ts`, `src/judge/choice.ts`):
+  - Updated nearest-exemplar classification to target the unified `POST /v1/systemone` endpoint in `axil-auren`.
+  - Supports both `decision` and `choice` response fields with calibrated confidence scoring.
+  - Cleaned up obsolete `/v1/classify` references while maintaining the fast circuit-breaker protected path (<15ms) and local heuristic fallbacks.
+- **Persistent Idle Status and Sub-Quest Depth Display** (`src/durability/status.ts`):
+  - `questStatus` renders `💤 idle [^Q]` in dim styling when no quest is active (`qid: null`), keeping the quest status slot anchored instead of clearing it.
+  - Sub-quests display their hierarchy depth appended to the quest identifier (`${icon} ${qid}:${depth} [^Q]`, e.g. `🔨 1xMjwo:1 [^Q]`).
+- **Unified Model Status Slot & Disconnected Power-Off State** (`src/auren-bootstrap.ts`, `src/index.ts`):
+  - Standardized local model status widget on shared slot ID `"auren-model"` with `AUREN_STATUS_SLOT`.
+  - Added `"🔌 off"` state in `describeModelStatus` when the daemon is offline or disconnected, replacing invisible cleared slots with explicit power-off feedback.
+- **Daemon Circuit Breaker & Resilient Timeout Wrapper** (`src/judge/circuit.ts`, `src/judge/embed.ts`, `src/judge/nearest.ts`):
+  - Added shared circuit breaker wrapper `withCircuitBreaker` protecting all `axil-auren` calls against connection refusal, hung sockets, and daemon downtime.
+  - Implemented fast-fail backoff (`CIRCUIT_BACKOFF_MS = 30_000`) and tight default timeout (`DEFAULT_CLASSIFY_TIMEOUT_MS = 250`).
+  - When `axil-auren` is offline or times out, the circuit breaker opens daemon-wide; subsequent calls fail fast immediately (~1 µs, 0 ms overhead) without touching the network or socket layer, preventing Pi event loop hangs.
+  - Added unit test suite in `tests/judge/circuit_breaker.test.ts` verifying connection refusal fast-fail, timeout abort, and manual/success circuit reset.
+- **Corrective Bug Reports & Negative Behavioral Directives Recognition** (`src/drafting/quest-exemplars.ts`, `src/drafting/judge.ts`, `src/drafting/kind-exemplars.ts`):
+  - Expanded `QUEST_EXEMPLARS.quest` with bilingual (EN/PT) exemplars for corrective directives ("You shouldn't draw X as Y, draw Z", "It shouldn't do X, do Y instead"), negative behavioral specifications ("Don't do X, do Y"), and rendering/logic bug observations ("The items are showing up as ephemeral objects instead of stones").
+  - Added `isCorrectiveOrBugHeuristic(text)` in `src/drafting/judge.ts` routed through the fallback and heuristic paths of `evaluateQuestIntent`, ensuring corrective directives are recognized deterministically when the classifier server is offline or in heuristic mode (`judgeFallback: "heuristic"`), without pre-empting embedding evaluation when online.
+  - Expanded `KIND_EXEMPLARS.bugfix` in `src/drafting/kind-exemplars.ts` so detected corrective directives classify accurately as `kind: "bugfix"`.
+  - Added unit test suite in `tests/quest_intent.test.ts` and evaluation script `scripts/eval-bug-intent.ts`.
+
+### Fixed
+- **Pi freeze on daemon unavailability**: Eliminated 2000ms+ sequential classification delays in `classifyViaEndpoint` when `axil-auren` is uncommunicative or stopped, ensuring zero turn stalls when local AI daemon is offline.
+
 ## [1.9.1] - 2026-10-29
 
 ### Added

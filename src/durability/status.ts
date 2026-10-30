@@ -14,10 +14,13 @@ const PHASE_ICONS: Record<Phase, string> = {
   archived: "📦",
 };
 
-export function questStatus(state: QuestState, style: StatusStyle = "icon"): string | undefined {
-  if (state.qid === null) return undefined;
-  if (style === "text") return `${state.phase} ${state.qid}`;
-  return `${PHASE_ICONS[state.phase]} ${state.qid}`;
+export function questStatus(state: QuestState, style: StatusStyle = "icon"): string {
+  if (state.qid === null) {
+    return style === "text" ? "idle" : `${PHASE_ICONS.idle} idle`;
+  }
+  const depthSuffix = state.depth > 0 ? `:${state.depth}` : "";
+  if (style === "text") return `${state.phase} ${state.qid}${depthSuffix}`;
+  return `${PHASE_ICONS[state.phase]} ${state.qid}${depthSuffix}`;
 }
 
 let statusStyle: StatusStyle = DEFAULT_CONFIG.statusStyle;
@@ -59,11 +62,10 @@ let blinkUi: PiCtx["ui"] | undefined;
 let blinkInterval: ReturnType<typeof setInterval> | undefined;
 let blinkStop: ReturnType<typeof setTimeout> | undefined;
 
-function renderStatus(state: QuestState, style: StatusStyle): string | undefined {
+function renderStatus(state: QuestState, style: StatusStyle): string {
   const base = questStatus(state, style);
-  if (base === undefined) return base;
   const framed = `${base} ${PLAN_HINT}`;
-  return brightPhase ? `${BRIGHT}${framed}${RESET}` : `${DIM}${framed}${RESET}`;
+  return (brightPhase && state.qid !== null) ? `${BRIGHT}${framed}${RESET}` : `${DIM}${framed}${RESET}`;
 }
 
 // Exported for test isolation: pending blink timers outlive a single test.

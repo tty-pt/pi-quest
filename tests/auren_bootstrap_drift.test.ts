@@ -44,7 +44,7 @@ Deno.test("auren-bootstrap: shouldAutoDownload rejects inference models without 
 
 Deno.test("auren-bootstrap: describeModelStatus formats download and active model status", () => {
   const idle = { phase: "idle" as const, running: false, started: false, downloads: [], failures: [], pendingConsent: [], configPath: null, notices: [] };
-  if (describeModelStatus(idle) !== undefined) throw new Error("idle should return undefined");
+  if (describeModelStatus(idle) !== "🔌 off") throw new Error("idle should return 🔌 off");
 
   const dl = { phase: "downloading" as const, running: false, started: false, downloads: [{ id: "bge-base", done: 42, total: 100 }], failures: [], pendingConsent: [], configPath: null, notices: [] };
   if (describeProgress(dl) !== "⬇ bge-base (42%)") throw new Error("describeProgress failed");

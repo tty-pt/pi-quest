@@ -3,16 +3,37 @@
 // classification is nearest-exemplar search over these vectors: deterministic,
 // millisecond-fast, no generation. Any failure — HTTP error, timeout, malformed or
 // all-zero vectors — is `null` ("unavailable"), never a guess, and a failed endpoint
-// is skipped for a short backoff so a dead server cannot stall every message.
+// trips the circuit breaker for a backoff so a dead server cannot stall every message.
 import { type QuestConfig } from "../config.ts";
+import {
+  CIRCUIT_BACKOFF_MS,
+  DEFAULT_CLASSIFY_TIMEOUT_MS,
+  DEFAULT_EMBED_TIMEOUT_MS,
+  isCircuitOpen,
+  recordCircuitFailure,
+  recordCircuitSuccess,
+  resetCircuitBreaker,
+  clearCircuitBreakerState,
+  withCircuitBreaker,
+} from "./circuit.ts";
 
-/** How long a failed endpoint is skipped. */
-export const EMBED_BACKOFF_MS = 10_000;
+export {
+  CIRCUIT_BACKOFF_MS,
+  DEFAULT_CLASSIFY_TIMEOUT_MS,
+  DEFAULT_EMBED_TIMEOUT_MS,
+  isCircuitOpen,
+  recordCircuitFailure,
+  recordCircuitSuccess,
+  resetCircuitBreaker,
+  clearCircuitBreakerState,
+  withCircuitBreaker,
+};
 
-const failedUntil = new Map<string, number>();
+/** How long a failed endpoint is skipped (backward compatibility). */
+export const EMBED_BACKOFF_MS = CIRCUIT_BACKOFF_MS;
 
 export function clearEmbedState(): void {
-  failedUntil.clear();
+  resetCircuitBreaker();
 }
 
 /** Embeddings server base URL (no trailing slash), or null when embeddings are unavailable. */
@@ -49,44 +70,45 @@ function toUnit(vec: unknown): number[] | null {
 export async function embedTexts(
   cfg: QuestConfig,
   texts: readonly string[],
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; fetchFn?: typeof fetch } = {},
 ): Promise<number[][] | null> {
   const base = embedBaseUrl(cfg);
   if (base === null || texts.length === 0) return null;
-  const now = Date.now();
-  if ((failedUntil.get(base) ?? 0) > now) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? Math.max((cfg.judgeTimeoutMs || 2000) * 2, 4000));
+
+  const fetchFn = opts.fetchFn ?? globalThis.fetch;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (cfg.judgeKey && cfg.judgeKey.trim() !== "") headers["Authorization"] = `Bearer ${cfg.judgeKey.trim()}`;
-  const fail = (): null => {
-    failedUntil.set(base, Date.now() + EMBED_BACKOFF_MS);
-    return null;
-  };
-  try {
-    const res = await fetch(`${base}/v1/embeddings`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-      signal: controller.signal,
-    });
-    if (!res.ok) return fail();
-    const body: unknown = await res.json();
-    const data = typeof body === "object" && body !== null ? (body as { data?: unknown }).data : undefined;
-    if (!Array.isArray(data) || data.length !== texts.length) return fail();
-    const ordered = [...data].sort(
-      (a, b) => Number((a as { index?: number })?.index ?? 0) - Number((b as { index?: number })?.index ?? 0),
-    );
-    const out: number[][] = [];
-    for (const item of ordered) {
-      const unitVec = toUnit((item as { embedding?: unknown })?.embedding);
-      if (unitVec === null) return fail();
-      out.push(unitVec);
-    }
-    return out;
-  } catch {
-    return fail();
-  } finally {
-    clearTimeout(timer);
-  }
+
+  const timeoutMs = opts.timeoutMs ?? Math.min(cfg.judgeTimeoutMs || DEFAULT_EMBED_TIMEOUT_MS, 4000);
+
+  return await withCircuitBreaker(
+    base,
+    async (signal) => {
+      const res = await fetchFn(`${base}/v1/embeddings`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model: cfg.embedModel, input: texts }),
+        signal,
+      });
+      if (res.status >= 500) {
+        recordCircuitFailure(base);
+        return null;
+      }
+      if (!res.ok) return null;
+      const body: unknown = await res.json();
+      const data = typeof body === "object" && body !== null ? (body as { data?: unknown }).data : undefined;
+      if (!Array.isArray(data) || data.length !== texts.length) return null;
+      const ordered = [...data].sort(
+        (a, b) => Number((a as { index?: number })?.index ?? 0) - Number((b as { index?: number })?.index ?? 0),
+      );
+      const out: number[][] = [];
+      for (const item of ordered) {
+        const unitVec = toUnit((item as { embedding?: unknown })?.embedding);
+        if (unitVec === null) return null;
+        out.push(unitVec);
+      }
+      return out;
+    },
+    { timeoutMs },
+  );
 }

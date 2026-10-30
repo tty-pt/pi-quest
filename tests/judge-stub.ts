@@ -19,10 +19,10 @@ export function stubJudgeFetch(answer: JudgeAnswer, embed?: EmbedAnswer): () => 
   const real = globalThis.fetch;
   globalThis.fetch = ((url: unknown, init?: { body?: string }) => {
     const urlStr = String(url);
-    if (urlStr.includes("/v1/classify")) {
+    if (urlStr.includes("/v1/classify") || urlStr.includes("/v1/systemone")) {
       // In the mock/stub environment for existing embed-counting tests,
       // return 404 to let tests testing local batch embedding and index caching fall back seamlessly
-      return Promise.resolve(new Response("classify not available in mock", { status: 404 }));
+      return Promise.resolve(new Response("systemone not available in mock", { status: 404 }));
     }
     if (urlStr.includes("/v1/embeddings")) {
       if (embed === undefined) return Promise.resolve(new Response("down", { status: 503 }));

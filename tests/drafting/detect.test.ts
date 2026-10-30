@@ -71,7 +71,7 @@ Deno.test("detection ignores casual narrative statements and memory probes", asy
 Deno.test("detection uses embeddings to classify quest intent", async () => {
   const server = Deno.serve({ port: 0 }, async (req) => {
     const url = new URL(req.url);
-    if (url.pathname.includes("/v1/classify")) {
+    if (url.pathname.includes("/v1/systemone") || url.pathname.includes("/v1/classify")) {
       const body = await req.json();
       const choice = body.text.includes("Optimize") ? "quest" : "conversation";
       return new Response(JSON.stringify({
