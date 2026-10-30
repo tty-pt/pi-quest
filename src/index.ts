@@ -26,7 +26,7 @@ export default function install(pi: Pi): void {
   onSessionStart(pi, (_e, ctx) => {
     resetNoticedReviews();
     resetAnnouncements();
-    ctx.ui?.setStatus?.("quest-judge", undefined);
+    ctx.ui?.setStatus?.("auren-model", "🔌 off");
     if (typeof ctx.ui?.onTerminalInput === "function") {
       ctx.ui.onTerminalInput((data: string) => {
         if (normalizeKey(data) !== "ctrlQ") return undefined;
@@ -68,7 +68,7 @@ export default function install(pi: Pi): void {
           confirm: confirmFn,
           onUpdate: (st) => {
             const statusText = describeModelStatus(st);
-            ctx.ui?.setStatus?.("quest-judge", statusText);
+            ctx.ui?.setStatus?.("auren-model", statusText);
             if (st.downloads.length > 0) {
               const dl = st.downloads[0];
               tell(`download:${dl.id}`, `[pi-quest] Downloading local embedding model "${dl.id}" for fast in-memory classification...`, "info");

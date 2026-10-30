@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.9.2] - 2026-10-30
 
 ### Added
+- **Persistent Idle Status and Sub-Quest Depth Display** (`src/durability/status.ts`):
+  - `questStatus` renders `💤 idle [^Q]` in dim styling when no quest is active (`qid: null`), keeping the quest status slot anchored instead of clearing it.
+  - Sub-quests display their hierarchy depth appended to the quest identifier (`${icon} ${qid}:${depth} [^Q]`, e.g. `🔨 1xMjwo:1 [^Q]`).
+- **Unified Model Status Slot & Disconnected Power-Off State** (`src/auren-bootstrap.ts`, `src/index.ts`):
+  - Standardized local model status widget on shared slot ID `"auren-model"` with `AUREN_STATUS_SLOT`.
+  - Added `"🔌 off"` state in `describeModelStatus` when the daemon is offline or disconnected, replacing invisible cleared slots with explicit power-off feedback.
 - **Daemon Circuit Breaker & Resilient Timeout Wrapper** (`src/judge/circuit.ts`, `src/judge/embed.ts`, `src/judge/nearest.ts`):
   - Added shared circuit breaker wrapper `withCircuitBreaker` protecting all `axil-auren` calls against connection refusal, hung sockets, and daemon downtime.
   - Implemented fast-fail backoff (`CIRCUIT_BACKOFF_MS = 30_000`) and tight default timeout (`DEFAULT_CLASSIFY_TIMEOUT_MS = 250`).
