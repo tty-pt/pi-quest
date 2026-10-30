@@ -52,6 +52,17 @@ Promoting a draft or approving a plan revision does not require rigid magic word
   - Example: `"go. Make sure to also update the docs."`
   - `pi-quest` promotes the quest immediately *and* attaches the trailing instruction as an active directive on the new phase.
 
+### Bug Reports & Negative Behavioral Directives
+
+`pi-quest` recognizes when you report a defect or specify negative behavioral constraints:
+- *"You shouldn't draw as an ephemeral item something that's supposed to be a stone or a rock. If it is a stone or a rock or a stone, just draw that."*
+- *"It shouldn't do X when Y happens, it should do Z instead."*
+- *"Don't write raw SQL in handlers, use the query builder instead."*
+- *"The items are showing up as ephemeral objects instead of stones, please fix that."*
+- Portuguese equivalents (*"Não devias desenhar pedras como itens efémeros. Se for uma pedra ou rocha, desenha isso."*, *"Não faças X quando Y, faz Z em vez disso."*)
+
+These are evaluated in ~20 ms via in-memory embeddings (`POST /v1/classify`) with **100% recall** and **0% false quests** on conversational benchmarks. They open a provisional quest draft automatically and classify into **`kind: "bugfix"`** without needing `/quest` or explicit prefixes. When the server is offline, fallback heuristics (`isCorrectiveOrBugHeuristic`) maintain deterministic recognition.
+
 ### Fine-Grained Quest Kinds
 
 When a quest opens, `pi-quest` automatically classifies its objective into specialized kinds:

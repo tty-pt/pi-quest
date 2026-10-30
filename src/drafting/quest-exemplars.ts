@@ -37,6 +37,8 @@ export const QUEST_EXEMPLARS: Record<string, string[]> = {
     "When clicking submit it shouldn't reload the page, it should submit via AJAX",
     "This should not be null, it should fall back to the default configuration",
     "That shouldn't happen, it should display an error banner instead",
+    "You shouldn't mutate state directly, dispatch an action instead",
+    "Never allow unauthenticated users to access this endpoint, redirect them instead",
     "We have a bug where the canvas draws rocks as ephemeral items",
     "Não devias desenhar pedras como itens efémeros. Se for uma pedra ou rocha, desenha isso.",
     "Não devias fazer X quando acontece Y, faz Z em vez disso.",
