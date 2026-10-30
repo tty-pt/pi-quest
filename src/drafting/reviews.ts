@@ -109,8 +109,8 @@ export async function bootDraftReview(
   const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
-  // Policy-based bypass (reviewPolicy "off", or "balanced" for non-complex).
-  if (bypassesDraftReview(config, state)) {
+  // Policy-based bypass (reviewPolicy "off", or "balanced" based on model risk and difficulty).
+  if (bypassesDraftReview(config, state, ctx)) {
     await bypassDraftReview(pi, ctx, config, { qid, state, sections, thresholds, belowBar: belowBar || quality.blocks, quality });
     return;
   }

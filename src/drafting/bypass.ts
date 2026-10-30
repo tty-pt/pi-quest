@@ -5,7 +5,8 @@
 // locked — so the agent is told exactly what is missing.
 import { sendWake } from "../app/interpreter";
 import type { QuestConfig, DraftThresholds } from "../config";
-import type { QuestState } from "../domain/quest";
+import { difficultyLevel, type QuestState } from "../domain/quest";
+import { calculateReviewNeed, resolveActiveModel } from "../policy/effective";
 import { draftPath } from "../domain/paths";
 import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx } from "../hooks/events";
@@ -15,8 +16,14 @@ import { promoteAfterPass } from "./promote";
 import type { QualityResult } from "./quality";
 import { deliverableBody, deliverableWord, draftProfileText, hasAuthoredText, type DraftSections } from "./plan-text";
 
-export function bypassesDraftReview(config: QuestConfig, state: QuestState): boolean {
-  return config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && state.difficulty !== "major");
+export function bypassesDraftReview(config: QuestConfig, state: QuestState, ctx?: PiCtx): boolean {
+  if (config.reviewPolicy === "off") return true;
+  if (config.reviewPolicy === "balanced") {
+    const activeModel = resolveActiveModel(ctx, config);
+    const need = calculateReviewNeed(state.difficulty, activeModel, state.setbacks.length);
+    return need <= 4.5 && difficultyLevel(state.difficulty) < 5;
+  }
+  return false;
 }
 
 export interface BypassArgs {

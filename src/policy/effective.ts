@@ -5,6 +5,7 @@
 // quest/auto virtual model to the physical model it last routed to, and falls
 // back to the launcher env.
 import type { QuestConfig, ReviewPolicy } from "../config";
+import { difficultyLevel, type QuestDifficulty } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
 import { lastRoutedModel } from "../router/last-route";
 
@@ -21,6 +22,45 @@ export interface EffectivePolicy {
 
 const POLICIES: ReadonlySet<string> = new Set(["strict", "balanced", "off"]);
 const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max)$/i;
+
+/**
+ * Model Capability & Risk Rating:
+ * - Tier 1 (High capability / low hallucination risk): 1.0
+ *   e.g. Claude 3.5 Sonnet, GPT-4o, Gemini 2.5 Pro, O1, O3
+ * - Tier 2 (Moderate capability / fast): 1.5
+ *   e.g. Gemini 3.8 Flash, GPT-4o-mini, Qwen 2.5 Coder 32B
+ * - Tier 3 (Small / lightweight / local): 2.5
+ *   e.g. 7B, 8B, 14B, 0.5B, or unknown/unspecified models
+ */
+export function evaluateModelRisk(modelName?: string): number {
+  if (!modelName) return 1.5;
+  const m = modelName.toLowerCase();
+  if (/(?:claude-3-5-sonnet|claude-3\.5-sonnet|claude-sonnet-5|gpt-4o$|gemini-2\.5-pro|gemini-pro|o1|o3)/i.test(m)) {
+    return 1.0;
+  }
+  if (/(?:gemini-.*flash|gpt-4o-mini|claude-.*haiku|qwen.*32b|codestral|mistral-large)/i.test(m)) {
+    return 1.5;
+  }
+  if (/(?:0\.5b|1b|3b|7b|8b|14b|qwen.*0\.5b|qwen.*7b|llama.*8b|olmoe)/i.test(m)) {
+    return 2.5;
+  }
+  return 1.5;
+}
+
+/**
+ * Calculate dynamic review need based on numeric difficulty (1..5), model capability risk,
+ * and recent quest setbacks / verification failures.
+ * ReviewNeed = (Difficulty * ModelRisk) + (Setbacks * 1.5)
+ */
+export function calculateReviewNeed(
+  difficulty: QuestDifficulty | number,
+  modelName?: string,
+  setbackCount = 0,
+): number {
+  const d = difficultyLevel(difficulty);
+  const risk = evaluateModelRisk(modelName);
+  return (d * risk) + (setbackCount * 1.5);
+}
 
 function asPolicy(value: unknown): ReviewPolicy | undefined {
   if (typeof value !== "string") return undefined;

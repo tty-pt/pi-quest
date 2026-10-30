@@ -1,7 +1,7 @@
 // HIGH_LEVEL: #drafting — pure embedding difficulty evaluation.
 // Classifies requests into trivial, standard, or complex using
 // nearest-exemplar embeddings, falling back to deterministic structural rules.
-import type { QuestDifficulty } from "../domain/quest.ts";
+import { difficultyName, type QuestDifficulty } from "../domain/quest.ts";
 import { type QuestConfig } from "../config.ts";
 import { gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
 import { DIFFICULTY_EXEMPLARS, DIFFICULTY_KINDS } from "./difficulty-exemplars.ts";
@@ -22,12 +22,22 @@ export const DIFFICULTY_QUESTION = {
 };
 
 /**
- * Structural heuristic: >= 4 distinct file paths => complex; otherwise standard.
+ * Structural 5-tier heuristic: evaluates file counts and keywords to determine difficulty level (1..5).
  * Free-form wording is never guessed without embeddings.
  */
+export function evaluateQuestDifficultyLevelHeuristic(prompt: string): number {
+  const trimmed = prompt.trim();
+  const pathMatches = new Set(trimmed.match(/[a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+/g) ?? []);
+  const fileCount = pathMatches.size;
+
+  if (fileCount >= 4 || /\b(?:architecture|redesign|overhaul|migrate database|rewrite core|split into services|protocol overhaul)\b/i.test(trimmed)) {
+    return 5;
+  }
+  return 3;
+}
+
 export function evaluateQuestDifficultyHeuristic(prompt: string): QuestDifficulty {
-  const pathMatches = prompt.trim().match(/[a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+/g) ?? [];
-  return new Set(pathMatches).size >= COMPLEX_PATH_COUNT ? "complex" : "standard";
+  return difficultyName(evaluateQuestDifficultyLevelHeuristic(prompt));
 }
 
 export interface QuestDifficultyResult {

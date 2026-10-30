@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import type { QuestState } from "../domain/quest";
-import { recordReviewResult } from "../domain/quest";
+import { recordReviewResult, difficultyLevel } from "../domain/quest";
 import { demoteToDrafting, demoteToImplementing } from "../domain/transitions";
 import type { Qid } from "../domain/qid";
 import { draftPath } from "../domain/paths";
@@ -16,7 +16,7 @@ import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../config";
-import { withEffectivePolicy } from "../policy/effective";
+import { withEffectivePolicy, resolveActiveModel, calculateReviewNeed } from "../policy/effective";
 import { cancelReview, hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
@@ -223,12 +223,14 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
 
   // Policy-based bypass in validation:
   // 1. "off": skip subagent review entirely when tests pass (or analysis)
-  // 2. "balanced": for non-complex tasks, skip subagent review when tests pass
+  // 2. "balanced": evaluate dynamic review need based on model risk and difficulty
   const testExecution = state.lastTestReceipt ?? getLatestTestExecution();
   const testsPassed = testExecution !== null ? testExecution.exitCode === 0 : state.kind === "analysis";
+  const activeModel = resolveActiveModel(ctx, config);
+  const need = calculateReviewNeed(state.difficulty, activeModel, state.setbacks.length);
   const shouldBypassValidation =
     config.reviewPolicy === "off" ||
-    (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && state.difficulty !== "major" && testsPassed);
+    (config.reviewPolicy === "balanced" && need <= 4.5 && difficultyLevel(state.difficulty) < 5 && testsPassed);
 
   if (shouldBypassValidation) {
     clearValidationVerdictFails(qid);

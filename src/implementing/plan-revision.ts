@@ -6,9 +6,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import { withEffectivePolicy } from "../policy/effective";
+import { withEffectivePolicy, resolveActiveModel, calculateReviewNeed } from "../policy/effective";
 import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
-import type { QuestState } from "../domain/quest";
+import { difficultyLevel, type QuestState } from "../domain/quest";
 import { approvePlanRevision, recordPlanRevision, revertPlanRevision } from "../domain/plan-revision";
 import { draftPath } from "../domain/paths";
 import type { Pi, PiCtx } from "../hooks/events";
@@ -80,8 +80,10 @@ export async function bootPlanRevisionReview(
   };
 
   // Policy-based bypass in plan revision:
-  // "off" or ("balanced" and non-complex): auto-approve without subagent
-  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && state.difficulty !== "major")) {
+  // "off" or ("balanced" and review need within safe autonomous limit): auto-approve without subagent
+  const activeModel = resolveActiveModel(ctx, config);
+  const need = calculateReviewNeed(state.difficulty, activeModel, state.setbacks.length);
+  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && need <= 4.5 && difficultyLevel(state.difficulty) < 5)) {
     clearPlanRevisionRetries(qid);
     updateState((s) => approvePlanRevision(s, target, sections.plan));
     emitNow(pi);
