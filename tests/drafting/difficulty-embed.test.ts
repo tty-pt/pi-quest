@@ -114,7 +114,7 @@ Deno.test("difficultyMode off or heuristic never uses embeddings; auto does", as
   let embedCalls = 0;
   const real = globalThis.fetch;
   globalThis.fetch = ((url: unknown) => {
-    if (String(url).includes("/v1/embeddings") || String(url).includes("/v1/classify")) embedCalls += 1;
+    if (String(url).includes("/v1/embeddings") || String(url).includes("/v1/systemone") || String(url).includes("/v1/classify")) embedCalls += 1;
     return Promise.resolve(new Response("x", { status: 500 }));
   }) as typeof fetch;
   try {

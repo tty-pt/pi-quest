@@ -46,7 +46,7 @@ const JUDGED = { ...DEFAULT_CONFIG, judgeMode: "auto" as const, judgeUrl: "http:
 Deno.test("judgeHasVerificationStep: decomposed embeddings decide, unavailable is null", async () => {
   const real = globalThis.fetch;
   globalThis.fetch = ((url: unknown) => {
-    if (String(url).includes("/v1/classify")) {
+    if (String(url).includes("/v1/systemone") || String(url).includes("/v1/classify")) {
       return Promise.resolve(new Response(JSON.stringify({
         choice: "automated_test",
         similarity: 0.90,

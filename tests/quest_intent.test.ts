@@ -70,7 +70,7 @@ Deno.test("evaluateQuestIntent recognizes corrective directives under explicit h
 Deno.test("evaluateQuestIntent classifies corrective directives as quest via mock embeddings", async () => {
   const server = Deno.serve({ port: 0 }, async (req) => {
     const url = new URL(req.url);
-    if (url.pathname.includes("/v1/classify")) {
+    if (url.pathname.includes("/v1/systemone") || url.pathname.includes("/v1/classify")) {
       const body = await req.json();
       const text = body.text ?? "";
       const isQuest = text.includes("ephemeral") || text.includes("stone") || text.includes("shouldn't");
@@ -113,7 +113,7 @@ Deno.test("evaluateQuestIntent classifies corrective directives as quest via moc
 Deno.test("evaluateQuestKind classifies corrective bug reports as bugfix via mock embeddings", async () => {
   const server = Deno.serve({ port: 0 }, async (req) => {
     const url = new URL(req.url);
-    if (url.pathname.includes("/v1/classify")) {
+    if (url.pathname.includes("/v1/systemone") || url.pathname.includes("/v1/classify")) {
       return new Response(JSON.stringify({
         choice: "bugfix",
         similarity: 0.89,

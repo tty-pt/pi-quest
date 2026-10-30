@@ -47,7 +47,7 @@ Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable
 
 Promoting a draft or approving a plan revision does not require rigid magic words:
 - **Predetermined Word**: A single word `go` (case- and punctuation-insensitive) advances with zero network dependency.
-- **Multilingual Semantic Assent**: Natural approvals in English and Portuguese (*"proceed"*, *"approved"*, *"looks good"*, *"bora"*, *"aprovado"*, *"vai em frente"*, *"manda bala"*) are evaluated server-side via `POST /v1/classify`.
+- **Multilingual Semantic Assent**: Natural approvals in English and Portuguese (*"proceed"*, *"approved"*, *"looks good"*, *"bora"*, *"aprovado"*, *"vai em frente"*, *"manda bala"*) are evaluated server-side via `POST /v1/systemone`.
 - **Compound Approvals**: You can approve and give a trailing directive in one breath:
   - Example: `"go. Make sure to also update the docs."`
   - `pi-quest` promotes the quest immediately *and* attaches the trailing instruction as an active directive on the new phase.
@@ -61,7 +61,7 @@ Promoting a draft or approving a plan revision does not require rigid magic word
 - *"The items are showing up as ephemeral objects instead of stones, please fix that."*
 - Portuguese equivalents (*"Não devias desenhar pedras como itens efémeros. Se for uma pedra ou rocha, desenha isso."*, *"Não faças X quando Y, faz Z em vez disso."*)
 
-These are evaluated in ~20 ms via in-memory embeddings (`POST /v1/classify`) with **100% recall** and **0% false quests** on conversational benchmarks. They open a provisional quest draft automatically and classify into **`kind: "bugfix"`** without needing `/quest` or explicit prefixes. When the server is offline, fallback heuristics (`isCorrectiveOrBugHeuristic`) maintain deterministic recognition.
+These are evaluated in ~20 ms via in-memory embeddings (`POST /v1/systemone`) with **100% recall** and **0% false quests** on conversational benchmarks. They open a provisional quest draft automatically and classify into **`kind: "bugfix"`** without needing `/quest` or explicit prefixes. When the server is offline, fallback heuristics (`isCorrectiveOrBugHeuristic`) maintain deterministic recognition.
 
 ### Fine-Grained Quest Kinds
 
@@ -130,7 +130,7 @@ When a quest enters peer review (in drafting, mid-flight plan revision, or valid
 - **Embedding-Only Model Provisioning & Visual Status**: Automatically downloads only the required fast embedding model (`bge-base`, 117 MB). Unused inference/chat models (`qwen`, `olmoe`) are never downloaded. Non-blocking download progress (`⬇ bge-base (42%)`) and active model status (`⚡ bge-base`) appear in the status bar under `quest-judge`.
 - **Proactive Dependency Checks**: On `session_start`, checks core C engine versions and alerts with remediation steps if anything is outdated.
 - **Deterministic Trigger Words**: Starting a prompt with `quest:`, `task:`, `fix:`, or `feat:` starts the quest instantly with 0ms latency.
-- **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/classify` (~10–20 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` falls back to deterministic local heuristics (explicit trigger words, `/quest`, structural path counts) without invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
+- **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/systemone` (~5–15 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` falls back to deterministic local heuristics (explicit trigger words, `/quest`, structural path counts) without invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
 - **Corrective Bug Report & Directive Intent Recognition**: Recognizes bug reports ("There's a bug in X", "The items are showing up as ephemeral objects instead of stones") and negative directives ("Don't do X, do Y instead", "You shouldn't draw X as Y") as quest intent with `bugfix` kind, both via embeddings and deterministic local heuristic fallback.
 - **Daemon Circuit Breaker & Resilient Fast Timeout**: All calls to `axil-auren` run with strict 250ms timeouts and an in-memory circuit breaker (`30s` cooldown). If the local daemon is uncommunicative, stopped, or slow, the circuit breaker opens daemon-wide; subsequent calls fail fast in ~1 µs without touching the network or socket layer, preventing Pi event loop hangs.
 

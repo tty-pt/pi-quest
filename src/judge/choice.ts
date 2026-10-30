@@ -1,5 +1,5 @@
 // HIGH_LEVEL: #working together — choice normalization helpers.
-// Generative Jev / System One choices have been deprecated in favor of pure embeddings.
+// System One decisions evaluate choices across declared options using fast reflexive inference.
 // String cleaning and option matching helpers remain for general tool usage.
 import type { QuestConfig } from "../config.ts";
 import { nearestExemplar } from "./nearest.ts";
@@ -42,9 +42,8 @@ export function normalizeJevUrl(baseUrlOrUrl: string): string {
 }
 
 /**
- * Pure embeddings (/v1/classify) replace generative LLM choice calls.
- * Evaluates the question instructions across the declared choice options
- * using stateless vector classification rather than generative sampling.
+ * System One evaluates the question instructions across the declared choice options
+ * using fast reflexive classification rather than slow generative sampling.
  */
 export async function askJudgeChoice(
   cfg: QuestConfig,
