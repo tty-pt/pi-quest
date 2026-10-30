@@ -1,6 +1,6 @@
 {
   "name": "@tty-pt/pi-quest",
-  "version": "1.9.3",
+  "version": "1.9.2",
   "description": "Quest Journal & Epistemic Workflow Extension for Pi Coding Agent (v2, layered rebuild)",
   "keywords": [
     "pi-package",
