@@ -22,12 +22,14 @@ export const DEFAULT_DRAFT_QUALITY: DraftQualityConfig = {
   mode: "enforce",
   tiers: {
     trivial: { citations: 0, steps: 1, requireVerification: false },
+    minor: { citations: 1, steps: 2, requireVerification: false },
     standard: { citations: 2, steps: 3, requireVerification: true },
+    major: { citations: 3, steps: 4, requireVerification: true },
     complex: { citations: 4, steps: 5, requireVerification: true },
   },
 };
 
-const TIERS: QuestDifficulty[] = ["trivial", "standard", "complex"];
+const TIERS: QuestDifficulty[] = ["trivial", "minor", "standard", "major", "complex"];
 
 function nonNegInt(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;

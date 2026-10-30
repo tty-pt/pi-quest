@@ -22,7 +22,7 @@ export type ArchivedOutcome = "COMPLETED" | "FAILED" | "ABANDONED";
 // Specialized kinds ("bugfix", "feature", "refactor", "docs") adapt evidence and verification requirements.
 export type QuestKind = "standard" | "analysis" | "bugfix" | "feature" | "refactor" | "docs";
 
-export type QuestDifficulty = "trivial" | "standard" | "complex";
+export type QuestDifficulty = "trivial" | "minor" | "standard" | "major" | "complex";
 
 export type ReviewKind = "draft" | "validation";
 

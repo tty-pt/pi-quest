@@ -11,11 +11,13 @@ export const COMPLEX_PATH_COUNT = 4;
 export const DIFFICULTY_QUESTION = {
   id: "quest_difficulty",
   state: "",
-  instructions: "Classify quest difficulty into trivial, standard, or complex.",
+  instructions: "Classify quest difficulty into trivial, minor, standard, major, or complex.",
   options: [
-    { key: "trivial", description: "Trivial task" },
-    { key: "standard", description: "Standard task" },
-    { key: "complex", description: "Complex task" },
+    { key: "trivial", description: "Trivial task (L1)" },
+    { key: "minor", description: "Minor task (L2)" },
+    { key: "standard", description: "Standard task (L3)" },
+    { key: "major", description: "Major task (L4)" },
+    { key: "complex", description: "Complex task (L5)" },
   ],
 };
 
@@ -50,7 +52,7 @@ export async function classifyDifficultyByEmbedding(prompt: string, cfg: QuestCo
     minSimilarity: cfg.intentMinSimilarity,
     minMargin: cfg.difficultyMinMargin,
     harmless: "standard",
-    actionable: new Set(["trivial", "complex"]),
+    actionable: new Set(["trivial", "minor", "major", "complex"]),
   }) as QuestDifficulty;
 }
 

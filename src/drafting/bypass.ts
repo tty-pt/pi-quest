@@ -16,7 +16,7 @@ import type { QualityResult } from "./quality";
 import { deliverableBody, deliverableWord, draftProfileText, hasAuthoredText, type DraftSections } from "./plan-text";
 
 export function bypassesDraftReview(config: QuestConfig, state: QuestState): boolean {
-  return config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex");
+  return config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && state.difficulty !== "major");
 }
 
 export interface BypassArgs {

@@ -70,6 +70,26 @@ Deno.test("update creates quests and drafts on disk", async () => {
   }
 });
 
+Deno.test("single-call creation: objective + plan provisions and authors plan immediately", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const res = await applyUpdate(pi, ctx, {
+      objective: "Build component X.",
+      plan: "1. Step one\n2. Step two",
+    });
+    check(!res.error, "no error in single call");
+    check(getState().phase === "drafting", "phase is drafting");
+    check(getState().draft?.planAuthored === true, "plan authored in turn 1");
+    const file = await readFile(join(ctx.cwd, draftPath(getState().qid!)), "utf8");
+    check(file.includes("Step one"), "plan text written to draft file");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
 Deno.test("plan writes after promotion redirect to amendment", async () => {
   replaceState(promote(authored(), "review"));
   const pi = fakePi();

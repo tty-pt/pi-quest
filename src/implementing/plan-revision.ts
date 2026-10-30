@@ -81,7 +81,7 @@ export async function bootPlanRevisionReview(
 
   // Policy-based bypass in plan revision:
   // "off" or ("balanced" and non-complex): auto-approve without subagent
-  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex")) {
+  if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && state.difficulty !== "major")) {
     clearPlanRevisionRetries(qid);
     updateState((s) => approvePlanRevision(s, target, sections.plan));
     emitNow(pi);

@@ -143,16 +143,24 @@ export async function provisionDraft(
   params: Record<string, unknown>,
   applied: string[],
 ): Promise<QuestState> {
-  const draftName = params["draftName"];
+  const plan = params["plan"];
+  const analysisParam = params["analysis"];
+  const explicitDraftName = params["draftName"];
+  const draftName =
+    typeof explicitDraftName === "string" && explicitDraftName.trim() !== ""
+      ? explicitDraftName.trim()
+      : ((typeof plan === "string" && plan.trim() !== "") || (typeof analysisParam === "string" && analysisParam.trim() !== "")
+        ? (state.name || state.qid || "draft")
+        : undefined);
+
   if (
-    typeof draftName !== "string" || draftName.trim() === "" ||
+    draftName === undefined ||
     state.phase !== "provisional" || state.qid === null
   ) {
     return state;
   }
   const qid = state.qid;
-  const name = draftName.trim();
-  const plan = params["plan"];
+  const name = draftName;
   const kind = params["kind"] === "analysis" ? "analysis" : "standard";
   const analysis = kind === "analysis";
   const thin = state.refinements.length === 0 &&

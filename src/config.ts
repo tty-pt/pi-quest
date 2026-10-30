@@ -20,8 +20,10 @@ export type DifficultyThresholds = Record<QuestDifficulty, DraftThresholds>;
 
 export const DEFAULT_DIFFICULTY_THRESHOLDS: DifficultyThresholds = {
   trivial: { requirements: 1, evidence: 2 },
+  minor: { requirements: 1, evidence: 4 },
   standard: { requirements: 2, evidence: 7 },
-  complex: { requirements: 3, evidence: 10 },
+  major: { requirements: 3, evidence: 9 },
+  complex: { requirements: 4, evidence: 12 },
 };
 
 export interface InterfaceBindings {
@@ -456,7 +458,9 @@ export function loadConfig(raw: unknown): QuestConfig {
 
   const difficultyThresholds: DifficultyThresholds = {
     trivial: parseTier("trivial", DEFAULT_DIFFICULTY_THRESHOLDS.trivial),
+    minor: parseTier("minor", DEFAULT_DIFFICULTY_THRESHOLDS.minor),
     standard: parseTier("standard", draftThresholds),
+    major: parseTier("major", DEFAULT_DIFFICULTY_THRESHOLDS.major),
     complex: parseTier("complex", DEFAULT_DIFFICULTY_THRESHOLDS.complex),
   };
 

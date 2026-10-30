@@ -61,7 +61,7 @@ export function normalizeState(raw: Record<string, unknown>): QuestState {
     phase: PHASES.includes(raw["phase"] as string) ? (raw["phase"] as QuestState["phase"]) : "idle",
     // Explicitly sanitized, not spread: a bogus kind or difficulty value must not survive.
     kind: raw["kind"] === "analysis" ? "analysis" : "standard",
-    difficulty: raw["difficulty"] === "trivial" || raw["difficulty"] === "complex" ? raw["difficulty"] : "standard",
+    difficulty: raw["difficulty"] === "trivial" || raw["difficulty"] === "minor" || raw["difficulty"] === "major" || raw["difficulty"] === "complex" ? raw["difficulty"] : "standard",
     qid: typeof raw["qid"] === "string" ? (raw["qid"] as QuestState["qid"]) : null,
     parentQid: typeof raw["parentQid"] === "string" ? (raw["parentQid"] as QuestState["parentQid"]) : null,
     depth: typeof raw["depth"] === "number" ? (raw["depth"] as number) : 0,

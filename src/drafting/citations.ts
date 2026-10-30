@@ -6,7 +6,19 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { citeLocations } from "./plan-text";
 
+const citableFileCache = new Map<string, string | null>();
+const fileLineCountCache = new Map<string, { mtimeMs: number; lines: number }>();
+
+export function clearCitationCache(): void {
+  citableFileCache.clear();
+  fileLineCountCache.clear();
+}
+
 async function resolveCitableFile(cwd: string, ref: string): Promise<string | null> {
+  const cacheKey = `${cwd}:${ref}`;
+  if (citableFileCache.has(cacheKey)) {
+    return citableFileCache.get(cacheKey)!;
+  }
   const candidates: string[] = [join(cwd, ref)];
   if (!ref.includes("/")) {
     try {
@@ -22,11 +34,15 @@ async function resolveCitableFile(cwd: string, ref: string): Promise<string | nu
   for (const candidate of candidates) {
     try {
       const info = await stat(candidate);
-      if (info.isFile()) return candidate;
+      if (info.isFile()) {
+        citableFileCache.set(cacheKey, candidate);
+        return candidate;
+      }
     } catch {
       // Keep probing candidates.
     }
   }
+  citableFileCache.set(cacheKey, null);
   return null;
 }
 
@@ -52,10 +68,22 @@ export async function resolveCitations(cwd: string, text: string): Promise<Citat
       problems.push(`${cite.file}:${cite.lineStart} not found`);
       continue;
     }
-    let lineCount = lineCounts.get(resolved);
+    let lineCount: number | undefined;
+    const cached = fileLineCountCache.get(resolved);
+    try {
+      const st = await stat(resolved);
+      if (cached && cached.mtimeMs === st.mtimeMs) {
+        lineCount = cached.lines;
+      } else {
+        lineCount = (await readFile(resolved, "utf8")).split("\n").length;
+        fileLineCountCache.set(resolved, { mtimeMs: st.mtimeMs, lines: lineCount });
+      }
+    } catch {
+      lineCount = cached?.lines;
+    }
     if (lineCount === undefined) {
       lineCount = (await readFile(resolved, "utf8")).split("\n").length;
-      lineCounts.set(resolved, lineCount);
+      fileLineCountCache.set(resolved, { mtimeMs: Date.now(), lines: lineCount });
     }
     if (cite.lineStart > lineCount) {
       problems.push(`${cite.file}:${cite.lineStart} beyond ${lineCount} lines`);

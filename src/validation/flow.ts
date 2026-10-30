@@ -228,7 +228,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   const testsPassed = testExecution !== null ? testExecution.exitCode === 0 : state.kind === "analysis";
   const shouldBypassValidation =
     config.reviewPolicy === "off" ||
-    (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && testsPassed);
+    (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && state.difficulty !== "major" && testsPassed);
 
   if (shouldBypassValidation) {
     clearValidationVerdictFails(qid);
