@@ -18,7 +18,7 @@ import {
 import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
-import { archiveActiveQuest } from "../../src/surface/tools/archive.ts";
+import { archiveActiveQuest, archiveTool } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { stopBlink } from "../../src/durability/index.ts";
 import { createChildQuest } from "../../src/surface/tools/subquest.ts";
@@ -194,7 +194,39 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
   replaceState({ ...claimed, lastReview: { verdict: "PASS", target, findings: "clean" } });
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", "shipped");
   check(done.archivedQid === "abc123", "archived");
+  check(done.objective === "req", "objective preserved in archive result");
+  check(done.kind === "standard", "kind preserved in archive result");
+  check(done.difficulty === "standard", "difficulty preserved in archive result");
+  check(Array.isArray(done.modifiedFiles), "modifiedFiles is array");
+  check(Array.isArray(done.findings), "findings is array");
+  check(done.findings.includes("shipped"), "summary included in findings");
   check(getState().phase === "idle", "top-level archive clears");
+
+  // Verify archiveTool returns full structured details
+  const tool = archiveTool(pi);
+  const s2 = {
+    ...claimComplete({ ...authored(), phase: "implementing" as const }),
+    difficulty: "major" as const,
+    setbacks: [{ reason: "build failure", evidence: ["ld error"] }],
+    amendments: [{ change: "use static linking", reasons: "missing dylib" }],
+    lastTestReceipt: { command: "make test", exitCode: 0, tailOutput: "ok", executedAt: Date.now() },
+  };
+  const target2 = implementationFingerprint(s2);
+  replaceState({
+    ...s2,
+    lastReview: { verdict: "PASS", target: target2, findings: "all clear" },
+  });
+  const res = await tool.execute("call-1", { outcome: "completed", summary: "all done" }, undefined, undefined, ctx);
+  const details = (res as { details?: Record<string, unknown> }).details;
+  check(details !== undefined, "details returned");
+  check(details?.archived === "abc123", "archived qid matches");
+  check(details?.objective === "req", "objective present in details");
+  check(details?.difficulty === "major", "difficulty present in details");
+  check(Array.isArray(details?.setbacks) && (details?.setbacks as unknown[]).length === 1, "setbacks present in details");
+  check(Array.isArray(details?.amendments) && (details?.amendments as unknown[]).length === 1, "amendments present in details");
+  check((details?.lastTestReceipt as { command?: string })?.command === "make test", "lastTestReceipt present in details");
+  check(Array.isArray(details?.findings), "findings present in details");
+
   const parent = createQuest("parent work", "par001");
   const child = { ...claimComplete({ ...authored(), phase: "implementing" as const }), parentQid: "par001" as Qid };
   const childTarget = implementationFingerprint(child);

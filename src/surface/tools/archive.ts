@@ -2,7 +2,15 @@
 // HIGH_LEVEL: #surface — slim archive: quest view, session reference, manifest.
 import { getState, replaceState, updateState } from "../../app/store";
 import { emitNow, sendSteer } from "../../app/interpreter";
-import type { ArchivedOutcome, QuestState } from "../../domain/quest";
+import type {
+  Amendment,
+  ArchivedOutcome,
+  QuestDifficulty,
+  QuestKind,
+  QuestState,
+  Setback,
+  VerificationReceipt,
+} from "../../domain/quest";
 import { archive } from "../../domain/transitions";
 import { settleChild } from "../../domain/children";
 import { popStackFrame } from "../../domain/stack";
@@ -17,6 +25,21 @@ import { reconcileParentDocOnReturn } from "../../quest-doc";
 import { advanceForeman } from "../../subquests/foreman";
 import { ensureChildDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
+
+export interface ArchivedQuestResult {
+  archivedQid: string;
+  zipPath: string;
+  returnedToParent: string | null;
+  objective: string;
+  kind: QuestKind;
+  difficulty: QuestDifficulty;
+  modifiedFiles: string[];
+  lastTestReceipt?: VerificationReceipt;
+  setbacks: Setback[];
+  findings: string[];
+  amendments: Amendment[];
+  summary: string | null;
+}
 
 export type ArchiveOutcomeParam = "completed" | "failed";
 
@@ -64,6 +87,46 @@ function assertArchiveAllowed(
   }
 }
 
+async function getModifiedFiles(pi: Pi, cwd: string): Promise<string[]> {
+  const files = new Set<string>();
+  try {
+    const res = (await pi.exec("git", ["status", "--porcelain"], { cwd })) as
+      | { code?: number; exitCode?: number; stdout?: string; output?: string }
+      | undefined;
+    const stdout = res?.stdout ?? res?.output ?? "";
+    if ((res?.code ?? res?.exitCode) === 0 && stdout) {
+      for (const line of stdout.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.length > 3) {
+          const file = trimmed.slice(3).trim();
+          if (file && !file.startsWith(".pi/quest/")) {
+            files.add(file);
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  for (const ref of ["HEAD~1", "HEAD"]) {
+    try {
+      const diffRes = (await pi.exec("git", ["diff", "--name-only", ref], { cwd })) as
+        | { code?: number; exitCode?: number; stdout?: string; output?: string }
+        | undefined;
+      const diffOut = diffRes?.stdout ?? diffRes?.output ?? "";
+      if ((diffRes?.code ?? diffRes?.exitCode) === 0 && diffOut) {
+        for (const line of diffOut.split("\n")) {
+          const f = line.trim();
+          if (f && !f.startsWith(".pi/quest/")) {
+            files.add(f);
+          }
+        }
+        break;
+      }
+    } catch { /* ignore */ }
+  }
+  return Array.from(files);
+}
+
 async function handleParentReturn(
   pi: Pi,
   ctx: PiCtx,
@@ -74,15 +137,25 @@ async function handleParentReturn(
   outcome: ArchivedOutcome,
   summary: string | null,
   zipPath: string,
-): Promise<{ archivedQid: string; zipPath: string; returnedToParent: string | null }> {
+  meta: {
+    objective: string;
+    kind: QuestKind;
+    difficulty: QuestDifficulty;
+    modifiedFiles: string[];
+    lastTestReceipt?: VerificationReceipt;
+    setbacks: Setback[];
+    findings: string[];
+    amendments: Amendment[];
+  },
+): Promise<ArchivedQuestResult> {
   const findings = summary ?? `Child ${qid} archived as ${outcome}.`;
   const receipt: HandbackReceipt = {
     childQid: qid,
     status: outcome === "COMPLETED" ? "COMPLETED" : "FAILED",
     assignedRequirements: state.contract?.assignedRequirements ?? [],
-    filesModified: [],
+    filesModified: meta.modifiedFiles,
     diffSummary: findings,
-    testCommand: state.contract?.requiredTestCommands[0] ?? "test",
+    testCommand: state.contract?.requiredTestCommands[0] ?? meta.lastTestReceipt?.command ?? "test",
     testPassed: outcome === "COMPLETED",
     findings,
   };
@@ -102,7 +175,7 @@ async function handleParentReturn(
           pi,
           `Foreman: Sub-quest ${qid} completed (${zipPath}). Automatically mounting ${advanced.nextItem.id}: ${advanced.nextItem.goal}. Proceeding with implementation.`,
         );
-        return { archivedQid: qid, zipPath, returnedToParent: parentQid };
+        return { archivedQid: qid, zipPath, returnedToParent: parentQid, ...meta, summary };
       }
     }
     replaceState(restored);
@@ -111,20 +184,20 @@ async function handleParentReturn(
       ? `Child quest ${qid} archived as ${outcome} (${zipPath}). Returned to parent ${parentQid}. Foreman: All sub-quests in backlog completed. Proceed to final root integration validation.`
       : `Child quest ${qid} archived as ${outcome} (${zipPath}). Returned to parent ${parentQid} with findings: ${findings}`;
     sendSteer(pi, completedMsg);
-    return { archivedQid: qid, zipPath, returnedToParent: parentQid };
+    return { archivedQid: qid, zipPath, returnedToParent: parentQid, ...meta, summary };
   }
 
   const parent = newestSnapshotFor(ctx.sessionManager.getEntries(), parentQid);
   if (parent === null) {
     replaceState({ ...archived, parentQid: null });
     sendSteer(pi, `Quest ${qid} archived as ${outcome} (${zipPath}). Parent ${parentQid} has no snapshot — staying on the archived quest.`);
-    return { archivedQid: qid, zipPath, returnedToParent: null };
+    return { archivedQid: qid, zipPath, returnedToParent: null, ...meta, summary };
   }
   replaceState({ ...parent, snapshotPending: true });
   updateState((s) => settleChild(s, qid, outcome === "COMPLETED" ? "returned" : "failed", findings));
   emitNow(pi);
   sendSteer(pi, `Child quest ${qid} archived as ${outcome} (${zipPath}). Returned to parent ${parentQid} with findings: ${findings}`);
-  return { archivedQid: qid, zipPath, returnedToParent: parentQid };
+  return { archivedQid: qid, zipPath, returnedToParent: parentQid, ...meta, summary };
 }
 
 export async function archiveActiveQuest(
@@ -133,17 +206,45 @@ export async function archiveActiveQuest(
   outcome: ArchivedOutcome,
   summary: string | null,
   opts?: { confirmDiscard?: boolean },
-): Promise<{ archivedQid: string; zipPath: string; returnedToParent: string | null }> {
+): Promise<ArchivedQuestResult> {
   const state = getState();
   if (state.qid === null) throw new Error("no active quest to archive");
   const qid = state.qid;
   assertArchiveAllowed(state, outcome, summary, opts);
   cancelReview(qid);
+
+  const modifiedFiles = await getModifiedFiles(pi, ctx.cwd);
+  const findingsList: string[] = [];
+  if (summary && summary.trim().length > 0) {
+    findingsList.push(summary.trim());
+  }
+  if (state.lastReview?.findings && state.lastReview.findings.trim().length > 0) {
+    if (!findingsList.includes(state.lastReview.findings.trim())) {
+      findingsList.push(state.lastReview.findings.trim());
+    }
+  }
+  for (const child of state.children) {
+    if (child.findings && !findingsList.includes(child.findings.trim())) {
+      findingsList.push(child.findings.trim());
+    }
+  }
+
+  const meta = {
+    objective: state.objective,
+    kind: state.kind,
+    difficulty: state.difficulty,
+    modifiedFiles,
+    lastTestReceipt: state.lastTestReceipt,
+    setbacks: [...state.setbacks],
+    findings: findingsList,
+    amendments: [...state.amendments],
+  };
+
   const zipPath = await archiveQuestFiles(pi, ctx.cwd, state, outcome, summary);
   const archived = updateState((s) => archive(s, outcome));
   emitNow(pi);
   if (archived.parentQid !== null) {
-    return await handleParentReturn(pi, ctx, state, archived, qid, archived.parentQid, outcome, summary, zipPath);
+    return await handleParentReturn(pi, ctx, state, archived, qid, archived.parentQid, outcome, summary, zipPath, meta);
   }
   replaceState({ ...archived, phase: "idle", qid: null, parentQid: null, snapshotPending: true });
   emitNow(pi);
@@ -156,7 +257,13 @@ export async function archiveActiveQuest(
   } else {
     sendSteer(pi, `Quest ${qid} archived as ${outcome} (${zipPath}). No active quest.`);
   }
-  return { archivedQid: qid, zipPath, returnedToParent: null };
+  return {
+    archivedQid: qid,
+    zipPath,
+    returnedToParent: null,
+    ...meta,
+    summary,
+  };
 }
 
 export function archiveTool(pi: Pi): PiToolSpec {
@@ -183,7 +290,21 @@ export function archiveTool(pi: Pi): PiToolSpec {
         const done = await archiveActiveQuest(pi, ctx, toOutcome(outcome), summary);
         return textResult(
           `Quest ${done.archivedQid} archived (${outcome}, ${done.zipPath}).${done.returnedToParent ? ` Returned to parent ${done.returnedToParent}.` : ""}`,
-          { archived: done.archivedQid, outcome, zip: done.zipPath },
+          {
+            archived: done.archivedQid,
+            outcome,
+            zip: done.zipPath,
+            returnedToParent: done.returnedToParent,
+            objective: done.objective,
+            kind: done.kind,
+            difficulty: done.difficulty,
+            modifiedFiles: done.modifiedFiles,
+            lastTestReceipt: done.lastTestReceipt,
+            setbacks: done.setbacks,
+            findings: done.findings,
+            amendments: done.amendments,
+            summary: done.summary,
+          },
         );
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
