@@ -114,7 +114,7 @@ Deno.test("rate_limit_failover: runIsolatedReview skips cooling models and fails
   feed({
     requestId: req1["requestId"],
     status: "error",
-    error: "Subagent delegation failed (failed): Quota reached. 429 rate_limit_exceeded",
+    error: "Subagent delegation failed (failed): 429 rate_limit_exceeded",
   });
 
   // Attempt 2: Both anthropic/claude-sonnet-5-5 (stripped variant) and anthropic/claude-haiku-3-5
@@ -142,5 +142,92 @@ Deno.test("rate_limit_failover: runIsolatedReview skips cooling models and fails
   assert.strictEqual(isModelInCooldown("anthropic/claude-sonnet-5-5"), true);
   assert.strictEqual(isModelInCooldown("provider:anthropic"), true);
 
+  clearReviewCooldowns();
+});
+
+Deno.test("rate_limit_failover: model quota error on Claude does NOT skip Gemini Flash under same provider", async () => {
+  clearReviewCooldowns();
+  const qid = "rl0002" as Qid;
+  replaceState(createDraft(createQuest("req", qid), "mat"));
+  const { pi, emitted, feed } = flowBus();
+
+  const pending = runIsolatedReview({
+    pi,
+    ctx: fakeCtx("/tmp"),
+    qid,
+    target: "target_quota_1",
+    prompt: "review this",
+    model: "antigravity/claude-sonnet-5-5",
+    fallbackModels: ["antigravity/gemini-3.8-flash"],
+    routerDefault: "antigravity/gemini-3.8-flash",
+  });
+
+  // Attempt 1: antigravity/claude-sonnet-5-5 fails with model-specific quota error
+  await waitForRequests(emitted, 1);
+  const req1 = requests(emitted)[0];
+  assert.strictEqual(req1["model"], "antigravity/claude-sonnet-5-5");
+
+  feed({
+    requestId: req1["requestId"],
+    status: "error",
+    error: "Subagent delegation failed (failed): Quota reached. Please wait 140h before retrying.",
+  });
+
+  // Attempt 2: antigravity/gemini-3.8-flash must NOT be skipped, even though it shares provider:antigravity!
+  await waitForRequests(emitted, 2);
+  const req2 = requests(emitted)[1];
+  assert.strictEqual(req2["model"], "antigravity/gemini-3.8-flash");
+
+  feed({
+    requestId: req2["requestId"],
+    status: "completed",
+    result: { kind: "text", text: "VERDICT: PASS\nAll requirements verified." },
+  });
+
+  const outcome = await pending;
+  assert.strictEqual(outcome.status, "verdict");
+  if (outcome.status === "verdict") {
+    assert.strictEqual(outcome.review.verdict, "PASS");
+  }
+
+  // Claude is cooled down, but provider:antigravity is NOT cooled down
+  assert.strictEqual(isModelInCooldown("antigravity/claude-sonnet-5-5"), true);
+  assert.strictEqual(isModelInCooldown("provider:antigravity"), false);
+
+  clearReviewCooldowns();
+});
+
+Deno.test("rate_limit_failover: inherit candidate resolves to physical routerDefault when active model is quest/auto", async () => {
+  clearReviewCooldowns();
+  const qid = "rl0003" as Qid;
+  replaceState(createDraft(createQuest("req", qid), "mat"));
+  const { pi, emitted, feed } = flowBus();
+
+  const ctx = fakeCtx("/tmp");
+  (ctx as { model?: unknown }).model = "quest/auto";
+
+  const pending = runIsolatedReview({
+    pi,
+    ctx,
+    qid,
+    target: "target_inherit_1",
+    prompt: "review this",
+    model: "quest/auto",
+    routerDefault: "antigravity/gemini-3.8-flash",
+  });
+
+  // When model is virtual quest/auto and degrades to inherit, it must resolve to physical routerDefault
+  await waitForRequests(emitted, 1);
+  const req1 = requests(emitted)[0];
+  assert.strictEqual(req1["model"], "antigravity/gemini-3.8-flash");
+
+  feed({
+    requestId: req1["requestId"],
+    status: "completed",
+    result: { kind: "text", text: "VERDICT: PASS\nAll requirements verified." },
+  });
+
+  const outcome = await pending;
+  assert.strictEqual(outcome.status, "verdict");
   clearReviewCooldowns();
 });

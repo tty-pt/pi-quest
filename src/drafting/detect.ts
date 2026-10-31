@@ -5,6 +5,7 @@ import { emitNow, sendSteer } from "../app/interpreter";
 import { createQuest } from "../domain/quest";
 import { nextQid } from "../domain/qid";
 import { ensureDraftFile, listKnownQids } from "../files";
+import { fetchActiveInvariants, formatInvariantsComment } from "../surface/invariants";
 import { extractRecentConversationContext } from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
@@ -65,7 +66,8 @@ export async function detectSubstantiveRequest(
     const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
     replaceState(createQuest(objective, qid, null, diff.difficulty, kind));
     const context = extractRecentConversationContext(ctx);
-    await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty);
+    const invariants = await fetchActiveInvariants(ctx.cwd);
+    await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty, formatInvariantsComment(invariants));
     emitNow(pi);
     const complexHint = diff.difficulty === "complex"
       ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
@@ -99,7 +101,8 @@ export async function detectSubstantiveRequest(
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
   replaceState(createQuest(trimmed, qid, null, diff.difficulty, kind));
   const context = extractRecentConversationContext(ctx);
-  await ensureDraftFile(ctx, qid, qid, trimmed, context, diff.difficulty);
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  await ensureDraftFile(ctx, qid, qid, trimmed, context, diff.difficulty, formatInvariantsComment(invariants));
   emitNow(pi);
   const complexHint = diff.difficulty === "complex"
     ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."

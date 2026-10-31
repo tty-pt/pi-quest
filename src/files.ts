@@ -63,13 +63,14 @@ export async function ensureDraftFile(
   objective: string,
   context?: string,
   difficulty?: QuestDifficulty,
+  invariantsBlock?: string,
 ): Promise<void> {
   if (!isQid(rawQid)) throw new Error(`invalid qid: ${rawQid}`);
   const qid: Qid = rawQid;
   await writeDraftFileIfNotExists(
     ctx.cwd,
     qid,
-    renderDraftTemplate(name, objective, context, difficulty),
+    renderDraftTemplate(name, objective, context, difficulty, invariantsBlock),
   );
 }
 

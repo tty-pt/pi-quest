@@ -6,9 +6,14 @@ export function renderDraftTemplate(
   objective: string,
   context?: string,
   difficulty?: QuestDifficulty,
+  invariantsBlock?: string,
 ): string {
   const contextSection = context && context.trim().length > 0
     ? `\n## Context / Background Discussion\n\n${context.trim()}\n`
+    : "";
+
+  const invBlockText = invariantsBlock && invariantsBlock.trim().length > 0
+    ? `\n${invariantsBlock.trim()}\n`
     : "";
 
   const subquestsSection = difficulty === "complex"
@@ -36,7 +41,7 @@ ${contextSection}
 1. Complete Coverage: Address every requirement in the original request without arbitrary omissions.
 2. Amendment Validity: Any amendment MUST resolve a proven contradiction against codebase reality or physical impossibility, citing concrete evidence.
 3. Maturity Bar: Drafts require at least 2 requirements, or 1 requirement + 7 evidence items, with an actionable plan or authored analysis.
-4. Validation Invariants: Zero placeholder code (TODO/FIXME/stubs), test receipt confirming clean run (exit code 0), zero boundary regressions. -->
+4. Validation Invariants: Zero placeholder code (TODO/FIXME/stubs), test receipt confirming clean run (exit code 0), zero boundary regressions. -->${invBlockText}
 
 ## Requirements
 

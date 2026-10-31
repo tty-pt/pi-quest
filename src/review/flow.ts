@@ -28,6 +28,7 @@ import {
   settleReview,
   trackReview,
 } from "./tracker";
+import { lastRoutedModel } from "../router/last-route";
 
 export type FlowOutcome =
   | { status: "verdict"; review: ParsedReview; settled: boolean }
@@ -157,12 +158,38 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       }
     }
 
+    let candidateModel = candidate.model ??
+      (args.routerDefault
+        ? (Array.isArray(args.routerDefault) ? args.routerDefault[0] : args.routerDefault)
+        : undefined);
+
+    if (candidateModel && candidateModel.toLowerCase().startsWith("quest/")) {
+      const physicalRouted = lastRoutedModel();
+      if (physicalRouted && !physicalRouted.toLowerCase().startsWith("quest/")) {
+        candidateModel = physicalRouted;
+      } else if (args.routerDefault) {
+        const def = Array.isArray(args.routerDefault) ? args.routerDefault[0] : args.routerDefault;
+        if (def && !def.toLowerCase().startsWith("quest/")) {
+          candidateModel = def;
+        } else {
+          candidateModel = undefined;
+        }
+      } else {
+        candidateModel = undefined;
+      }
+    } else if (!candidateModel) {
+      const physicalRouted = lastRoutedModel();
+      if (physicalRouted && !physicalRouted.toLowerCase().startsWith("quest/")) {
+        candidateModel = physicalRouted;
+      }
+    }
+
     const runner = createRunner({
       pi,
       ctx,
       ownerRunId: qid,
       toolName: runnerTool,
-      ...(candidate.model ? { model: candidate.model } : {}),
+      ...(candidateModel ? { model: candidateModel } : {}),
       ...(thinking ? { thinking } : {}),
       ...(args.maxDurationMs !== undefined ? { maxDurationMs: args.maxDurationMs } : {}),
       ...(args.inactivityLimitMs !== undefined ? { inactivityLimitMs: args.inactivityLimitMs } : {}),
@@ -187,7 +214,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
             recordModelCooldown(stripped, cooldownMs, now);
           }
           const prov = extractProvider(candidate.model);
-          if (prov !== "") {
+          if (prov !== "" && !/quota\s+reached|model\s+quota/i.test(detail)) {
             recordModelCooldown(`provider:${prov}`, cooldownMs, now);
           }
         }

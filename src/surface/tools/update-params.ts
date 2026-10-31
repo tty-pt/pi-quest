@@ -43,6 +43,7 @@ import { extractRecentConversationContext } from "../../durability/transcript.ts
 import { setDocStatus } from "../../durability/quest-doc-io.ts";
 import { noteDraftUpdated } from "../../durability/status.ts";
 import { ensureDraftFile, listKnownQids } from "../../files.ts";
+import { fetchActiveInvariants, formatInvariantsComment } from "../invariants.ts";
 
 export async function syncAmendmentsToDraft(
   ctx: PiCtx,
@@ -79,7 +80,9 @@ export async function provisionRootQuest(
   const base = createQuest(objective, qid, null, difficulty);
   replaceState(markChanged(base, { kind, difficulty }));
   const context = extractRecentConversationContext(ctx);
-  await ensureDraftFile(ctx, qid, qid, objective, context, difficulty);
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  const invBlock = formatInvariantsComment(invariants);
+  await ensureDraftFile(ctx, qid, qid, objective, context, difficulty, invBlock);
   return qid;
 }
 
@@ -167,7 +170,9 @@ export async function provisionDraft(
     ((typeof plan !== "string" || plan.trim() === "") && !analysis);
   state = createDraft(state, name, kind);
   replaceState(state);
-  await ensureDraftFile(ctx, qid, name, state.objective, undefined, state.difficulty);
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  const invBlock = formatInvariantsComment(invariants);
+  await ensureDraftFile(ctx, qid, name, state.objective, undefined, state.difficulty, invBlock);
   state = await carryRefinementsToDraft(ctx, getState());
   applied.push(`draft ${name} created at ${draftPath(qid)} — edit ONLY this file`);
   if (thin) {

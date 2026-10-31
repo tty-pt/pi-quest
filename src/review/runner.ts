@@ -2,6 +2,7 @@
 // HIGH_LEVEL: #independent review contexts — fresh context per run, no inherited reasoning.
 // HIGH_LEVEL: #no direct mutation — the runner returns evidence, never transitions.
 import type { Pi, PiCtx } from "../hooks/events";
+import { lastRoutedModel } from "../router/last-route";
 
 export interface ReviewRunner {
   launch(prompt: string, signal: AbortSignal): Promise<LaunchResult>;
@@ -153,6 +154,23 @@ function runReview(
       unsubs.push(env.pi.events.on("prompt-template:subagent:update", noteActivity));
       unsubs.push(env.pi.events.on("subagent:activity", noteActivity));
       unsubs.push(env.pi.events.on("subagent:started", noteActivity));
+      let subagentModel = env.model;
+      if (subagentModel && subagentModel.toLowerCase().startsWith("quest/")) {
+        const physical = lastRoutedModel();
+        subagentModel = (physical && !physical.toLowerCase().startsWith("quest/")) ? physical : undefined;
+      }
+      if (!subagentModel) {
+        const ctxModel = (env.ctx as { model?: unknown } | undefined)?.model;
+        const isVirtual = typeof ctxModel === "string"
+          ? ctxModel.toLowerCase().startsWith("quest/")
+          : (typeof (ctxModel as { id?: string })?.id === "string" && (ctxModel as { id: string }).id.toLowerCase().startsWith("quest/"));
+        if (isVirtual) {
+          const physical = lastRoutedModel();
+          if (physical && !physical.toLowerCase().startsWith("quest/")) {
+            subagentModel = physical;
+          }
+        }
+      }
       env.pi.events.emit("prompt-template:subagent:request", {
         requestId,
         ownerRunId: env.ownerRunId,
@@ -161,7 +179,7 @@ function runReview(
         task: prompt,
         context: "fresh",
         cwd: env.ctx.cwd,
-        ...(env.model ? { model: env.model } : {}),
+        ...(subagentModel ? { model: subagentModel } : {}),
         // Omitted by default (inherit): the extension never fabricates a
         // thinking level the child registry may not carry.
         ...(env.thinking ? { thinking: env.thinking } : {}),
