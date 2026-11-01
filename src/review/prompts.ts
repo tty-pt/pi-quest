@@ -32,6 +32,7 @@ export interface ReviewMaterial {
   codeDiff?: string;
   testReceipt?: string;
   rtmChecklist?: string;
+  touchedFiles?: string[];
   // Draft requirements (## Requirements bullets) so the reviewer can judge the maturity bar.
   requirements?: string[];
 }
@@ -103,7 +104,9 @@ function contextBlock(material: ReviewMaterial): string {
     : "";
   const codeDiff = material.codeDiff
     ? `\nGIT DIFF (actual changes to verify against requirements):\n${material.codeDiff}\n`
-    : "";
+    : (material.touchedFiles && material.touchedFiles.length > 0
+      ? `\nTOUCHED FILES (no VCS diff available — inspect these files directly in workspace):\n${material.touchedFiles.map((f) => `- ${f}`).join("\n")}\n`
+      : "");
   const testReceipt = material.testReceipt
     ? `\nTEST VERIFICATION RECEIPT:\n${material.testReceipt}\n`
     : "";
@@ -177,23 +180,35 @@ Distinguish: user requirement (blocks) vs technical constraint (binds) vs review
 function validationGuidance(kind: QuestKind | undefined): string {
   if (kind === "analysis") {
     return `WHAT YOU MUST EVALUATE (VALIDATION):
-You review the ANALYSIS deliverable against the original request: is it complete, grounded, and on scope?
-1. Every requirement in the request is addressed by the analysis;
+You are an adversarial compliance auditor. You review the ANALYSIS deliverable against the original request: is it complete, grounded, and strictly obedient to what was asked?
+
+USER REQUEST SUPREMACY:
+The ORIGINAL REQUEST is the supreme acceptance criterion. The author cannot unilaterally drop, soften, or substitute requirements.
+1. Every requirement and intent in the ORIGINAL REQUEST is thoroughly addressed by the analysis;
 2. Conclusions are grounded — spot-check claims against the repository and the RESEARCH TRANSCRIPT extract;
-3. The analysis stays in scope; covering a different problem is a failure;
+3. The analysis stays in scope; covering a different problem or substituting a simpler task is an automatic FAIL;
 4. The research backing is adequate for the claim made;
 5. All RECORDED AMENDMENTS are valid: each must resolve a genuine, proven contradiction backed by repository evidence.
 Reviewer preference NEVER blocks; only unmet requirements, ungrounded claims, invalid amendments, or out-of-scope drift do.`;
   }
   return `WHAT YOU MUST EVALUATE (ROOT INTEGRATION VALIDATION):
-You are an adversarial auditor defending the codebase from incomplete or shallow work.
-You review the IMPLEMENTATION against the original request, approved plan, and recorded amendments:
-1. Every item in the request and RTM checklist must correspond to concrete changes in the GIT DIFF. If any requirement is missing from the diff, you MUST issue VERDICT: FAIL.
+You are an adversarial compliance auditor defending the codebase from incomplete, shallow, or drifted work.
+You review the IMPLEMENTATION against the original request, approved plan, recorded amendments, and git diff:
+
+USER REQUEST SUPREMACY:
+The ORIGINAL REQUEST (and RTM checklist) is the supreme contract.
+The APPROVED PLAN is merely the implementer's internal proposal, NOT the acceptance specification.
+If the implementation follows the plan but fails to fulfill what the user asked in the ORIGINAL REQUEST, you MUST issue VERDICT: FAIL. The agent is never permitted to unilaterally redefine success or drop requested features.
+
+AUDIT CHECKLIST:
+1. Every item, clause, and intent in the ORIGINAL REQUEST and RTM checklist must be fully implemented in the code:
+   - When GIT DIFF is provided: Verify that the diff directly implements the requested features across all modified repositories and submodules. If any requirement is missing or only partially addressed in the diff, you MUST issue VERDICT: FAIL.
+   - When NO VCS DIFF is available (non-git workspace or external files without VCS): You are an autonomous auditor equipped with read, search, and inspection tools. You MUST directly inspect the target files in the workspace to verify that the implementation is present and satisfies the user's request.
 2. The TEST VERIFICATION RECEIPT must confirm clean execution (exit code 0). If tests failed or were not run, you MUST issue VERDICT: FAIL.
-3. Scan the GIT DIFF for placeholder implementations: TODO, FIXME, stub functions returning dummy values, or commented-out tests. If found, issue VERDICT: FAIL.
+3. Scan the changes and touched files for placeholder implementations: TODO, FIXME, stub functions returning dummy values, or commented-out tests. If found, issue VERDICT: FAIL.
 4. Ensure no regression of repository boundaries (e.g. #ifdef in pure-C isomorphic UX, cross-module #include "*.c").
 5. When a revision history is present, judge every plan move: a revision that corrected an impossibility while holding the objective is legitimate; a revision that weakens the acceptance bar to fit what was built must FAIL.
-6. Verify all RECORDED AMENDMENTS: each must resolve a genuine contradiction backed by code reality. If an amendment dropped user requirements without an actual impossibility, issue VERDICT: FAIL.
+6. Verify all RECORDED AMENDMENTS: each must resolve a genuine, proven contradiction backed by code reality. If an amendment dropped user requirements without an actual impossibility, issue VERDICT: FAIL.
 Reviewer preference NEVER blocks; only unmet requirements, unverified code, invalid amendments, or out-of-scope drift do.`;
 }
 
@@ -219,7 +234,8 @@ export function getReviewCriteriaSummary(phase: "drafting" | "implementing", kin
 - Amendments: Verified against genuine contradictions.`;
   }
   return `Validation Criteria (Implementation):
-- Diff Completeness: Every request item & RTM requirement implemented in git diff.
+- User Request Supremacy: Full fidelity to original user request; following plan but failing request is a FAIL.
+- Diff Completeness: Every request item & RTM requirement implemented in git diff or verified via direct file inspection.
 - Verification: Clean test execution (exit code 0) with zero regressions.
 - Zero Placeholders: No TODO/FIXME/stubs or dummy returns.
 - Boundary Integrity: No architectural or module boundary violations.

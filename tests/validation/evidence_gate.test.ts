@@ -118,6 +118,18 @@ Deno.test("assertCompletionEligibility accommodates analysis quest without file 
   // No exception thrown for analysis quest
 });
 
+Deno.test("assertCompletionEligibility accommodates trivial quest with clean tree and no test run", async () => {
+  const quest = createQuest("Trivial chore", QID, null, "trivial");
+  quest.phase = "implementing";
+  quest.kind = "standard";
+
+  await assertCompletionEligibility(quest, {
+    getDiffStat: async () => "",
+    getLatestTest: () => null,
+  });
+  // No exception thrown for trivial difficulty quest even with clean tree
+});
+
 Deno.test("isTestCommand matches custom commands specified in contract.requiredTestCommands", () => {
   check(isTestCommand("make test"), "standard make test recognized");
   check(isTestCommand("deno test tests/"), "standard deno test recognized");

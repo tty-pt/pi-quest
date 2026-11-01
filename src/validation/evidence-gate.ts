@@ -48,11 +48,20 @@ export async function assertCompletionEligibility(
 
   const diffStat = await getDiffStat();
   if (diffStat.trim() === "" && state.children.length === 0) {
-    throw new Error("Cannot claim completion: No files have been modified.");
+    // Docs quests require modified files (documentation text).
+    // Standard/code quests require modified files unless difficulty is trivial (e.g. clean-tree VCS chores).
+    if (state.kind === "docs" || state.difficulty !== "trivial") {
+      throw new Error("Cannot claim completion: No files have been modified.");
+    }
   }
 
   // Documentation quests require modified files (docs/markdown), but binary test runner execution is not required.
   if (state.kind === "docs") {
+    return;
+  }
+
+  // Trivial difficulty tasks (typo fixes, comments, config touch, version bumps) do not require mandatory binary test runner execution
+  if (state.difficulty === "trivial") {
     return;
   }
 

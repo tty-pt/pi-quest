@@ -8,6 +8,9 @@ import {
   parsePolicyRules,
   resolveActiveModel,
   withEffectivePolicy,
+  resolveModelAccuracy,
+  evaluateModelRisk,
+  calculateReviewNeed,
 } from "../../src/policy/effective.ts";
 import { recordRoutedModel, resetRoutedModel } from "../../src/router/last-route.ts";
 
@@ -78,4 +81,28 @@ Deno.test("withEffectivePolicy: returns config with the resolved policy and a no
   check(out.reviewPolicy === "off", "policy replaced");
   check(out.policyNote !== undefined && out.policyNote.includes("p/m"), "note names the model");
   check(withEffectivePolicy(DEFAULT_CONFIG, ctxWith({ provider: "p", id: "m" })) === DEFAULT_CONFIG, "no rules -> same object");
+});
+
+Deno.test("resolveModelAccuracy and evaluateModelRisk support custom modelAccuracy dictionary", () => {
+  const accuracyMap = {
+    "anthropic/claude-sonnet-5-5*": 0.95,
+    "antigravity/gemini-3.8-flash*": 0.85,
+    "local/0.5b*": 0.35,
+  };
+
+  check(resolveModelAccuracy("anthropic/claude-sonnet-5-5:low", accuracyMap) === 0.95, "matches glob and strips thinking suffix");
+  check(resolveModelAccuracy("antigravity/gemini-3.8-flash", accuracyMap) === 0.85, "matches flash");
+  check(resolveModelAccuracy("local/0.5b-chat", accuracyMap) === 0.35, "matches local small");
+  check(resolveModelAccuracy("unknown/model", accuracyMap) === undefined, "unknown returns undefined");
+
+  // Dynamic risk calculation: 1.0 / accuracy
+  check(evaluateModelRisk("anthropic/claude-sonnet-5-5", accuracyMap) === 1.1, "0.95 accuracy => 1.1 risk");
+  check(evaluateModelRisk("antigravity/gemini-3.8-flash", accuracyMap) === 1.2, "0.85 accuracy => 1.2 risk");
+  check(evaluateModelRisk("local/0.5b-chat", accuracyMap) === 2.9, "0.35 accuracy => 2.9 risk");
+
+  // Review need with accuracy map:
+  // standard task (D=3) on Claude (risk 1.1) => 3.3 (below 4.5, balanced bypasses review)
+  check(calculateReviewNeed("standard", "anthropic/claude-sonnet-5-5", 0, accuracyMap) === 3.3, "claude standard need 3.3");
+  // standard task (D=3) on 0.5B (risk 2.9) => 8.7 (well above 4.5, strict review enforced)
+  check(calculateReviewNeed("standard", "local/0.5b-chat", 0, accuracyMap) === 8.7, "local standard need 8.7");
 });

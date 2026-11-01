@@ -46,7 +46,7 @@ export default function install(pi: Pi): void {
         const engineReports = checkAllEngineVersions({ cwd: ctx.cwd });
         for (const rep of engineReports) {
           if (rep.name === "axil-auren" && (rep.status === "missing" || rep.status === "outdated")) {
-            if (cfg.judgeMode !== "off" && cfg.judgeMode !== "heuristic") {
+            if (cfg.judgeMode !== "off") {
               ctx.ui?.notify?.(`[pi-quest] ${formatRemediationToast(rep)}`, "warning");
             }
           }

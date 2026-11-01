@@ -242,3 +242,22 @@ Deno.test("quest-cancel-review command cancels in-flight review", async () => {
   replaceState(IDLE_STATE);
 });
 
+Deno.test("quest-ratings command formats model distributions and autonomy levels", async () => {
+  const pi = fakePi();
+  installCommands(pi);
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+
+  const ratingsCmd = pi.commands.find((c) => c.name === "quest-ratings");
+  check(Boolean(ratingsCmd), "must register 'quest-ratings' command");
+
+  await ratingsCmd!.options.handler("", ctx);
+  check(ctx.notifications.calls.some((n) => n.message.includes("Model Reliability & Autonomy Ratings")), "reports header");
+
+  // Alias /quest ratings
+  const questCmd = pi.commands.find((c) => c.name === "quest");
+  await questCmd!.options.handler("ratings", ctx);
+  check(ctx.notifications.calls.some((n) => n.message.includes("Autonomy Ladder Thresholds")), "reports thresholds");
+});
+
+

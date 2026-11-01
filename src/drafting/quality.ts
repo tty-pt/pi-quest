@@ -22,6 +22,8 @@ export function countSteps(plan: string): number {
   return plan.split("\n").filter((line) => /^\s*(?:\d+[.)]|[-*+])\s+\S/.test(line)).length;
 }
 
+const TEST_COMMAND_REGEX = /\b(?:make\s+test|npm\s+test|deno\s+test|cargo\s+test|pytest|assert)\b/i;
+
 /**
  * Decomposed step evaluation: extracts steps and classifies them against fine-grained
  * verification categories via in-memory server-side or local nearest-exemplar embeddings.
@@ -37,11 +39,16 @@ export async function evaluateVerificationDecomposed(config: QuestConfig, plan: 
 
   if (steps.length === 0) return null;
 
+  // Fast-path regex check for standard test/verification commands (0ms, 0 network calls)
+  if (steps.some((step) => TEST_COMMAND_REGEX.test(step))) {
+    return true;
+  }
+
   const examples = mergeExemplars(VERIFICATION_EXEMPLARS, {});
+  const verdicts = await Promise.all(steps.map((step) => nearestExemplar(config, examples, step)));
   let anyEvaluated = false;
 
-  for (const step of steps) {
-    const verdict = await nearestExemplar(config, examples, step);
+  for (const verdict of verdicts) {
     if (!verdict) continue;
     anyEvaluated = true;
     if (VERIFY_CLUSTERS.has(verdict.kind) && verdict.similarity >= 0.50 && verdict.margin >= 0.05) {

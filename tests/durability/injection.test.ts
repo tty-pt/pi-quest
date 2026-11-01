@@ -22,6 +22,7 @@ Deno.test("injection names the draft file while drafting", () => {
   const content = String(injected?.message?.content ?? "");
   check(content.includes("future/abc123.md"), "draft path injected");
   check(content.includes("drafting"), "phase injected");
+  check(content.includes("[Compliance Criteria]"), "drafting context contains compliance criteria");
   replaceState(IDLE_STATE);
   const idle = handlers.get("before_agent_start")!({}, fakeCtx("/tmp"));
   check(idle === undefined, "idle injects nothing");
@@ -55,5 +56,6 @@ Deno.test("injection includes active directives and running subquests in impleme
   check(content.includes("Don't touch auth.c"), "second directive injected");
   check(content.includes("spawn via quest_subquest"), "actionable tool cue injected");
   check(content.includes("[Active Sub-Quests]: child1 (Sub task 1)"), "running subquest injected");
+  check(!content.includes("[Compliance Criteria]"), "slim context omits compliance criteria during implementing");
 });
 

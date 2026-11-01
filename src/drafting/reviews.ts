@@ -109,9 +109,42 @@ export async function bootDraftReview(
   const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
-  // Policy-based bypass (reviewPolicy "off", or "balanced" for non-complex).
-  if (bypassesDraftReview(config, state)) {
+  // Policy-based bypass (reviewPolicy "off", or "balanced" based on model risk and difficulty).
+  if (bypassesDraftReview(config, state, ctx)) {
     await bypassDraftReview(pi, ctx, config, { qid, state, sections, thresholds, belowBar: belowBar || quality.blocks, quality });
+    return;
+  }
+
+  // Deterministic local fast-fail: when deterministic quality checks block or draft is below maturity bar,
+  // reject immediately in 0ms without launching an expensive doomed subagent review.
+  if (belowBar || quality.blocks) {
+    if (getState().phase !== "drafting") return;
+    updateState((s) => (s.phase === "drafting" ? noteDraftFindings(s) : s));
+    clearDraftReviewRetry(qid);
+    emitNow(pi);
+    const consecutive = noteReviewVerdictFailed(qid);
+    const reasons: string[] = [];
+    if (belowBar) {
+      const req = sections.requirements.length;
+      const ev = sections.evidence.length;
+      reasons.push(`below maturity bar (${req}/${thresholds.requirements} requirements, ${ev}/${thresholds.evidence} evidence)`);
+    }
+    if (quality.blocks && quality.summary !== "") {
+      reasons.push(quality.summary);
+    }
+    const findingText = reasons.join("; ");
+    const profile = `\n\nDraft profile:\n${draftProfileText(sections, thresholds, "", kind, state.difficulty)}`;
+
+    if (consecutive >= MAX_CONSECUTIVE_REVIEW_FAILS) {
+      sendWake(
+        pi,
+        `Draft review fast-failed ${consecutive} consecutive times for ${qid}. Deterministic criteria not met:\n${findingText}${profile}\n\n` +
+        `Consult the human operator for guidance, or the operator may reply "go" / "proceed" to bypass review and start coding immediately.`,
+      );
+      return;
+    }
+
+    sendWake(pi, `Draft review FAIL (fast-fail, 0ms): ${findingText}. Revise the ${deliverableWord(kind).toLowerCase()} and save; saving boots a fresh review.${profile}`);
     return;
   }
 

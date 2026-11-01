@@ -25,6 +25,7 @@ function shrinkLists(state: QuestState): QuestState {
   }
   if (state.amendments.length > 20) return { ...state, amendments: state.amendments.slice(-20) };
   if (state.children.length > 50) return { ...state, children: state.children.slice(-50) };
+  if ((state.touchedFiles ?? []).length > 100) return { ...state, touchedFiles: state.touchedFiles!.slice(-100) };
   return state;
 }
 
@@ -61,7 +62,7 @@ export function normalizeState(raw: Record<string, unknown>): QuestState {
     phase: PHASES.includes(raw["phase"] as string) ? (raw["phase"] as QuestState["phase"]) : "idle",
     // Explicitly sanitized, not spread: a bogus kind or difficulty value must not survive.
     kind: raw["kind"] === "analysis" ? "analysis" : "standard",
-    difficulty: raw["difficulty"] === "trivial" || raw["difficulty"] === "complex" ? raw["difficulty"] : "standard",
+    difficulty: raw["difficulty"] === "trivial" || raw["difficulty"] === "minor" || raw["difficulty"] === "major" || raw["difficulty"] === "complex" ? raw["difficulty"] : "standard",
     qid: typeof raw["qid"] === "string" ? (raw["qid"] as QuestState["qid"]) : null,
     parentQid: typeof raw["parentQid"] === "string" ? (raw["parentQid"] as QuestState["parentQid"]) : null,
     depth: typeof raw["depth"] === "number" ? (raw["depth"] as number) : 0,
@@ -86,6 +87,8 @@ export function normalizeState(raw: Record<string, unknown>): QuestState {
     lastTestReceipt: raw["lastTestReceipt"] && typeof raw["lastTestReceipt"] === "object"
       ? (raw["lastTestReceipt"] as QuestState["lastTestReceipt"])
       : undefined,
+    baseCommit: typeof raw["baseCommit"] === "string" ? raw["baseCommit"] : undefined,
+    touchedFiles: Array.isArray(raw["touchedFiles"]) ? (raw["touchedFiles"] as string[]) : [],
     snapshotPending: get("snapshotPending", false),
   };
 }

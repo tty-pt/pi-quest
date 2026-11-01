@@ -5,6 +5,86 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-11-01
+
+### Fixed
+- **Validator Compliance & User Request Supremacy** (`src/review/prompts.ts`, `src/validation/flow.ts`):
+  - Enforced User Request Supremacy in validation guidance: established that the original user request and RTM checklist form the supreme contract, framing the author's plan merely as an internal proposal. Following the plan while failing or omitting user-requested features is an automatic `VERDICT: FAIL`.
+  - Added clean deliverable slicing in `validationBrief`: extracts only the actual deliverable plan body via `deliverableBody(sections, state.kind)`, stripping out conversation history (`## Context / Background Discussion`), HTML guideline comments, and invariant blocks that previously caused attention dilution and framing bias.
+  - Injected bounded `git diff` (`codeDiff`) directly into the validation brief via `captureGitDiff`, providing validator subagents immediate visibility into concrete code changes.
+  - Confined completion validation bypass under `reviewPolicy: "balanced"` strictly to `trivial` chores (`state.difficulty === "trivial" && testsPassed`), guaranteeing that `minor`, `standard`, `major`, and `complex` tasks undergo isolated validator review.
+  - Added first-class `strictMode: boolean` support in `src/config.ts` and `src/validation/flow.ts`, honoring `"strictMode": true` in `settings.json` to prevent validation bypass even for trivial chores.
+
+## [1.10.0] - 2026-11-01
+
+### Added
+- **Earned Autonomy Ladder & Level 3 Fast-Path Gating** (`src/policy/effective.ts`, `src/drafting/bypass.ts`, `src/validation/flow.ts`):
+  - Added `resolveAutonomyLevel(need)` mapping review need $N$ into 3 graduated trust tiers: Level 3 (Full Autonomy, $N \le 2.2$), Level 2 (Balanced Autonomy, $2.2 < N \le 4.5$), and Level 1 (Supervised Audit, $N > 4.5$).
+  - Level 3 permits zero-subagent execution and auto-approves validation on clean test exit code 0 or clean trees.
+- **Zero-Friction Implicit Behavioral Telemetry** (`src/durability/ratings.ts`, `src/surface/tools/archive.ts`, `src/drafting/detect.ts`):
+  - Added post-quest commit handoff tracking (`.pi/quest/recent-handoff.json`) and automated git revert detection (`checkPostQuestReversions`): detects if delivered commits were reset or reverted within 3 turns and penalizes model reliability with $S = 0.0$.
+  - Added immediate conversational correction detection (`checkPostQuestCorrection`): observes developer complaints or bug reports in post-handoff turns and applies a retrospective score penalty ($S = 0.25$).
+- **Model Ratings Dashboard Command (`/quest-ratings`)** (`src/surface/commands/ratings.ts`, `src/surface/commands/index.ts`):
+  - Added `/quest-ratings` (and `/quest ratings` alias) displaying an ASCII table of tracked model reliability scores, Beta distributions, episode counts, and active autonomy tiers.
+- **Configurable Model Accuracy Dictionary (`modelAccuracy`)** (`src/config.ts`, `src/policy/effective.ts`):
+  - Added `modelAccuracy` configuration mapping model glob patterns to accuracy ratings in $(0.0, 1.0]$.
+  - Calculates dynamic review need: $\text{ReviewNeed} = (D / \text{Accuracy}) + (\text{Setbacks} \times 1.5)$, allowing verified models to operate autonomously on routine tasks while escalating to adversarial subagents for complex work or degraded scores.
+- **Quest Outcome Feedback Loop & Bayesian Ratings Persistence** (`src/durability/ratings.ts`, `src/surface/tools/archive.ts`):
+  - Captures post-quest telemetry (setbacks, review cycles, validator outcome) and updates model reliability distributions ($\text{Beta}(\alpha, \beta)$) with memory discounting ($\gamma = 0.98$) stored in `.pi/quest/model-ratings.json`.
+  - Supports explicit operator ratings via `/quest rate <1-5>` or non-blocking prompts.
+- **VCS & Maintenance Chore Exemplars** (`src/drafting/quest-exemplars.ts`):
+  - Added routine git commands (`"commit my work"`, `"git push"`, `"stash changes"`, `"git status"`), workspace maintenance, and system meta-inquiries to `conversation`, eliminating false-positive quest launches while maintaining strict disjointness from test corpora.
+- **Natural Inquiry Request Guard** (`src/drafting/detect.ts`):
+  - Bypasses quest creation for exploratory queries ending in `?` under `MAX_QUESTION_CHARS` unless summoned via explicit trigger prefixes (`quest:`, `/quest`).
+- **Evidence Gate Adaptability for Trivial Tasks** (`src/validation/evidence-gate.ts`, `src/validation/flow.ts`):
+  - Relaxed mandatory binary test runner execution for `trivial` difficulty quests where no test runner is applicable, preventing false deadlocks when claiming completion.
+- **Default Model Accuracy Calibration & Risk Evaluation** (`src/policy/effective.ts`):
+  - Added `DEFAULT_MODEL_ACCURACY` baseline mapping model patterns (`*claude-3-5-sonnet*`, `*gpt-4o*`, `*gemini-2.5-pro*`, `*gemini*flash*`, `*qwen*`, etc.) to calibrated accuracy scores (1.0, 0.67, 0.40).
+  - Mathematical risk calibration: $\text{risk} = 1.0 / \text{accuracy}$, allowing review need to continuously adapt to model strength.
+- **Automated Commit Tracking on Handoff** (`src/surface/tools/archive.ts`):
+  - Automatically queries and records the latest git commit hash into `recent-handoff.json` upon quest completion, observing post-handoff turns for potential regressions, reversions, or user corrections.
+- **Spec-Map Gate Path Resilience** (`tests/dag_and_spec.test.ts`):
+  - Added dynamic path fallback for `HIGH_LEVEL.md` lookup, ensuring spec-map tests succeed both in isolated package runs and monorepo submodule environments.
+
+## [1.9.3] - 2026-10-31
+
+### Added
+- **5-Level Difficulty Scaling & Numeric Tiers (1–5)** (`src/domain/quest.ts`, `src/config.ts`, `src/drafting/difficulty-exemplars.ts`):
+  - Expanded difficulty tiers from 3 to 5 levels: `trivial` (1), `minor` (2), `standard` (3), `major` (4), and `complex` (5).
+  - Assigned numeric ratings (1–5) to each tier to facilitate quantitative policy calculations and fine-grained review thresholds.
+- **Model Capability Risk Assessment & Dynamic Review Need** (`src/policy/effective.ts`, `src/drafting/bypass.ts`, `src/validation/flow.ts`):
+  - Added model capability tier classification (`modelCapabilityTier`) evaluating active session models against task complexity.
+  - Dynamically determines review requirements: allows highly capable models to auto-promote low-risk trivial/minor tasks while enforcing strict review policies on complex initiatives or lower-capability models.
+- **Single-Call Quest Creation** (`src/surface/tools/update-params.ts`, `src/surface/tools/update-state.ts`):
+  - Enabled atomic quest creation and drafting in one call by accepting `objective`, `plan`, `difficulty`, and `kind` directly in `quest_update_state`.
+- **Structured Execution Metadata on Quest Archive** (`src/surface/tools/archive.ts`):
+  - Enriched `quest_archive` return value with structured execution diagnostics: wall-clock duration, turn count, tool invocation breakdown, git diff line statistics, and validation status.
+- **Active Invariant Draft Seeding** (`src/surface/invariants.ts`, `src/views/draft-template.ts`):
+  - Automatically queries active standing operational directives and repository invariants from persistent memory and embeds them into newly created draft plans under `## Context / Background Discussion`, guaranteeing compliance during planning.
+- **Reviewer Failover Hardening** (`src/review/flow.ts`, `src/review/runner.ts`):
+  - Hardened multi-provider failover chains across rate limits (HTTP 429), quota depletion, and timeouts, preventing draft stalls during peer review.
+- **Parallelized Drafting Evaluation & Model Filtering** (`src/drafting/detect.ts`, `src/drafting/quality.ts`, `src/review/model.ts`):
+  - Parallelized execution of difficulty evaluation, kind classification, and exemplar checks via `Promise.all`.
+  - Filtered internal quest subagent models from reviewer selection to prevent circular delegation.
+- **Cached Citation Verification & Fast-Fail Optimization** (`src/drafting/citations.ts`, `src/drafting/quality.ts`, `src/drafting/reviews.ts`, `src/durability/injection.ts`):
+  - Memoized citation file:line resolution on unchanged files to eliminate repetitive disk I/O.
+  - Added deterministic fast-fail checks for empty plans or missing requirements before booting review subagents.
+  - Optimized test command regex fast-path and slimmed down context injection during implementation phase.
+
+### Changed
+- **Calibrated Quest Margin to 0.05** (`src/config.ts`):
+  - Calibrated default `questMinMargin` from 0.10 to 0.05, allowing genuine engineering tasks, suggestions, and polite tech-lead phrasing to clear the gate without false quests on conversational queries.
+- **Expanded Tech-Lead & Suggestive Exemplars** (`src/drafting/quest-exemplars.ts`):
+  - Added natural tech-lead suggestions, observations, and architectural critiques in English and Portuguese to `QUEST_EXEMPLARS.quest` (*"I think you should have X instead of Y"*, *"We aren't doing X, let's change to Y"*, *"Can we improve the overall efficiency of this system?"*).
+  - Achieved 100% recall on conversational tech-lead directives while maintaining 100% specificity and 0 false quests on casual conversation.
+
+### Removed
+- **Complete Elimination of Heuristics**:
+  - Removed all regex and structural heuristics (`isCorrectiveOrBugHeuristic`, `evaluateQuestDifficultyLevelHeuristic`, `evaluateQuestDifficultyHeuristic`).
+  - Deprecated and removed `"heuristic"` from `JudgeMode`, `DifficultyMode`, and `JudgeFallback`.
+  - Zero heuristic guessing: decisions are strictly evaluated via server-side nearest-exemplar embeddings (`/v1/systemone`) or explicit documented trigger prefixes/commands (`quest:`, `fix:`, `/quest`).
+  - When offline or unavailable, the system safely falls back to `"skip"` (triggers required) and default difficulty (`"standard"`), never guessing.
+
 ## [1.9.2] - 2026-10-30
 
 ### Added

@@ -59,12 +59,12 @@ export async function applyUpdate(
     }
     const rawDiff = params["difficulty"];
     let difficulty: QuestDifficulty;
-    if (rawDiff === "trivial" || rawDiff === "standard" || rawDiff === "complex") {
+    if (rawDiff === "trivial" || rawDiff === "minor" || rawDiff === "standard" || rawDiff === "major" || rawDiff === "complex") {
       difficulty = rawDiff;
     } else if (rawDiff !== undefined) {
       return {
         applied,
-        error: `unknown difficulty ${JSON.stringify(rawDiff)} — expected "trivial", "standard", or "complex"`,
+        error: `unknown difficulty ${JSON.stringify(rawDiff)} — expected "trivial", "minor", "standard", "major", or "complex"`,
       };
     } else {
       const cfg = await readQuestConfig(ctx.cwd);
@@ -82,13 +82,13 @@ export async function applyUpdate(
   }
   const rawDiff = params["difficulty"];
   if (rawDiff !== undefined && state.qid) {
-    if (rawDiff === "trivial" || rawDiff === "standard" || rawDiff === "complex") {
+    if (rawDiff === "trivial" || rawDiff === "minor" || rawDiff === "standard" || rawDiff === "major" || rawDiff === "complex") {
       state = updateState((s) => ({ ...s, difficulty: rawDiff, snapshotPending: true }));
       applied.push(`difficulty updated to ${rawDiff}`);
     } else {
       return {
         applied,
-        error: `unknown difficulty ${JSON.stringify(rawDiff)} — expected "trivial", "standard", or "complex"`,
+        error: `unknown difficulty ${JSON.stringify(rawDiff)} — expected "trivial", "minor", "standard", "major", or "complex"`,
       };
     }
   }
@@ -172,7 +172,7 @@ export function updateStateTool(pi: Pi): PiToolSpec {
         },
         difficulty: {
           type: "string",
-          description: "Quest difficulty tier: \"trivial\", \"standard\", or \"complex\".",
+          description: "Quest difficulty tier: \"trivial\", \"minor\", \"standard\", \"major\", or \"complex\".",
         },
         draftName: { type: "string" },
         refinement: { type: "string" },

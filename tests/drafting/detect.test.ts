@@ -152,7 +152,7 @@ Deno.test("detection fails closed when judge is unreachable and no trigger is pr
   };
 
   const res = await detectSubstantiveRequest(pi, ctx, "Improve latency across all queries", cfg);
-  check(!res, "failed closed without guessing via heuristics");
+  check(!res, "failed closed without guessing");
   check(getState().phase === "idle", "phase remains idle");
   replaceState(IDLE_STATE);
 });

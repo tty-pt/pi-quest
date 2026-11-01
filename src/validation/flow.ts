@@ -2,11 +2,12 @@
 // HIGH_LEVEL: #validator communication — plan, snapshot, amendments, evidence, criteria.
 // SPEC: B1.5 (completion + slim archive).
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import type { QuestState } from "../domain/quest";
-import { recordReviewResult } from "../domain/quest";
+import { recordReviewResult, difficultyLevel } from "../domain/quest";
 import { demoteToDrafting, demoteToImplementing } from "../domain/transitions";
 import type { Qid } from "../domain/qid";
 import { draftPath } from "../domain/paths";
@@ -16,11 +17,24 @@ import { isReviewerAvailable } from "../review/runner";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../config";
-import { withEffectivePolicy } from "../policy/effective";
+import { withEffectivePolicy, resolveActiveModel, calculateReviewNeed, resolveAutonomyLevel } from "../policy/effective";
 import { cancelReview, hasInFlight } from "../review/tracker";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
-import { parseDraftSections } from "../drafting/plan-text";
+import { citeLocations, deliverableBody, parseDraftSections } from "../drafting/plan-text";
+import { captureUnifiedDiff, MAX_DIFF_CHARS } from "../utils/git";
+
+export { MAX_DIFF_CHARS };
+
+export async function captureGitDiff(
+  ctx: PiCtx,
+  pi?: Pi,
+  touchedFiles?: string[],
+  baseCommit?: string,
+): Promise<string> {
+  const res = await captureUnifiedDiff(ctx, { pi, touchedFiles, baseCommit, maxChars: MAX_DIFF_CHARS });
+  return res.diff;
+}
 import { extractQuestTranscript } from "../durability/transcript";
 import { getLatestTestExecution } from "./evidence-gate";
 import { interpretUserTurn } from "../domain/intent";
@@ -103,18 +117,35 @@ export function buildConclusionSummary(state: QuestState, target: string, review
   return `Validation PASS (${target.slice(0, 12)}). ${state.amendments.length} amendment(s), ${state.setbacks.length} setback(s). Advisories: ${noted}`;
 }
 
+
 // The validator's brief differs by kind: standard quests validate against the
-// full approved doc; analysis quests validate the ## Analysis deliverable
+// deliverable plan body; analysis quests validate the ## Analysis deliverable
 // against the bounded research transcript (D4).
 const DELIVERED_ANALYSIS_CHARS = 900;
 
-export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<ReviewMaterial> {
+export async function validationBrief(ctx: PiCtx, state: QuestState, pi?: Pi): Promise<ReviewMaterial> {
   const plan = await approvedPlan(ctx, state);
   const sections = parseDraftSections(plan);
   const allRequirements = [
     ...sections.requirements,
     ...state.refinements.map((r) => r.startsWith("- ") ? r : `- ${r}`),
   ];
+
+  const deliverable = deliverableBody(sections, state.kind);
+  const citedFiles = citeLocations(deliverable).map((c) => c.file);
+  const candidateFiles = Array.from(new Set([...(state.touchedFiles ?? []), ...citedFiles]));
+
+  const unified = await captureUnifiedDiff(ctx, {
+    pi,
+    touchedFiles: candidateFiles,
+    baseCommit: state.baseCommit,
+    maxChars: MAX_DIFF_CHARS,
+  });
+
+  const codeDiff = unified.hasVcsDiff ? unified.diff : undefined;
+  const touchedFiles = (!unified.hasVcsDiff && candidateFiles.length > 0)
+    ? candidateFiles
+    : undefined;
 
   if (state.kind === "analysis" && state.qid !== null) {
     return {
@@ -130,6 +161,8 @@ export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<Re
       planRevisionHistory: formatRevisionHistory(state),
       implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
       transcriptExtract: await extractQuestTranscript(ctx, state.qid),
+      codeDiff,
+      touchedFiles,
     };
   }
   const testReceipt = getLatestTestExecution();
@@ -141,9 +174,11 @@ export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<Re
     ? state.rtm.map((r) => `- [${r.status === "satisfied" ? "x" : " "}] ${r.id}: ${r.description} (status: ${r.status})`).join("\n")
     : undefined;
 
+  const cleanPlan = deliverable || "(no plan body authored)";
+
   return {
     objective: state.pendingRootRequest ?? state.objective,
-    plan,
+    plan: cleanPlan,
     kind: state.kind,
     evidence: [
       ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
@@ -156,6 +191,8 @@ export async function validationBrief(ctx: PiCtx, state: QuestState): Promise<Re
     implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
     testReceipt: testReceiptText,
     rtmChecklist: rtmText,
+    codeDiff,
+    touchedFiles,
   };
 }
 
@@ -222,13 +259,22 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   const config = withEffectivePolicy(await readQuestConfig(ctx.cwd), ctx);
 
   // Policy-based bypass in validation:
-  // 1. "off": skip subagent review entirely when tests pass (or analysis)
-  // 2. "balanced": for non-complex tasks, skip subagent review when tests pass
+  // 1. "off": skip subagent review entirely when tests pass (or analysis / trivial)
+  // 2. "balanced": evaluate dynamic review need based on model risk, accuracy, and difficulty
   const testExecution = state.lastTestReceipt ?? getLatestTestExecution();
-  const testsPassed = testExecution !== null ? testExecution.exitCode === 0 : state.kind === "analysis";
+  const testsPassed = testExecution !== null
+    ? testExecution.exitCode === 0
+    : (state.kind === "analysis" || state.difficulty === "trivial");
+  const activeModel = resolveActiveModel(ctx, config);
+  const need = calculateReviewNeed(state.difficulty, activeModel, state.setbacks.length, config.modelAccuracy);
+  const autonomyLevel = resolveAutonomyLevel(need);
+  const level3FastPath = autonomyLevel === 3 && (testsPassed || testExecution === null);
+
   const shouldBypassValidation =
-    config.reviewPolicy === "off" ||
-    (config.reviewPolicy === "balanced" && state.difficulty !== "complex" && testsPassed);
+    !config.strictMode && (
+      config.reviewPolicy === "off" ||
+      (config.reviewPolicy === "balanced" && state.difficulty === "trivial" && testsPassed)
+    );
 
   if (shouldBypassValidation) {
     clearValidationVerdictFails(qid);
@@ -252,7 +298,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   }
 
   const validatorModel = resolveRoleModel(config, "validator");
-  const brief = await validationBrief(ctx, state);
+  const brief = await validationBrief(ctx, state, pi);
   const outcome = await runIsolatedReview({
     pi,
     ctx,

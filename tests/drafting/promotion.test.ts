@@ -16,14 +16,19 @@ import { barePi, fakeCtx, fakePi } from "../fake-pi.ts";
 const QID = "abc123" as Qid;
 
 function draftFile(cwd: string, evidence: boolean): string {
+  mkdirSync(join(cwd, "src"), { recursive: true });
+  writeFileSync(join(cwd, "src", "a.ts"), "export const a = 1;\n");
+  writeFileSync(join(cwd, "src", "b.ts"), "export const b = 2;\n");
   const content = [
     "## Requirements",
     "- first requirement",
     "- second requirement",
     "",
-    ...(evidence ? ["## Evidence", "- found in the code", ""] : []),
+    ...(evidence ? ["## Evidence", "- src/a.ts:1", "- src/b.ts:1", ""] : []),
     "## Implementation Plan",
-    "Do the work in order.",
+    "1. Step one via src/a.ts:1",
+    "2. Step two via src/b.ts:1",
+    "3. Run make test to verify",
     "",
   ].join("\n");
   mkdirSync(join(cwd, ".pi", "quest", "future"), { recursive: true });
@@ -135,13 +140,14 @@ Deno.test("no reviewer keeps drafting and steers only a live user 'go'", async (
 });
 
 function analysisDraftFile(cwd: string): string {
+  writeFileSync(join(cwd, "alloc.c"), "export const x = 1;\n".repeat(100));
   const content = [
     "## Requirements",
     "- first requirement",
     "- second requirement",
     "",
     "## Evidence",
-    "- found in the code",
+    "- alloc.c:1",
     "",
     "## Analysis",
     "Root cause sits in alloc.c:77; bound the buffer to fix it.",

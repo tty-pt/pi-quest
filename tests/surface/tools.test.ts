@@ -18,7 +18,7 @@ import {
 import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
-import { archiveActiveQuest } from "../../src/surface/tools/archive.ts";
+import { archiveActiveQuest, archiveTool } from "../../src/surface/tools/archive.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { stopBlink } from "../../src/durability/index.ts";
 import { createChildQuest } from "../../src/surface/tools/subquest.ts";
@@ -70,6 +70,26 @@ Deno.test("update creates quests and drafts on disk", async () => {
   }
 });
 
+Deno.test("single-call creation: objective + plan provisions and authors plan immediately", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx(tmp());
+  try {
+    const res = await applyUpdate(pi, ctx, {
+      objective: "Build component X.",
+      plan: "1. Step one\n2. Step two",
+    });
+    check(!res.error, "no error in single call");
+    check(getState().phase === "drafting", "phase is drafting");
+    check(getState().draft?.planAuthored === true, "plan authored in turn 1");
+    const file = await readFile(join(ctx.cwd, draftPath(getState().qid!)), "utf8");
+    check(file.includes("Step one"), "plan text written to draft file");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
 Deno.test("plan writes after promotion redirect to amendment", async () => {
   replaceState(promote(authored(), "review"));
   const pi = fakePi();
@@ -94,7 +114,11 @@ Deno.test("update claims completion only with no running children", async () => 
   replaceState({ ...promote(authored(), "review"), children: [{ qid: "kid001" as Qid, brief: "b", status: "running", findings: null, acknowledged: false }] });
   const blocked = await applyUpdate(pi, ctx, { claimComplete: true });
   check(blocked.error !== undefined && blocked.error.includes("kid001"), "children block claims");
-  replaceState(promote(authored(), "review"));
+  replaceState({
+    ...promote(authored(), "review"),
+    touchedFiles: ["src/index.ts"],
+    lastTestReceipt: { command: "npm test", exitCode: 0, tailOutput: "ok", executedAt: Date.now() },
+  });
   const claimed = await applyUpdate(pi, ctx, { claimComplete: true });
   check(getState().phase === "validating", "validating");
   check(claimed.applied.length === 1, "claim applied");
@@ -174,7 +198,39 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
   replaceState({ ...claimed, lastReview: { verdict: "PASS", target, findings: "clean" } });
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", "shipped");
   check(done.archivedQid === "abc123", "archived");
+  check(done.objective === "req", "objective preserved in archive result");
+  check(done.kind === "standard", "kind preserved in archive result");
+  check(done.difficulty === "standard", "difficulty preserved in archive result");
+  check(Array.isArray(done.modifiedFiles), "modifiedFiles is array");
+  check(Array.isArray(done.findings), "findings is array");
+  check(done.findings.includes("shipped"), "summary included in findings");
   check(getState().phase === "idle", "top-level archive clears");
+
+  // Verify archiveTool returns full structured details
+  const tool = archiveTool(pi);
+  const s2 = {
+    ...claimComplete({ ...authored(), phase: "implementing" as const }),
+    difficulty: "major" as const,
+    setbacks: [{ reason: "build failure", evidence: ["ld error"] }],
+    amendments: [{ change: "use static linking", reasons: "missing dylib" }],
+    lastTestReceipt: { command: "make test", exitCode: 0, tailOutput: "ok", executedAt: Date.now() },
+  };
+  const target2 = implementationFingerprint(s2);
+  replaceState({
+    ...s2,
+    lastReview: { verdict: "PASS", target: target2, findings: "all clear" },
+  });
+  const res = await tool.execute("call-1", { outcome: "completed", summary: "all done" }, undefined, undefined, ctx);
+  const details = (res as { details?: Record<string, unknown> }).details;
+  check(details !== undefined, "details returned");
+  check(details?.archived === "abc123", "archived qid matches");
+  check(details?.objective === "req", "objective present in details");
+  check(details?.difficulty === "major", "difficulty present in details");
+  check(Array.isArray(details?.setbacks) && (details?.setbacks as unknown[]).length === 1, "setbacks present in details");
+  check(Array.isArray(details?.amendments) && (details?.amendments as unknown[]).length === 1, "amendments present in details");
+  check((details?.lastTestReceipt as { command?: string })?.command === "make test", "lastTestReceipt present in details");
+  check(Array.isArray(details?.findings), "findings present in details");
+
   const parent = createQuest("parent work", "par001");
   const child = { ...claimComplete({ ...authored(), phase: "implementing" as const }), parentQid: "par001" as Qid };
   const childTarget = implementationFingerprint(child);
@@ -563,10 +619,10 @@ Deno.test("quest_update_state infers or overrides difficulty tier", async () => 
   const pi = fakePi();
   const ctx = fakeCtx(tmp());
   try {
-    // 1. Inferred from prompt (judge-less fallback is structural: many files => complex)
+    // 1. Defaults to standard when offline (zero heuristics)
     const created = await applyUpdate(pi, ctx, { objective: "Update src/a.ts src/b.ts src/c.ts src/d.ts" });
     check(created.applied.length === 1, "quest created");
-    check(getState().difficulty === "complex", "inferred complex from many file references");
+    check(getState().difficulty === "standard", "defaults to standard when judge offline");
 
     // 2. Explicit update of difficulty
     const updated = await applyUpdate(pi, ctx, { difficulty: "trivial" });

@@ -22,7 +22,54 @@ export type ArchivedOutcome = "COMPLETED" | "FAILED" | "ABANDONED";
 // Specialized kinds ("bugfix", "feature", "refactor", "docs") adapt evidence and verification requirements.
 export type QuestKind = "standard" | "analysis" | "bugfix" | "feature" | "refactor" | "docs";
 
-export type QuestDifficulty = "trivial" | "standard" | "complex";
+export type QuestDifficulty = "trivial" | "minor" | "standard" | "major" | "complex";
+
+export const DIFFICULTY_LEVELS: Record<QuestDifficulty, number> = {
+  trivial: 1,
+  minor: 2,
+  standard: 3,
+  major: 4,
+  complex: 5,
+};
+
+export const DIFFICULTY_BY_LEVEL: Record<number, QuestDifficulty> = {
+  1: "trivial",
+  2: "minor",
+  3: "standard",
+  4: "major",
+  5: "complex",
+};
+
+/** Convert a difficulty tier (string name or number 1..5) to its canonical numeric rank (1..5). */
+export function difficultyLevel(d?: QuestDifficulty | number | string): number {
+  if (typeof d === "number") {
+    if (d <= 1) return 1;
+    if (d >= 5) return 5;
+    return Math.round(d);
+  }
+  if (typeof d === "string") {
+    const norm = d.trim().toLowerCase();
+    if (norm === "1" || norm === "trivial") return 1;
+    if (norm === "2" || norm === "minor") return 2;
+    if (norm === "3" || norm === "standard") return 3;
+    if (norm === "4" || norm === "major") return 4;
+    if (norm === "5" || norm === "complex") return 5;
+    const num = Number(norm);
+    if (!isNaN(num) && num > 0) return difficultyLevel(num);
+  }
+  return 3;
+}
+
+/** Convert a numeric level (1..5) or alias string to the canonical difficulty name. */
+export function difficultyName(d?: QuestDifficulty | number | string): QuestDifficulty {
+  const lvl = difficultyLevel(d);
+  return DIFFICULTY_BY_LEVEL[lvl] ?? "standard";
+}
+
+/** Check if difficulty is at least a specified numeric threshold. */
+export function isDifficultyAtLeast(d: QuestDifficulty | number | string | undefined, minLevel: number): boolean {
+  return difficultyLevel(d) >= minLevel;
+}
 
 export type ReviewKind = "draft" | "validation";
 
@@ -146,6 +193,8 @@ export interface QuestState {
   questStack: StackFrame[];
   handbackReceipts: HandbackReceipt[];
   lastTestReceipt?: VerificationReceipt;
+  baseCommit?: string;
+  touchedFiles?: string[];
   archivedOutcome: ArchivedOutcome | null;
   snapshotPending: boolean;
 }
@@ -175,6 +224,8 @@ export const IDLE_STATE: QuestState = {
   questStack: [],
   handbackReceipts: [],
   lastTestReceipt: undefined,
+  baseCommit: undefined,
+  touchedFiles: [],
   archivedOutcome: null,
   snapshotPending: false,
 };
@@ -209,6 +260,7 @@ export function createQuest(
   parentQid: Qid | null = null,
   difficulty: QuestDifficulty = "standard",
   kind: QuestKind = "standard",
+  baseCommit?: string,
 ): QuestState {
   if (!isQid(qid)) throw new Error(`invalid qid: ${qid}`);
   return markChanged(IDLE_STATE, {
@@ -219,8 +271,16 @@ export function createQuest(
     kind,
     objective: request,
     pendingRootRequest: request,
+    baseCommit,
+    touchedFiles: [],
     exactNextAction: "Establish quest identity: investigate, then record findings.",
   });
+}
+
+export function recordTouchedFile(state: QuestState, filePath: string): QuestState {
+  const current = state.touchedFiles ?? [];
+  if (current.includes(filePath)) return state;
+  return markChanged(state, { touchedFiles: [...current, filePath] });
 }
 
 export function setQuestDifficulty(state: QuestState, difficulty: QuestDifficulty): QuestState {

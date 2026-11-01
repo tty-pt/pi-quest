@@ -8,6 +8,7 @@ import { resumeQuest } from "./quest";
 import { runQuestDoctor, getQuestDoctorLines, createQuestDoctorComponent, type QuestDoctorData } from "./doctor";
 import { getRouterStatusLines } from "./router";
 import { getPolicyStatusLines } from "./policy";
+import { getRatingsStatusLines } from "./ratings";
 import { refreshStatus } from "../../durability/status";
 import { hasInFlight, cancelReview } from "../../review/tracker";
 import { clearPlanRevisionRetries } from "../../implementing/plan-revision";
@@ -70,6 +71,11 @@ export function installCommands(pi: Pi): void {
         }
         return;
       }
+      if (trimmed === "ratings") {
+        const lines = await getRatingsStatusLines(ctx);
+        notify(ctx, lines.join("\n"));
+        return;
+      }
       const out = trimmed === "" ? await pickQuest(pi, ctx) : await resumeQuest(pi, ctx, trimmed);
       refreshStatus(ctx);
       notify(ctx, out);
@@ -117,6 +123,13 @@ export function installCommands(pi: Pi): void {
     description: "Show the review policy in force for the active model (policyByModel), the draft quality bar, and config warnings.",
     handler: async (_args, ctx) => {
       notify(ctx, (await getPolicyStatusLines(ctx)).join("\n"));
+    },
+  });
+  pi.registerCommand("quest-ratings", {
+    description: "Inspect model accuracy ratings, learned Beta distributions, and autonomy levels.",
+    handler: async (_args, ctx) => {
+      const lines = await getRatingsStatusLines(ctx);
+      notify(ctx, lines.join("\n"));
     },
   });
   pi.registerCommand("quest-cancel-review", {

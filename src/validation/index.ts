@@ -38,5 +38,19 @@ export function installValidation(pi: Pi): void {
         updateState((s) => ({ ...s, lastTestReceipt: receipt, snapshotPending: true }));
       }
     }
+
+    if (!event.isError && (event.toolName === "edit" || event.toolName === "write")) {
+      const p = event.input["path"];
+      if (typeof p === "string" && p.trim().length > 0) {
+        const { isAbsolute, resolve } = await import("node:path");
+        const resolved = isAbsolute(p) ? p : resolve(ctx.cwd, p);
+        updateState((s) => {
+          if (s.phase === "idle" || s.qid === null) return s;
+          const current = s.touchedFiles ?? [];
+          if (current.includes(resolved)) return s;
+          return { ...s, touchedFiles: [...current, resolved], snapshotPending: true };
+        });
+      }
+    }
   });
 }

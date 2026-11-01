@@ -177,11 +177,11 @@ Deno.test("reviewPolicy off validation auto-archives when tests pass", async () 
   replaceState(IDLE_STATE);
 });
 
-Deno.test("reviewPolicy balanced validation auto-archives standard task when tests pass", async () => {
+Deno.test("reviewPolicy balanced validation auto-archives trivial task when tests pass", async () => {
   const cwd = tmp();
   const pi = fakePi();
   const state = validatingWithStalePlanPass();
-  state.difficulty = "standard";
+  state.difficulty = "trivial";
   state.lastTestReceipt = {
     command: "npm test",
     exitCode: 0,
@@ -197,7 +197,7 @@ Deno.test("reviewPolicy balanced validation auto-archives standard task when tes
     "utf8",
   );
   await ensureValidationFlow(pi, fakeCtx(cwd));
-  check(getState().phase === "idle", "quest auto-archived under reviewPolicy balanced");
+  check(getState().phase === "idle", "quest auto-archived under reviewPolicy balanced for trivial task");
   replaceState(IDLE_STATE);
 });
 

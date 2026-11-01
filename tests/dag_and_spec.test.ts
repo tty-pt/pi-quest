@@ -104,7 +104,12 @@ Deno.test("DAG gate: modules form an acyclic graph and domain remains pure", asy
 
 Deno.test("Spec-map gate: code references all HIGH_LEVEL sections accurately", async () => {
   const PKG = new URL("..", import.meta.url).pathname;
-  const SPEC = `${PKG}/../../../HIGH_LEVEL.md`;
+  let SPEC = `${PKG}/../../../HIGH_LEVEL.md`;
+  try {
+    await Deno.stat(SPEC);
+  } catch {
+    SPEC = `/home/quirinpa/site/HIGH_LEVEL.md`;
+  }
   const SRC = `${PKG}/src`;
 
   const specText = await Deno.readTextFile(SPEC);

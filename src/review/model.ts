@@ -57,12 +57,24 @@ export function resolveDefaultReviewModel(ctx?: PiCtx): string {
   if (provider !== undefined && model !== undefined) return `${provider}/${model}`;
   if (model !== undefined) return model;
   const ctxModel = (ctx as { model?: unknown } | undefined)?.model;
-  if (typeof ctxModel === "string") return ctxModel;
+  if (typeof ctxModel === "string") {
+    if (ctxModel.toLowerCase().startsWith("quest/")) return "";
+    return ctxModel;
+  }
   if (ctxModel !== null && typeof ctxModel === "object") {
     const m = ctxModel as { provider?: unknown; id?: unknown; name?: unknown };
-    if (typeof m.provider === "string" && typeof m.id === "string") return `${m.provider}/${m.id}`;
-    if (typeof m.id === "string") return m.id;
-    if (typeof m.name === "string") return m.name;
+    if (typeof m.provider === "string" && typeof m.id === "string") {
+      if (m.provider.toLowerCase() === "quest") return "";
+      return `${m.provider}/${m.id}`;
+    }
+    if (typeof m.id === "string") {
+      if (m.id.toLowerCase().startsWith("quest/")) return "";
+      return m.id;
+    }
+    if (typeof m.name === "string") {
+      if (m.name.toLowerCase().startsWith("quest/")) return "";
+      return m.name;
+    }
   }
   return "";
 }
@@ -126,7 +138,8 @@ export function reviewModelCandidates(
   fallbackModels: readonly string[] = [],
   options?: ReviewModelCandidateOptions,
 ): ReviewModelCandidate[] {
-  const target = targetModel.trim();
+  let target = targetModel.trim();
+  if (target.toLowerCase().startsWith("quest/")) target = "";
   const candidates: ReviewModelCandidate[] = target === ""
     ? [{ label: "inherit" }]
     : [{ model: target, label: target }];
@@ -173,7 +186,7 @@ export function reviewModelCandidates(
   // Auto-append active session model if provided and different
   if (options?.sessionModel) {
     const sm = options.sessionModel.trim();
-    if (sm !== "") {
+    if (sm !== "" && !sm.toLowerCase().startsWith("quest/")) {
       if (!candidates.some((c) => c.model === sm)) candidates.push({ model: sm, label: sm });
       const smStripped = stripThinkingSuffix(sm);
       if (smStripped !== "" && smStripped !== sm && !candidates.some((c) => c.model === smStripped)) {

@@ -61,7 +61,7 @@ Promoting a draft or approving a plan revision does not require rigid magic word
 - *"The items are showing up as ephemeral objects instead of stones, please fix that."*
 - Portuguese equivalents (*"Não devias desenhar pedras como itens efémeros. Se for uma pedra ou rocha, desenha isso."*, *"Não faças X quando Y, faz Z em vez disso."*)
 
-These are evaluated in ~20 ms via in-memory embeddings (`POST /v1/systemone`) with **100% recall** and **0% false quests** on conversational benchmarks. They open a provisional quest draft automatically and classify into **`kind: "bugfix"`** without needing `/quest` or explicit prefixes. When the server is offline, fallback heuristics (`isCorrectiveOrBugHeuristic`) maintain deterministic recognition.
+These are evaluated in ~20 ms via in-memory embeddings (`POST /v1/systemone`) with **100% recall** and **0% false quests** on conversational benchmarks. They open a provisional quest draft automatically and classify into **`kind: "bugfix"`** without needing `/quest` or explicit prefixes. When the server is offline, explicit trigger prefixes (`fix:`, `quest:`) or `/quest` are required (zero fuzzy heuristics).
 
 ### Fine-Grained Quest Kinds
 
@@ -101,9 +101,40 @@ When an `analysis` quest concludes and validates, `pi-quest` automatically archi
 
 *Configure rules per model via `"policyByModel": { "gemini/*": "balanced", "claude/*": "strict" }`.*
 
+### 5-Level Difficulty Scaling & Model Capability Risk
+
+`pi-quest` evaluates task complexity across 5 numeric tiers:
+1. **`trivial` (Tier 1)**: Single-line fixes, typos, comment adjustments.
+2. **`minor` (Tier 2)**: Small scoped modifications, configuration tweaks, localized helper functions.
+3. **`standard` (Tier 3)**: Typical engineering features, bug fixes, or routine refactors requiring unit tests.
+4. **`major` (Tier 4)**: Multi-file implementations, interface contracts, cross-module updates.
+5. **`complex` (Tier 5)**: Architectural redesigns, kernel migrations, multi-service protocol changes.
+
+Dynamic review gating compares the difficulty tier against the active model's capability tier (`modelCapabilityTier`). Highly capable reasoning models can fast-track low-risk tiers (1–2) under balanced policy, while lower-capability models or complex tiers (4–5) trigger thorough peer review.
+
+### Earned Autonomy Ladder & Model Ratings
+
+`pi-quest` dynamically scales review requirements based on an **Earned Autonomy Ladder**:
+$$\text{ReviewNeed} = \frac{\text{Difficulty}}{\text{ModelAccuracy}} + (\text{Setbacks} \times 1.5)$$
+
+- **Level 3 (Full Autonomy, $\text{ReviewNeed} \le 2.2$)**:
+  High trust. Plan is auto-promoted without review subagents, and validation completes automatically upon passing test receipts or clean file trees.
+- **Level 2 (Balanced Autonomy, $2.2 < \text{ReviewNeed} \le 4.5$)**:
+  Routine tasks bypass drafting subagent review; completion is gated on execution test receipts.
+- **Level 1 (Supervised Audit, $\text{ReviewNeed} > 4.5$)**:
+  Mandatory independent reviewer and validator subagents on drafting, revisions, and completion.
+
+#### Zero-Friction Implicit Behavioral Telemetry
+Model reliability is continuously learned without manual surveys:
+- **Commit Reversions**: Tracks git commit hashes delivered in `.pi/quest/recent-handoff.json` across 3 turns; if a commit is reset or reverted, the model receives a penalty ($S = 0.0$).
+- **Developer Corrections**: Subsequent turns are monitored for user bug reports or complaints via semantic embeddings; corrections incur a retrospective penalty ($S = 0.25$).
+- **Bayesian Ratings**: Updates model distributions ($\text{Beta}(\alpha, \beta)$) with memory discounting ($\gamma = 0.98$) stored in `.pi/quest/model-ratings.json`.
+- **Dashboard Command**: Inspect active ratings with `/quest-ratings` (or `/quest ratings`).
+- **Configurable Accuracies**: Set model accuracy baselines in `.pi/settings.json` via `"modelAccuracy": { "anthropic/claude-sonnet-5*": 0.95, "openai/gpt-4o*": 0.92, "local/*": 0.5 }`.
+
 ---
 
-## 4. Reviewer Failover & Cooldown Architecture
+## 4. Reviewer Failover, Cooldown & Invariant Seeding
 
 When a quest enters peer review (in drafting, mid-flight plan revision, or validation), `pi-quest` guarantees that external provider rate limits or quota depletion cannot stall the agent:
 
@@ -120,6 +151,8 @@ When a quest enters peer review (in drafting, mid-flight plan revision, or valid
   - Records a 15-minute cooldown on the model key, its stripped variant, and the provider prefix (`provider:<prov>`, e.g. `provider:anthropic`).
   - All subsequent candidate models under the same provider namespace are immediately skipped without wasting network requests or timing out.
   - The reviewer immediately fails over to an independent provider (e.g. `antigravity/gemini-3.8-flash`) or `{ label: "inherit" }`, returning a timely verdict.
+- **Active Invariant Draft Seeding**:
+  When drafting opens, `pi-quest` queries persistent memory for standing operational directives and architectural invariants (`level: "L2"`). These invariants are embedded directly into the draft proposal (`## Context / Background Discussion`), ensuring that the planner, peer reviewers, and validators adhere to established project rules from the outset.
 
 ---
 
@@ -130,8 +163,8 @@ When a quest enters peer review (in drafting, mid-flight plan revision, or valid
 - **Embedding-Only Model Provisioning & Visual Status**: Automatically downloads only the required fast embedding model (`bge-base`, 117 MB). Unused inference/chat models (`qwen`, `olmoe`) are never downloaded. Non-blocking download progress (`⬇ bge-base (42%)`) and active model status (`⚡ bge-base`) appear in the status bar under `quest-judge`.
 - **Proactive Dependency Checks**: On `session_start`, checks core C engine versions and alerts with remediation steps if anything is outdated.
 - **Deterministic Trigger Words**: Starting a prompt with `quest:`, `task:`, `fix:`, or `feat:` starts the quest instantly with 0ms latency.
-- **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/systemone` (~5–15 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` falls back to deterministic local heuristics (explicit trigger words, `/quest`, structural path counts) without invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
-- **Corrective Bug Report & Directive Intent Recognition**: Recognizes bug reports ("There's a bug in X", "The items are showing up as ephemeral objects instead of stones") and negative directives ("Don't do X, do Y instead", "You shouldn't draw X as Y") as quest intent with `bugfix` kind, both via embeddings and deterministic local heuristic fallback.
+- **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/systemone` (~5–15 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` requires explicit trigger prefixes or commands (`quest:`, `fix:`, `/quest`) without guessing or invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
+- **Corrective Bug Report & Directive Intent Recognition**: Recognizes bug reports ("There's a bug in X", "The items are showing up as ephemeral objects instead of stones") and negative directives ("Don't do X, do Y instead", "You shouldn't draw X as Y") as quest intent with `bugfix` kind via embeddings. When offline, explicit trigger commands are used.
 - **Daemon Circuit Breaker & Resilient Fast Timeout**: All calls to `axil-auren` run with strict 250ms timeouts and an in-memory circuit breaker (`30s` cooldown). If the local daemon is uncommunicative, stopped, or slow, the circuit breaker opens daemon-wide; subsequent calls fail fast in ~1 µs without touching the network or socket layer, preventing Pi event loop hangs.
 
 ### Diagnostic Command
@@ -146,9 +179,9 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
-| `quest_update_state` | `objective`, `draftName`, `difficulty`, `plan`, `analysis`, `planRevision`, `claimComplete` | Primary write path: creates quests, authors plans, revises plans mid-flight, and claims completion. |
+| `quest_update_state` | `objective`, `draftName`, `difficulty`, `plan`, `analysis`, `planRevision`, `claimComplete` | Primary write path: atomic single-call quest creation, plan authoring, mid-flight plan revision, and completion claims. |
 | `quest_subquest` | `goal`, `brief`, `allowedPaths`, `requiredTestCommands` | Spawns a sequential child quest on the stack for complex initiatives. |
-| `quest_archive` | `outcome`, `summary` | Concludes and archives the active quest (`outcome: "completed"` requires validation PASS). |
+| `quest_archive` | `outcome`, `summary` | Concludes and archives the active quest (`outcome: "completed"` requires validation PASS); returns structured execution diagnostics (duration, turn count, tool calls breakdown, diff stats). |
 | `quest_rebut` | `rebuttal` | Submits concrete evidence addressing reviewer findings, booting a fresh review. |
 | `quest_ask_human` | `question`, `default`, `timeoutMs` | Asks the human with a recommended default, continuing autonomously on absence. |
 | `quest_recover` | `qid` | Reconstructs quest state from the transcript after crashes or context resets. |
@@ -162,6 +195,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 | `/quest` | `Ctrl+Q` | View active plan in scrollable overlay, resume paused drafts, or create new quest. |
 | `/quests` | | List active branch quests, future drafts, and archived completions. |
 | `/quest-policy` | | Inspect active model, effective review policy, and draft quality rules. |
+| `/quest-ratings` | | Inspect model accuracy ratings, learned Beta distributions, and autonomy levels. |
 | `/quest-router` | | Inspect phase $\times$ difficulty matrix cells, active routes, and cooldown timers. |
 | `/quest-del` | | Archive the active quest as abandoned. |
 

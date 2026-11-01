@@ -323,10 +323,15 @@ const NO_QUALITY = { ...DEFAULT_CONFIG.draftQuality, mode: "off" as const };
 
 async function draftFailureSetup(qid: Qid): Promise<{ cwd: string; qid: Qid; file: string; doc: string; target: string }> {
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-retry-"));
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await writeFile(join(cwd, "src/a.ts"), "export const a = 1;\n", "utf8");
+  await writeFile(join(cwd, "src/b.ts"), "export const b = 2;\n", "utf8");
+  await writeFile(join(cwd, "src/c.ts"), "export const c = 3;\n", "utf8");
+  await writeFile(join(cwd, "src/d.ts"), "export const d = 4;\n", "utf8");
   replaceState(createDraft(createQuest("req", qid), "mat"));
   const file = join(cwd, draftPath(qid));
   await mkdir(dirname(file), { recursive: true });
-  const doc = "## Requirements\n- one\n- two\n\n## Evidence\n- found\n\n## Implementation Plan\n\n### Goal\nDo the work.\n";
+  const doc = "## Requirements\n- one\n- two\n\n## Evidence\n- src/a.ts:1\n- src/b.ts:1\n- src/c.ts:1\n- src/d.ts:1\n\n## Implementation Plan\n\n### Goal\nDo the work.\n\n1. Step one via src/a.ts:1\n2. Step two via src/b.ts:1\n3. Step three via src/c.ts:1\n4. Step four via src/d.ts:1\n5. Run tests and make test\n";
   await writeFile(file, doc, "utf8");
   const target = hashContent(doc);
   // Mirror the real pipeline: maybeBootDraftReview marks planAuthored and the
@@ -471,28 +476,17 @@ async function belowBarSetup(qid: Qid): Promise<{ cwd: string; file: string; doc
   return { cwd, file, doc, target };
 }
 
-Deno.test("a below-bar draft boots a bounded fast-fail review brief", async () => {
+Deno.test("a below-bar draft fast-fails locally without emitting a subagent request", async () => {
   const d = await belowBarSetup("barf01" as Qid);
   const bus = retryBus();
   try {
-    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
-    await waitForRequests(bus.emitted, 1);
-    const task = String(requests(bus.emitted)[0]["task"] ?? "");
-    check(task.includes("FAST-FAIL"), "below-bar brief enters fast-fail mode");
-    check(task.toLowerCase().includes("maturity bar"), "bar named in the brief");
-    bus.feed({
-      requestId: requests(bus.emitted)[0]["requestId"],
-      status: "completed",
-      result: {
-        kind: "text",
-        text: "VERDICT: FAIL\nSEVERITY: MINOR\nFINDINGS:\n- Issue: below the maturity bar\n  Evidence: thin draft\n\nREQUIRED REVISIONS:\n- add requirements and evidence",
-      },
-    });
-    await booted;
+    await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    check(requests(bus.emitted).length === 0, "no subagent review request emitted for below-bar draft");
     const sentWakes = wakes(bus.pi);
     check(sentWakes.length === 1, "FAIL wakes once");
     const text = String(sentWakes[0].content);
-    check(text.includes("draft profile"), "FAIL wake carries the draft profile");
+    check(text.includes("fast-fail") && text.includes("FAIL"), "FAIL wake indicates fast-fail");
+    check(text.includes("Draft profile"), "FAIL wake carries the draft profile");
     check(text.includes("NOT met"), "wake names the bar gap");
   } finally {
     clearDraftReviewRetry("barf01" as Qid);
@@ -631,15 +625,19 @@ Deno.test("reviewPolicy balanced bypasses draft review for standard and trivial 
 Deno.test("roles.reviewer model is forwarded to subagent review request", async () => {
   const d = await draftFailureSetup("role001" as Qid);
   const bus = retryBus();
-  // Complex difficulty forces review even under balanced
+  // Complex difficulty forces review even under balanced (needs 4 requirements under 5-tier complex)
   updateState((s) => ({ ...s, difficulty: "complex" }));
+  const complexDoc = d.doc.replace("## Requirements\n- one\n- two\n", "## Requirements\n- one\n- two\n- three\n- four\n");
+  await writeFile(d.file, complexDoc, "utf8");
+  const complexTarget = hashContent(complexDoc);
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: complexTarget } });
   try {
     const roleConfig = {
       ...DEFAULT_CONFIG,
       reviewPolicy: "balanced" as const,
       roles: { reviewer: "google/gemini-2.5-flash" },
     };
-    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, roleConfig);
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), complexTarget, roleConfig);
     await waitForRequests(bus.emitted, 1);
     const req = requests(bus.emitted)[0];
     check(req["model"] === "google/gemini-2.5-flash", "reviewer model dispatched");

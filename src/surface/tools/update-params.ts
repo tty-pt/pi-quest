@@ -43,6 +43,7 @@ import { extractRecentConversationContext } from "../../durability/transcript.ts
 import { setDocStatus } from "../../durability/quest-doc-io.ts";
 import { noteDraftUpdated } from "../../durability/status.ts";
 import { ensureDraftFile, listKnownQids } from "../../files.ts";
+import { fetchActiveInvariants, formatInvariantsComment } from "../invariants.ts";
 
 export async function syncAmendmentsToDraft(
   ctx: PiCtx,
@@ -79,7 +80,9 @@ export async function provisionRootQuest(
   const base = createQuest(objective, qid, null, difficulty);
   replaceState(markChanged(base, { kind, difficulty }));
   const context = extractRecentConversationContext(ctx);
-  await ensureDraftFile(ctx, qid, qid, objective, context, difficulty);
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  const invBlock = formatInvariantsComment(invariants);
+  await ensureDraftFile(ctx, qid, qid, objective, context, difficulty, invBlock);
   return qid;
 }
 
@@ -102,11 +105,16 @@ export async function claimForValidation(
     );
   }
 
+  const lintRules = (await readQuestConfig(ctx.cwd)).lintRules;
   const hasGit = existsSync(join(ctx.cwd, ".git"));
+
+  let getDiffStat: () => Promise<string>;
+  let getDiffPatch: () => Promise<string>;
 
   if (hasGit) {
     const runGitDiff = async (...args: string[]) => {
-      for (const ref of ["HEAD", "HEAD~1"]) {
+      const refs = state.baseCommit ? [state.baseCommit, "HEAD", "HEAD~1"] : ["HEAD", "HEAD~1"];
+      for (const ref of refs) {
         try {
           const res = (await pi.exec("git", ["diff", ...args, ref], { cwd: ctx.cwd })) as
             | { code?: number; exitCode?: number; stdout?: string; output?: string }
@@ -117,14 +125,27 @@ export async function claimForValidation(
       }
       return "";
     };
-    const lintRules = (await readQuestConfig(ctx.cwd)).lintRules;
-    await assertCompletionEligibility(state, {
-      lintRules,
-      getDiffStat: () => runGitDiff("--stat"),
-      getDiffPatch: () => runGitDiff(),
-      getLatestTest: () => state.lastTestReceipt ?? getLatestTestExecution(),
-    });
+    getDiffStat = async () => {
+      const stat = await runGitDiff("--stat");
+      if (stat.trim().length > 0) return stat;
+      const touched = state.touchedFiles ?? [];
+      return touched.length > 0 ? `${touched.length} file(s) modified in session` : "";
+    };
+    getDiffPatch = () => runGitDiff();
+  } else {
+    getDiffStat = async () => {
+      const touched = state.touchedFiles ?? [];
+      return touched.length > 0 ? `${touched.length} file(s) modified in session` : "";
+    };
+    getDiffPatch = async () => "";
   }
+
+  await assertCompletionEligibility(state, {
+    lintRules,
+    getDiffStat,
+    getDiffPatch,
+    getLatestTest: () => state.lastTestReceipt ?? getLatestTestExecution(),
+  });
 
   const claimed = updateState((s) => claimComplete(s));
   await setDocStatus(ctx, qid, "validating", false);
@@ -143,23 +164,33 @@ export async function provisionDraft(
   params: Record<string, unknown>,
   applied: string[],
 ): Promise<QuestState> {
-  const draftName = params["draftName"];
+  const plan = params["plan"];
+  const analysisParam = params["analysis"];
+  const explicitDraftName = params["draftName"];
+  const draftName =
+    typeof explicitDraftName === "string" && explicitDraftName.trim() !== ""
+      ? explicitDraftName.trim()
+      : ((typeof plan === "string" && plan.trim() !== "") || (typeof analysisParam === "string" && analysisParam.trim() !== "")
+        ? (state.name || state.qid || "draft")
+        : undefined);
+
   if (
-    typeof draftName !== "string" || draftName.trim() === "" ||
+    draftName === undefined ||
     state.phase !== "provisional" || state.qid === null
   ) {
     return state;
   }
   const qid = state.qid;
-  const name = draftName.trim();
-  const plan = params["plan"];
+  const name = draftName;
   const kind = params["kind"] === "analysis" ? "analysis" : "standard";
   const analysis = kind === "analysis";
   const thin = state.refinements.length === 0 &&
     ((typeof plan !== "string" || plan.trim() === "") && !analysis);
   state = createDraft(state, name, kind);
   replaceState(state);
-  await ensureDraftFile(ctx, qid, name, state.objective, undefined, state.difficulty);
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  const invBlock = formatInvariantsComment(invariants);
+  await ensureDraftFile(ctx, qid, name, state.objective, undefined, state.difficulty, invBlock);
   state = await carryRefinementsToDraft(ctx, getState());
   applied.push(`draft ${name} created at ${draftPath(qid)} — edit ONLY this file`);
   if (thin) {

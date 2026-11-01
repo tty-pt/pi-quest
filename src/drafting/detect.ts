@@ -5,6 +5,7 @@ import { emitNow, sendSteer } from "../app/interpreter";
 import { createQuest } from "../domain/quest";
 import { nextQid } from "../domain/qid";
 import { ensureDraftFile, listKnownQids } from "../files";
+import { fetchActiveInvariants, formatInvariantsComment } from "../surface/invariants";
 import { extractRecentConversationContext } from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
@@ -12,6 +13,8 @@ import { parseExplicitSyntax } from "../domain/intent";
 import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../config";
 import { evaluateQuestIntent, evaluateQuestKind } from "./judge";
 import { evaluateQuestDifficulty } from "./difficulty";
+import { checkPostQuestReversions, checkPostQuestCorrection } from "../durability/ratings";
+import { getGitHead } from "../utils/git";
 
 export function matchTriggerPrefix(
   text: string,
@@ -58,12 +61,16 @@ export async function detectSubstantiveRequest(
   const trigger = matchTriggerPrefix(trimmed, cfg.triggerPrefixes);
   if (trigger.matched) {
     const objective = trigger.objective;
-    const diff = await evaluateQuestDifficulty(objective, cfg);
-    const kind = await evaluateQuestKind(objective, cfg);
+    const [diff, kind, baseCommit] = await Promise.all([
+      evaluateQuestDifficulty(objective, cfg),
+      evaluateQuestKind(objective, cfg),
+      getGitHead(ctx.cwd, pi),
+    ]);
     const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-    replaceState(createQuest(objective, qid, null, diff.difficulty, kind));
+    replaceState(createQuest(objective, qid, null, diff.difficulty, kind, baseCommit));
     const context = extractRecentConversationContext(ctx);
-    await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty);
+    const invariants = await fetchActiveInvariants(ctx.cwd);
+    await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty, formatInvariantsComment(invariants));
     emitNow(pi);
     const complexHint = diff.difficulty === "complex"
       ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
@@ -90,12 +97,16 @@ export async function detectSubstantiveRequest(
 
   if (!isQuest) return false;
 
-  const diff = await evaluateQuestDifficulty(trimmed, cfg);
-  const kind = await evaluateQuestKind(trimmed, cfg);
+  const [diff, kind, baseCommit] = await Promise.all([
+    evaluateQuestDifficulty(trimmed, cfg),
+    evaluateQuestKind(trimmed, cfg),
+    getGitHead(ctx.cwd, pi),
+  ]);
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  replaceState(createQuest(trimmed, qid, null, diff.difficulty, kind));
+  replaceState(createQuest(trimmed, qid, null, diff.difficulty, kind, baseCommit));
   const context = extractRecentConversationContext(ctx);
-  await ensureDraftFile(ctx, qid, qid, trimmed, context, diff.difficulty);
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  await ensureDraftFile(ctx, qid, qid, trimmed, context, diff.difficulty, formatInvariantsComment(invariants));
   emitNow(pi);
   const complexHint = diff.difficulty === "complex"
     ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
@@ -110,7 +121,19 @@ export async function detectSubstantiveRequest(
 }
 
 export function watchNewRequests(pi: Pi): void {
-  onUserMessage(pi, (text, ctx) => {
+  onUserMessage(pi, async (text, ctx) => {
+    try {
+      await checkPostQuestReversions(ctx.cwd, async (args) => {
+        return (await pi.exec("git", args, { cwd: ctx.cwd })) as
+          | { code?: number; exitCode?: number; stdout?: string; output?: string }
+          | undefined;
+      });
+    } catch { /* ignore */ }
+
+    try {
+      await checkPostQuestCorrection(ctx.cwd, text);
+    } catch { /* ignore */ }
+
     void detectSubstantiveRequest(pi, ctx, text);
   });
 }

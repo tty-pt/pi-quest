@@ -14,14 +14,16 @@ export interface DraftThresholds {
 }
 
 export type EmbedMode = "auto" | "off";
-export type DifficultyMode = "auto" | "judge" | "heuristic" | "off";
+export type DifficultyMode = "auto" | "judge" | "off";
 
 export type DifficultyThresholds = Record<QuestDifficulty, DraftThresholds>;
 
 export const DEFAULT_DIFFICULTY_THRESHOLDS: DifficultyThresholds = {
   trivial: { requirements: 1, evidence: 2 },
+  minor: { requirements: 1, evidence: 4 },
   standard: { requirements: 2, evidence: 7 },
-  complex: { requirements: 3, evidence: 10 },
+  major: { requirements: 3, evidence: 9 },
+  complex: { requirements: 4, evidence: 12 },
 };
 
 export interface InterfaceBindings {
@@ -29,9 +31,9 @@ export interface InterfaceBindings {
 }
 
 export type StatusStyle = "icon" | "text";
-export type JudgeMode = "auto" | "systemone" | "heuristic" | "off";
+export type JudgeMode = "auto" | "systemone" | "off";
 export type JudgeProtocol = "auto" | "systemzero" | "systemone";
-export type JudgeFallback = "heuristic" | "skip";
+export type JudgeFallback = "skip";
 export type ReviewPolicy = "strict" | "balanced" | "off";
 
 export interface LintRule {
@@ -101,8 +103,12 @@ export interface QuestConfig {
   statusStyle: StatusStyle;
   autoArchive: boolean;
   reviewPolicy: ReviewPolicy;
+  /** Enforces isolated adversarial validation without bypass on non-trivial tasks. */
+  strictMode: boolean;
   /** Ordered glob rules mapping the active "provider/id" to a policy. */
   policyByModel: PolicyRule[];
+  /** Configured accuracy/reliability ratings per model glob pattern (0.0 to 1.0). */
+  modelAccuracy: Record<string, number>;
   /** Set by withEffectivePolicy: why reviewPolicy has its current value. */
   policyNote?: string;
   draftQuality: DraftQualityConfig;
@@ -181,7 +187,9 @@ export const DEFAULT_CONFIG: QuestConfig = {
   statusStyle: "icon",
   autoArchive: true,
   reviewPolicy: "strict",
+  strictMode: false,
   policyByModel: [],
+  modelAccuracy: {},
   draftQuality: DEFAULT_DRAFT_QUALITY,
   reviewerModel: undefined,
   validatorModel: undefined,
@@ -196,7 +204,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   judgeUrl: undefined,
   judgeModel: "olmoe",
   judgeKey: undefined,
-  judgeFallback: "heuristic",
+  judgeFallback: "skip",
   judgeTimeoutMs: 6000,
   embedMode: "auto",
   embedUrl: undefined,
@@ -204,7 +212,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   intentMinMargin: 0.075,
   intentMinSimilarity: 0.6,
   intentExemplars: {},
-  questMinMargin: 0.1,
+  questMinMargin: 0.05,
   questExemplars: {},
   difficultyMinMargin: 0.075,
   difficultyExemplars: {},
@@ -283,7 +291,7 @@ function loadJudgeConfig(record: Record<string, unknown>): {
 } {
   const rawJudgeMode = record["judgeMode"] ?? getEnv("PI_QUEST_JUDGE_MODE") ?? getEnv("PI_MM_JUDGE_MODE");
   const judgeMode: JudgeMode =
-    rawJudgeMode === "auto" || rawJudgeMode === "systemone" || rawJudgeMode === "heuristic" || rawJudgeMode === "off"
+    rawJudgeMode === "auto" || rawJudgeMode === "systemone" || rawJudgeMode === "off"
       ? rawJudgeMode
       : DEFAULT_CONFIG.judgeMode;
 
@@ -315,7 +323,7 @@ function loadJudgeConfig(record: Record<string, unknown>): {
 
   const rawJudgeFallback = record["judgeFallback"] ?? getEnv("PI_QUEST_JUDGE_FALLBACK");
   const judgeFallback: JudgeFallback =
-    rawJudgeFallback === "heuristic" || rawJudgeFallback === "skip"
+    rawJudgeFallback === "skip"
       ? rawJudgeFallback
       : DEFAULT_CONFIG.judgeFallback;
 
@@ -426,7 +434,7 @@ export function loadConfig(raw: unknown): QuestConfig {
 
   const rawDiffMode = record["difficultyMode"] ?? getEnv("PI_QUEST_DIFFICULTY_MODE");
   const difficultyMode: DifficultyMode =
-    rawDiffMode === "auto" || rawDiffMode === "judge" || rawDiffMode === "heuristic" || rawDiffMode === "off"
+    rawDiffMode === "auto" || rawDiffMode === "judge" || rawDiffMode === "off"
       ? rawDiffMode
       : DEFAULT_CONFIG.difficultyMode;
 
@@ -456,7 +464,9 @@ export function loadConfig(raw: unknown): QuestConfig {
 
   const difficultyThresholds: DifficultyThresholds = {
     trivial: parseTier("trivial", DEFAULT_DIFFICULTY_THRESHOLDS.trivial),
+    minor: parseTier("minor", DEFAULT_DIFFICULTY_THRESHOLDS.minor),
     standard: parseTier("standard", draftThresholds),
+    major: parseTier("major", DEFAULT_DIFFICULTY_THRESHOLDS.major),
     complex: parseTier("complex", DEFAULT_DIFFICULTY_THRESHOLDS.complex),
   };
 
@@ -465,6 +475,11 @@ export function loadConfig(raw: unknown): QuestConfig {
     rawPolicy === "strict" || rawPolicy === "balanced" || rawPolicy === "off"
       ? rawPolicy
       : DEFAULT_CONFIG.reviewPolicy;
+
+  const rawStrictMode = record["strictMode"] ?? getEnv("PI_QUEST_STRICT_MODE");
+  const strictMode = typeof rawStrictMode === "boolean"
+    ? rawStrictMode
+    : rawStrictMode === "1" || rawStrictMode === "true";
 
   const rawRoles = (typeof record["roles"] === "object" && record["roles"] !== null)
     ? (record["roles"] as Record<string, unknown>)
@@ -538,7 +553,21 @@ export function loadConfig(raw: unknown): QuestConfig {
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
     autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
     reviewPolicy,
+    strictMode,
     policyByModel: parsePolicyRules(record["policyByModel"] ?? getEnv("PI_QUEST_POLICY_BY_MODEL")),
+    modelAccuracy: (() => {
+      const raw = record["modelAccuracy"];
+      const out: Record<string, number> = {};
+      if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+        for (const [pattern, val] of Object.entries(raw)) {
+          const num = typeof val === "number" ? val : typeof val === "string" ? Number(val) : NaN;
+          if (!isNaN(num) && num > 0 && num <= 1) {
+            out[pattern.trim()] = num;
+          }
+        }
+      }
+      return out;
+    })(),
     draftQuality: parseDraftQuality(record["draftQuality"] ?? getEnv("PI_QUEST_DRAFT_QUALITY")),
     reviewerModel,
     validatorModel,

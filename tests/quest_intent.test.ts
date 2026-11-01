@@ -1,6 +1,6 @@
 import { check } from "./check.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../src/config.ts";
-import { evaluateQuestIntent, isCorrectiveOrBugHeuristic } from "../src/drafting/judge.ts";
+import { evaluateQuestIntent } from "../src/drafting/judge.ts";
 import { evaluateQuestKind } from "../src/drafting/judge.ts";
 import { QUEST_EXEMPLARS } from "../src/drafting/quest-exemplars.ts";
 import { KIND_EXEMPLARS } from "../src/drafting/kind-exemplars.ts";
@@ -14,57 +14,20 @@ const PT_BUG_REPORT =
 const CONVERSATION_QUESTION =
   "What do you think of this approach?";
 
-Deno.test("isCorrectiveOrBugHeuristic detects corrective directives and bug reports", () => {
-  check(isCorrectiveOrBugHeuristic(USER_BUG_REPORT), "matches user bug report");
-  check(isCorrectiveOrBugHeuristic(NEGATIVE_SPEC), "matches negative specification");
-  check(isCorrectiveOrBugHeuristic("Don't write raw SQL in handlers, use the query builder instead."), "matches don't X do Y");
-  check(isCorrectiveOrBugHeuristic(PT_BUG_REPORT), "matches Portuguese corrective directive");
-  check(isCorrectiveOrBugHeuristic("Não faças X quando Y, faz Z em vez disso."), "matches PT negative directive");
-  check(isCorrectiveOrBugHeuristic("The rocks are showing up as ephemeral objects instead of stones."), "matches instead of bug observation");
-  check(isCorrectiveOrBugHeuristic("As pedras estão a aparecer como itens efémeros em vez de rochas."), "matches PT instead of observation");
-
-  // Negative controls: must NOT match casual conversation or questions
-  check(!isCorrectiveOrBugHeuristic(CONVERSATION_QUESTION), "rejects conversation question");
-  check(!isCorrectiveOrBugHeuristic("Can you explain how this module works?"), "rejects explain request");
-  check(!isCorrectiveOrBugHeuristic("What is the difference between a process and a thread?"), "rejects conceptual query");
-  check(!isCorrectiveOrBugHeuristic("Good morning!"), "rejects greeting");
-  check(!isCorrectiveOrBugHeuristic("Olá, como estás?"), "rejects PT greeting");
-});
-
-Deno.test("evaluateQuestIntent recognizes corrective directives under heuristic fallback", async () => {
-  const fallbackCfg: QuestConfig = {
+Deno.test("evaluateQuestIntent skips quest creation when offline without guessing", async () => {
+  const offlineCfg: QuestConfig = {
     ...DEFAULT_CONFIG,
     embedMode: "off",
-    judgeFallback: "heuristic",
   };
 
-  const res1 = await evaluateQuestIntent(USER_BUG_REPORT, fallbackCfg);
-  check(res1.isQuest === true, "user bug report recognized under heuristic fallback");
+  const res1 = await evaluateQuestIntent(USER_BUG_REPORT, offlineCfg);
+  check(res1.isQuest === false, "offline skips quest creation without judge");
+  check(res1.source === "skip", "source is skip");
   check(res1.degraded === true, "marked degraded");
 
-  const res2 = await evaluateQuestIntent(NEGATIVE_SPEC, fallbackCfg);
-  check(res2.isQuest === true, "negative spec recognized under heuristic fallback");
-
-  const res3 = await evaluateQuestIntent(PT_BUG_REPORT, fallbackCfg);
-  check(res3.isQuest === true, "PT bug report recognized under heuristic fallback");
-
-  // Negative control
-  const resConv = await evaluateQuestIntent(CONVERSATION_QUESTION, fallbackCfg);
-  check(resConv.isQuest === false, "conversation question rejected under heuristic fallback");
-});
-
-Deno.test("evaluateQuestIntent recognizes corrective directives under explicit heuristic mode", async () => {
-  const heurCfg: QuestConfig = {
-    ...DEFAULT_CONFIG,
-    judgeMode: "heuristic",
-  };
-
-  const res = await evaluateQuestIntent(USER_BUG_REPORT, heurCfg);
-  check(res.isQuest === true, "recognized in heuristic mode");
-  check(res.source === "heuristic", "source is heuristic");
-
-  const resConv = await evaluateQuestIntent(CONVERSATION_QUESTION, heurCfg);
-  check(resConv.isQuest === false, "conversation rejected in heuristic mode");
+  const resConv = await evaluateQuestIntent(CONVERSATION_QUESTION, offlineCfg);
+  check(resConv.isQuest === false, "conversation question skipped");
+  check(resConv.source === "skip", "source is skip");
 });
 
 Deno.test("evaluateQuestIntent classifies corrective directives as quest via mock embeddings", async () => {
