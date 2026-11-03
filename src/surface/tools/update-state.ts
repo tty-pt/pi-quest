@@ -8,7 +8,7 @@ import {
   type QuestDifficulty,
   type QuestKind,
 } from "../../domain/quest.ts";
-import { acknowledgeChild } from "../../domain/children.ts";
+import { acknowledgeChild, settleChild } from "../../domain/children.ts";
 import { type Qid } from "../../domain/qid.ts";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events.ts";
 import { checkAnalysisParam, checkPlanParam } from "./draft-profile.ts";
@@ -134,7 +134,14 @@ export async function applyUpdate(
     : "";
   if (continuePast && state.qid) {
     try {
-      state = updateState((s) => acknowledgeChild(s, continuePast as Qid));
+      state = updateState((s) => {
+        let st = s;
+        const link = st.children.find((c) => c.qid === continuePast);
+        if (link && link.status === "running") {
+          st = settleChild(st, continuePast as Qid, "returned", "Settled via continuePast");
+        }
+        return acknowledgeChild(st, continuePast as Qid);
+      });
       applied.push(`continued past child ${continuePast}`);
     } catch (err) {
       return { applied, error: err instanceof Error ? err.message : String(err) };
