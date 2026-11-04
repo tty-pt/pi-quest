@@ -205,7 +205,15 @@ export async function captureUnifiedDiff(
 
     // C. Fallback to uncommitted HEAD changes, then HEAD~1 if not diffed with base
     if (!diffWithBase) {
-      for (const ref of ["HEAD", "HEAD~1"]) {
+      const isExplicitlyTouched = touchedFiles.some((f) => {
+        const fullPath = isAbsolute(f) ? f : resolve(ctx.cwd, f);
+        return findRepoRoot(fullPath) === repo;
+      });
+      const refs = isExplicitlyTouched || repoRoots.size === 1
+        ? ["HEAD", "HEAD~1"]
+        : ["HEAD"];
+
+      for (const ref of refs) {
         const diffRes = await runGit(["diff", ref], repo, pi);
         if (diffRes.exitCode === 0 && diffRes.stdout.trim().length > 0) {
           repoDiff = diffRes.stdout.trim();
@@ -227,13 +235,21 @@ export async function captureUnifiedDiff(
     }
   }
 
-  // Synthesize diff text
+  // Synthesize diff text (prioritize external/touched repos)
+  const sortedBlocks = [...diffBlocks].sort((a, b) => {
+    const aIsExternal = a.label.startsWith("EXTERNAL REPOSITORY:");
+    const bIsExternal = b.label.startsWith("EXTERNAL REPOSITORY:");
+    if (aIsExternal && !bIsExternal) return -1;
+    if (!aIsExternal && bIsExternal) return 1;
+    return 0;
+  });
+
   let combinedDiff = "";
-  if (diffBlocks.length === 1 && diffBlocks[0].label.startsWith("WORKSPACE:")) {
+  if (sortedBlocks.length === 1 && sortedBlocks[0].label.startsWith("WORKSPACE:")) {
     // Single workspace repo diff: keep simple without extra headers
-    combinedDiff = diffBlocks[0].text;
-  } else if (diffBlocks.length > 0) {
-    combinedDiff = diffBlocks
+    combinedDiff = sortedBlocks[0].text;
+  } else if (sortedBlocks.length > 0) {
+    combinedDiff = sortedBlocks
       .map((b) => `=== ${b.label} ===\n${b.text}`)
       .join("\n\n");
   }
