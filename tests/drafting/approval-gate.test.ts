@@ -170,3 +170,43 @@ Deno.test("approvalGate: quest_ask_human timeout does NOT promote when draft is 
   check(getState().phase === "drafting", "NOT promoted: draft was unvalidated");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("approvalGate: Reviewer PASS after timeout promotes", async () => {
+  replaceState(IDLE_STATE);
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-timeout-pass-"));
+  const target = createTestDraft(cwd, true);
+  const drafting = createDraft(createQuest("build feature", QID), "build feature");
+  replaceState({
+    ...drafting,
+    draft: { ...drafting.draft!, planAuthored: true, contentHash: target },
+    lastReview: null,
+  });
+  const pi = busPi();
+  const ctx = fakeCtx(cwd);
+
+  const config = { ...DEFAULT_CONFIG, approvalGate: true };
+  const pendingReview = bootDraftReview(pi, ctx, target, config);
+  await new Promise((r) => setTimeout(r, 50));
+  const request = pi.emitted.find((e) => e.event === "prompt-template:subagent:request");
+  check(request !== undefined, "review launched and in flight");
+
+  // Call quest_ask_human while review is in flight (headless, so times out immediately to default)
+  const tool = askHumanTool(pi);
+  const result = await tool.execute("t4", { question: "Approve implementation?", default: "proceed" }, undefined, undefined, ctx);
+  const details = result.details as Record<string, unknown>;
+  check(details["source"] === "default", "timed out to default");
+  check(getState().phase === "drafting", "still in drafting awaiting review verdict");
+  check(getState().draft?.timeoutAwaitingValidation === true, "marked awaiting validation after timeout");
+
+  // Now the in-flight review delivers PASS
+  pi.feed({
+    requestId: (request!.data as Record<string, unknown>)["requestId"],
+    status: "completed",
+    result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE\n" },
+  });
+  await pendingReview;
+
+  check(getState().phase === "implementing", "promoted to implementing on review PASS after timeout");
+  check(getState().draft?.approvedBy === "review", "promoted via review approval");
+  replaceState(IDLE_STATE);
+});

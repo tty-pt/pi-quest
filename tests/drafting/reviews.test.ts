@@ -375,7 +375,7 @@ Deno.test("the draft retry bumps the review count and a fresh review promotes on
     bus.schedules.push({ delay, fire });
   });
   try {
-    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, DEFAULT_CONFIG);
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, { ...DEFAULT_CONFIG, approvalGate: false });
     await waitForRequests(bus.emitted, 1);
     bus.feed({ requestId: requests(bus.emitted)[0]["requestId"], status: "error", error: "boom" });
     await booted;
@@ -611,7 +611,7 @@ Deno.test("reviewPolicy balanced bypasses draft review for standard and trivial 
   const d = await draftFailureSetup("polbal01" as Qid);
   const bus = retryBus();
   try {
-    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY, approvalGate: false };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
     check(requests(bus.emitted).length === 0, "zero subagents launched for standard task under balanced");
     const wake = wakes(bus.pi).find((m) => String(m.content).includes("policy 'balanced' (standard task)"));
@@ -686,7 +686,7 @@ Deno.test("reviewPolicy balanced clears inFlight review on auto-promotion", asyn
   trackReview(d.qid, d.target, () => {});
   check(hasInFlight(d.qid) === true, "review initially tracked");
   try {
-    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY };
+    const balConfig = { ...DEFAULT_CONFIG, reviewPolicy: "balanced" as const, draftQuality: NO_QUALITY, approvalGate: false };
     await bootDraftReview(bus.pi, fakeCtx(d.cwd), d.target, balConfig);
     check(getState().phase === "implementing", "promotes to implementing under balanced");
     check(hasInFlight(d.qid) === false, "inFlight is cleared after bypass promotion");
@@ -735,7 +735,7 @@ Deno.test("balanced e2e: saving a standard plan promotes without leaving the too
   const d = await draftFailureSetup("bale2e01" as Qid);
   const bus = retryBus();
   await mkdir(join(d.cwd, ".pi"), { recursive: true });
-  await writeFile(join(d.cwd, ".pi", "settings.json"), JSON.stringify({ "pi-quest": { reviewPolicy: "balanced", draftQuality: { mode: "off" } } }), "utf8");
+  await writeFile(join(d.cwd, ".pi", "settings.json"), JSON.stringify({ "pi-quest": { reviewPolicy: "balanced", draftQuality: { mode: "off" }, approvalGate: false } }), "utf8");
   const hooks: Array<(e: unknown, c: unknown) => unknown> = [];
   (bus.pi as unknown as { on: unknown }).on = (_n: string, h: (e: unknown, c: unknown) => unknown) => { hooks.push(h); };
   installDraftGate(bus.pi);

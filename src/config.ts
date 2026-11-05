@@ -187,7 +187,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   bindings: { reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
-  approvalGate: false,
+  approvalGate: true,
   reviewPolicy: "strict",
   strictMode: false,
   policyByModel: [],
@@ -487,8 +487,8 @@ export function loadConfig(raw: unknown): QuestConfig {
   const approvalGate: boolean =
     rawApprovalGate === false || rawApprovalGate === "0" || rawApprovalGate === "false"
       ? false
-      : typeof rawApprovalGate === "boolean"
-      ? rawApprovalGate
+      : rawApprovalGate === true || rawApprovalGate === "1" || rawApprovalGate === "true"
+      ? true
       : DEFAULT_CONFIG.approvalGate;
 
   const rawRoles = (typeof record["roles"] === "object" && record["roles"] !== null)

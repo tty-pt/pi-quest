@@ -62,8 +62,7 @@ export async function askWithDefault(pi: Pi, ctx: PiCtx, args: AskArgs): Promise
           await approveDraft(pi, ctx, curr.qid, "user");
         }
       } else if (source === "default") {
-        const isValidated = curr.lastReview?.verdict === "PASS" ||
-          (bypassesDraftReview(config, curr, ctx) && curr.draft.planAuthored);
+        const isValidated = curr.lastReview?.verdict === "PASS" && curr.lastReview.target === curr.draft.contentHash;
         if (isValidated) {
           await approveDraft(pi, ctx, curr.qid, "review");
         } else if (hasInFlight(curr.qid)) {

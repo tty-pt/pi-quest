@@ -67,7 +67,7 @@ export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig,
   }));
   const advisory = quality.gaps.length > 0 ? ` Draft quality advisory (mode ${config.draftQuality.mode}): ${quality.gaps.join("; ")}.` : "";
   const currentDraft = getState().draft;
-  if (state.kind !== "analysis" && config.approvalGate && !currentDraft?.timeoutAwaitingValidation && currentDraft?.approvedBy !== "user") {
+  if (config.reviewPolicy !== "off" && state.kind !== "analysis" && config.approvalGate && !currentDraft?.timeoutAwaitingValidation && currentDraft?.approvedBy !== "user") {
     updateState((s) => ({
       ...s,
       exactNextAction: "Draft validated under policy bypass. Present analysis summary to operator and call quest_ask_human to request implementation approval.",
