@@ -37,6 +37,8 @@ export function pushStackFrame(
     phase: "implementing",
     depth: linkedParent.depth + 1,
     contract,
+    worktreePath: contract.worktreePath,
+    worktreeBranch: contract.worktreeBranch,
     questStack: [...existingStack, parentFrame],
     exactNextAction: "Implement contract requirements against declared allowedPaths.",
   });

@@ -10,8 +10,10 @@ import type { SubQuestContract } from "../../domain/contract";
 import { nextQid, type Qid } from "../../domain/qid";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../durability/snapshots";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
+import { createWorktree, findPrimaryRepoRoot } from "../../utils/git";
 import { ensureChildDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
+import { join } from "node:path";
 
 export interface ChildQuestContractParams {
   assignedRequirements?: string[];
@@ -19,6 +21,7 @@ export interface ChildQuestContractParams {
   requiredTestCommands?: string[];
   acceptanceCriteria?: string[];
   maxTurns?: number;
+  worktree?: boolean;
   worktreePath?: string;
   worktreeBranch?: string;
 }
@@ -30,7 +33,7 @@ export async function createChildQuest(
   brief: string,
   switchNow: boolean,
   contractParams?: ChildQuestContractParams,
-): Promise<{ childQid: Qid; switched: boolean }> {
+): Promise<{ childQid: Qid; switched: boolean; worktreePath?: string; worktreeBranch?: string }> {
   const parent = getState();
   if (parent.qid === null) throw new Error("no active quest to parent the sub-quest");
   const config = await readQuestConfig(ctx.cwd);
@@ -39,6 +42,28 @@ export async function createChildQuest(
     throw new Error(`depth cap ${config.depthCap} reached — fold this work into the parent quest`);
   }
   const childQid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
+
+  const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
+  let worktreePath = contractParams?.worktreePath;
+  let worktreeBranch = contractParams?.worktreeBranch;
+
+  if (contractParams?.worktree === true || worktreePath !== undefined) {
+    if (!worktreePath) {
+      worktreePath = join(primaryRoot, ".pi", "worktrees", childQid);
+    }
+    if (!worktreeBranch) {
+      worktreeBranch = `quest/${childQid}`;
+    }
+    const wtResult = await createWorktree(primaryRoot, worktreePath, worktreeBranch, pi);
+    if (!wtResult.ok) {
+      if (contractParams?.worktree === true) {
+        throw new Error(`failed to create worktree at ${worktreePath}: ${wtResult.error}`);
+      }
+      worktreePath = undefined;
+      worktreeBranch = undefined;
+    }
+  }
+
   const contract: SubQuestContract = {
     qid: childQid,
     parentQid: parent.qid,
@@ -48,8 +73,8 @@ export async function createChildQuest(
     requiredTestCommands: contractParams?.requiredTestCommands ?? (config.testCommands.length > 0 ? config.testCommands : []),
     acceptanceCriteria: contractParams?.acceptanceCriteria ?? [goal.trim()],
     maxTurns: contractParams?.maxTurns ?? 15,
-    worktreePath: contractParams?.worktreePath,
-    worktreeBranch: contractParams?.worktreeBranch,
+    worktreePath,
+    worktreeBranch,
   };
 
   if (switchNow) {
@@ -57,17 +82,19 @@ export async function createChildQuest(
     pi.appendEntry(SNAPSHOT_TYPE, encodeSnapshot(child));
     await ensureChildDraftFile(ctx.cwd, childQid, parent.qid, contract, goal);
     replaceState(child);
-    sendSteer(pi, `Switched to sub-quest ${childQid}: ${goal} Parent ${parent.qid} waits and resumes on return.`);
-    return { childQid, switched: true };
+    const wtMsg = worktreePath ? ` in worktree ${worktreePath} (branch ${worktreeBranch})` : "";
+    sendSteer(pi, `Switched to sub-quest ${childQid}: ${goal}${wtMsg} Parent ${parent.qid} waits and resumes on return.`);
+    return { childQid, switched: true, worktreePath, worktreeBranch };
   }
 
   updateState((s) => addChild(s, { qid: childQid, brief, status: "running", findings: null, acknowledged: false }));
   emitNow(pi);
-  const child = { ...createQuest(goal, childQid, parent.qid), depth, contract };
+  const child = { ...createQuest(goal, childQid, parent.qid), depth, contract, worktreePath, worktreeBranch };
   pi.appendEntry(SNAPSHOT_TYPE, encodeSnapshot(child));
   await ensureChildDraftFile(ctx.cwd, childQid, parent.qid, contract, goal);
-  sendSteer(pi, `Sub-quest ${childQid} created under ${parent.qid}. Parent stays active.`);
-  return { childQid, switched: false };
+  const wtMsg = worktreePath ? ` (worktree: ${worktreePath})` : "";
+  sendSteer(pi, `Sub-quest ${childQid} created under ${parent.qid}${wtMsg}. Parent stays active.`);
+  return { childQid, switched: false, worktreePath, worktreeBranch };
 }
 
 export function subquestTool(pi: Pi): PiToolSpec {
@@ -86,6 +113,7 @@ export function subquestTool(pi: Pi): PiToolSpec {
         requiredTestCommands: { type: "array", items: { type: "string" }, description: "Test commands required before completion." },
         acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Observable conditions for completion." },
         maxTurns: { type: "number", description: "Maximum turns before warning." },
+        worktree: { type: "boolean", description: "Whether to provision an isolated git worktree for this sub-quest (default: false)." },
         worktreePath: { type: "string", description: "Optional isolated worktree path for this sub-quest." },
         worktreeBranch: { type: "string", description: "Optional git branch for the isolated worktree." },
       },
@@ -107,6 +135,7 @@ export function subquestTool(pi: Pi): PiToolSpec {
         requiredTestCommands: Array.isArray(params["requiredTestCommands"]) ? params["requiredTestCommands"] as string[] : undefined,
         acceptanceCriteria: Array.isArray(params["acceptanceCriteria"]) ? params["acceptanceCriteria"] as string[] : undefined,
         maxTurns: typeof params["maxTurns"] === "number" ? params["maxTurns"] as number : undefined,
+        worktree: params["worktree"] === true,
         worktreePath: typeof params["worktreePath"] === "string" ? params["worktreePath"] as string : undefined,
         worktreeBranch: typeof params["worktreeBranch"] === "string" ? params["worktreeBranch"] as string : undefined,
       };

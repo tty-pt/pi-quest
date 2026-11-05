@@ -111,6 +111,86 @@ export function isGitWorktree(startPath: string): boolean {
   return false;
 }
 
+/**
+ * Creates a new git worktree on an isolated branch.
+ * @param repoRoot Root of the primary git repository
+ * @param worktreePath Target directory for the new worktree
+ * @param branch Branch name to create and check out
+ * @param pi Optional Pi instance for command execution
+ */
+export async function createWorktree(
+  repoRoot: string,
+  worktreePath: string,
+  branch: string,
+  pi?: Pi,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const branchCheck = await runGit(["rev-parse", "--verify", `refs/heads/${branch}`], repoRoot, pi);
+    const branchExists = branchCheck.exitCode === 0;
+
+    const args = branchExists
+      ? ["worktree", "add", worktreePath, branch]
+      : ["worktree", "add", "-b", branch, worktreePath, "HEAD"];
+
+    const res = await runGit(args, repoRoot, pi);
+    if (res.exitCode !== 0) {
+      return { ok: false, error: res.stdout || "git worktree add failed" };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Merges a worktree branch into the current branch of the repository.
+ * @param repoRoot Root of the git repository
+ * @param branch Branch name to merge
+ * @param pi Optional Pi instance for command execution
+ */
+export async function mergeWorktreeBranch(
+  repoRoot: string,
+  branch: string,
+  pi?: Pi,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await runGit(["merge", "--no-ff", "-m", `Merge branch '${branch}'`, branch], repoRoot, pi);
+    if (res.exitCode !== 0) {
+      return { ok: false, error: res.stdout || `git merge ${branch} failed` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Removes a git worktree and optionally deletes its branch.
+ * @param repoRoot Root of the primary git repository
+ * @param worktreePath Directory of the worktree to remove
+ * @param branch Optional branch name to delete after worktree removal
+ * @param pi Optional Pi instance for command execution
+ */
+export async function removeWorktree(
+  repoRoot: string,
+  worktreePath: string,
+  branch?: string,
+  pi?: Pi,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await runGit(["worktree", "remove", "--force", worktreePath], repoRoot, pi);
+    if (res.exitCode !== 0) {
+      await runGit(["worktree", "prune"], repoRoot, pi);
+    }
+    if (branch) {
+      await runGit(["branch", "-D", branch], repoRoot, pi);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

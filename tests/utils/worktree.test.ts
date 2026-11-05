@@ -2,11 +2,11 @@ import { check } from "../check.ts";
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findGitCommonDir, findPrimaryRepoRoot, isGitWorktree } from "../../src/utils/git.ts";
+import { findGitCommonDir, findPrimaryRepoRoot, isGitWorktree, createWorktree, mergeWorktreeBranch, removeWorktree } from "../../src/utils/git.ts";
 import { canonicalWorkspaceRoot, draftFilePath, archiveFilePath } from "../../src/files.ts";
 import { listDraftQids, ensureDraftFile } from "../../src/files.ts";
 import type { Qid } from "../../src/domain/qid.ts";
-import { fakeCtx } from "../fake-pi.ts";
+import { fakeCtx, fakePi } from "../fake-pi.ts";
 
 Deno.test("worktree detection: recognizes main repo, secondary worktree, and non-git directory", () => {
   const root = mkdtempSync(join(tmpdir(), "pi-quest-wt-test-"));
@@ -83,4 +83,29 @@ Deno.test("worktree path anchoring: quest drafts and archives anchor to primary 
   } finally {
     try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+});
+
+Deno.test("worktree git operations: createWorktree, mergeWorktreeBranch, and removeWorktree", async () => {
+  const commands: Array<{ cmd: string; args: string[]; cwd: string }> = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[], opts?: { cwd?: string }) => {
+    commands.push({ cmd, args, cwd: opts?.cwd ?? "" });
+    if (cmd === "git" && args[0] === "rev-parse") {
+      return { code: 1, stdout: "" };
+    }
+    return { code: 0, stdout: "" };
+  };
+
+  const resCreate = await createWorktree("/repo", "/repo/.pi/worktrees/wt1", "quest/wt1", pi);
+  check(resCreate.ok === true, "createWorktree succeeded");
+  check(commands.some((c) => c.args.includes("worktree") && c.args.includes("add") && c.args.includes("-b")), "executed worktree add -b");
+
+  const resMerge = await mergeWorktreeBranch("/repo", "quest/wt1", pi);
+  check(resMerge.ok === true, "mergeWorktreeBranch succeeded");
+  check(commands.some((c) => c.args.includes("merge") && c.args.includes("quest/wt1")), "executed git merge");
+
+  const resRemove = await removeWorktree("/repo", "/repo/.pi/worktrees/wt1", "quest/wt1", pi);
+  check(resRemove.ok === true, "removeWorktree succeeded");
+  check(commands.some((c) => c.args.includes("worktree") && c.args.includes("remove")), "executed worktree remove");
+  check(commands.some((c) => c.args.includes("branch") && c.args.includes("-D")), "executed branch delete");
 });

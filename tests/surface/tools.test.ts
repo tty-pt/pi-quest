@@ -158,6 +158,52 @@ Deno.test("subquest links children and enforces the depth cap", async () => {
   replaceState(IDLE_STATE);
 });
 
+Deno.test("subquest provisions isolated worktree when requested", async () => {
+  const parent = { ...authored(), phase: "implementing" as const };
+  replaceState(parent);
+  const gitCommands: string[][] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+    gitCommands.push(args);
+    if (cmd === "git" && args[0] === "rev-parse") return { code: 1, stdout: "" };
+    return { code: 0, stdout: "" };
+  };
+  const ctx = fakeCtx(tmp());
+  const done = await createChildQuest(pi, ctx, "worktree slice", "slice", false, {
+    worktree: true,
+  });
+  check(done.worktreePath !== undefined, "worktreePath returned");
+  check(done.worktreeBranch !== undefined, "worktreeBranch returned");
+  check(done.worktreeBranch === `quest/${done.childQid}`, "worktreeBranch follows quest/qid pattern");
+  check(gitCommands.some((a) => a.includes("worktree") && a.includes("add")), "git worktree add executed");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("archive merges worktree branch and removes worktree directory on return", async () => {
+  const gitCommands: string[][] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+    gitCommands.push(args);
+    return { code: 0, stdout: "" };
+  };
+  const ctx = fakeCtx(tmp());
+  const parent = createQuest("parent task", "par001");
+  const child = {
+    ...claimComplete({ ...authored(), phase: "implementing" as const }),
+    parentQid: "par001" as Qid,
+    worktreePath: "/repo/.pi/worktrees/abc123",
+    worktreeBranch: "quest/abc123",
+  };
+  const childTarget = implementationFingerprint(child);
+  replaceState({ ...child, lastReview: { verdict: "PASS", target: childTarget, findings: "ok" } });
+  const entries = [{ customType: SNAPSHOT_TYPE, data: encodeSnapshot(parent) }];
+  const returned = await archiveActiveQuest(pi, fakeCtx(ctx.cwd, entries), "COMPLETED", "child done");
+  check(returned.returnedToParent === "par001", "returned to parent");
+  check(gitCommands.some((a) => a.includes("merge") && a.includes("quest/abc123")), "git merge executed");
+  check(gitCommands.some((a) => a.includes("worktree") && a.includes("remove")), "git worktree remove executed");
+  replaceState(IDLE_STATE);
+});
+
 Deno.test("creation pre-creates the child scaffold and never clobbers", async () => {
   const parent = { ...authored(), phase: "implementing" as const };
   replaceState(parent);

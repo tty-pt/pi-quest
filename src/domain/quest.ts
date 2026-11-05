@@ -196,6 +196,8 @@ export interface QuestState {
   lastTestReceipt?: VerificationReceipt;
   baseCommit?: string;
   touchedFiles?: string[];
+  worktreePath?: string;
+  worktreeBranch?: string;
   archivedOutcome: ArchivedOutcome | null;
   snapshotPending: boolean;
 }
@@ -227,6 +229,8 @@ export const IDLE_STATE: QuestState = {
   lastTestReceipt: undefined,
   baseCommit: undefined,
   touchedFiles: [],
+  worktreePath: undefined,
+  worktreeBranch: undefined,
   archivedOutcome: null,
   snapshotPending: false,
 };

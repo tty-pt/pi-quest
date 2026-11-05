@@ -25,6 +25,7 @@ import { reconcileParentDocOnReturn } from "../../quest-doc";
 import { advanceForeman } from "../../subquests/foreman";
 import { ensureChildDraftFile, listKnownQids } from "../../files";
 import { textResult } from "./reply";
+import { findPrimaryRepoRoot, mergeWorktreeBranch, removeWorktree } from "../../utils/git";
 import { recordQuestRating, writeHandoffReceipt } from "../../durability/ratings";
 import { readQuestConfig } from "../../config";
 import { resolveActiveModel } from "../../policy/effective";
@@ -202,6 +203,19 @@ async function handleParentReturn(
   };
 
   await reconcileParentDocOnReturn(ctx.cwd, parentQid, receipt);
+
+  const wtPath = state.worktreePath ?? state.contract?.worktreePath;
+  const wtBranch = state.worktreeBranch ?? state.contract?.worktreeBranch;
+  if (wtPath) {
+    const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
+    if (outcome === "COMPLETED" && wtBranch) {
+      const mergeRes = await mergeWorktreeBranch(primaryRoot, wtBranch, pi);
+      if (!mergeRes.ok) {
+        meta.findings.push(`Worktree branch merge warning: ${mergeRes.error}`);
+      }
+    }
+    await removeWorktree(primaryRoot, wtPath, wtBranch, pi);
+  }
 
   if (state.questStack && state.questStack.length > 0) {
     const restored = popStackFrame(state, receipt);
