@@ -54,9 +54,6 @@ export async function writeAnalysisToDraft(
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
     throw new Error(`analysis text needs an active draft (phase ${state.phase}); the analysis is drafting-only`);
   }
-  if (state.kind !== "analysis") {
-    throw new Error("analysis text is for analysis quests — author the ## Implementation Plan via {plan: ...} instead");
-  }
   assertNoSectionHeadings(analysisText, "analysis");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");

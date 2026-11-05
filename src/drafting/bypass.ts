@@ -3,7 +3,8 @@
 // maturity bar alone gates promotion. A draft below the bar must never stall
 // silently — nothing else would ever wake the agent, and the tool gate stays
 // locked — so the agent is told exactly what is missing.
-import { sendWake } from "../app/interpreter";
+import { emitNow, sendWake } from "../app/interpreter";
+import { getState, updateState } from "../app/store";
 import type { QuestConfig, DraftThresholds } from "../config";
 import { difficultyLevel, type QuestState } from "../domain/quest";
 import { calculateReviewNeed, resolveActiveModel } from "../policy/effective";
@@ -56,7 +57,28 @@ export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig,
   }
   clearDraftReviewRetry(qid);
   clearReviewVerdictFails(qid);
-  const message = await promoteAfterPass(pi, ctx, qid, "review");
+  updateState((s) => ({
+    ...s,
+    lastReview: {
+      verdict: "PASS",
+      target: s.draft?.contentHash ?? "",
+      findings: "Maturity bar satisfied under " + base,
+    },
+  }));
   const advisory = quality.gaps.length > 0 ? ` Draft quality advisory (mode ${config.draftQuality.mode}): ${quality.gaps.join("; ")}.` : "";
+  const currentDraft = getState().draft;
+  if (state.kind !== "analysis" && config.approvalGate && !currentDraft?.timeoutAwaitingValidation && currentDraft?.approvedBy !== "user") {
+    updateState((s) => ({
+      ...s,
+      exactNextAction: "Draft validated under policy bypass. Present analysis summary to operator and call quest_ask_human to request implementation approval.",
+    }));
+    emitNow(pi);
+    sendWake(
+      pi,
+      `Draft validated under ${reason}. Next: (1) Present the deep analysis summary to the operator in your response, and (2) Call quest_ask_human to request approval for implementation.${advisory}`,
+    );
+    return;
+  }
+  const message = await promoteAfterPass(pi, ctx, qid, currentDraft?.approvedBy === "user" ? "user" : "review");
   if (message !== null) sendWake(pi, `${message} Draft review bypassed under ${reason}.${advisory}`);
 }

@@ -102,6 +102,7 @@ export interface QuestConfig {
   bindings: InterfaceBindings;
   statusStyle: StatusStyle;
   autoArchive: boolean;
+  approvalGate: boolean;
   reviewPolicy: ReviewPolicy;
   /** Enforces isolated adversarial validation without bypass on non-trivial tasks. */
   strictMode: boolean;
@@ -186,6 +187,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   bindings: { reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
+  approvalGate: false,
   reviewPolicy: "strict",
   strictMode: false,
   policyByModel: [],
@@ -481,6 +483,14 @@ export function loadConfig(raw: unknown): QuestConfig {
     ? rawStrictMode
     : rawStrictMode === "1" || rawStrictMode === "true";
 
+  const rawApprovalGate = record["approvalGate"] ?? getEnv("PI_QUEST_APPROVAL_GATE");
+  const approvalGate: boolean =
+    rawApprovalGate === false || rawApprovalGate === "0" || rawApprovalGate === "false"
+      ? false
+      : typeof rawApprovalGate === "boolean"
+      ? rawApprovalGate
+      : DEFAULT_CONFIG.approvalGate;
+
   const rawRoles = (typeof record["roles"] === "object" && record["roles"] !== null)
     ? (record["roles"] as Record<string, unknown>)
     : {};
@@ -552,6 +562,7 @@ export function loadConfig(raw: unknown): QuestConfig {
     depthCap: typeof depth === "number" ? depth : DEFAULT_CONFIG.depthCap,
     statusStyle: style === "icon" || style === "text" ? style : DEFAULT_CONFIG.statusStyle,
     autoArchive: typeof autoArchive === "boolean" ? autoArchive : DEFAULT_CONFIG.autoArchive,
+    approvalGate,
     reviewPolicy,
     strictMode,
     policyByModel: parsePolicyRules(record["policyByModel"] ?? getEnv("PI_QUEST_POLICY_BY_MODEL")),

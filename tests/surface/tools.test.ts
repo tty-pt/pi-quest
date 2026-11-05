@@ -558,7 +558,7 @@ Deno.test("analysis quests author the ## Analysis deliverable and refuse plans",
   }
 });
 
-Deno.test("an invalid kind and a standard-quest analysis are refused", async () => {
+Deno.test("an invalid kind is refused and a standard-quest analysis is accepted", async () => {
   replaceState(IDLE_STATE);
   const pi = fakePi();
   const ctx = fakeCtx(tmp());
@@ -568,8 +568,9 @@ Deno.test("an invalid kind and a standard-quest analysis are refused", async () 
     check(getState().qid === null, "nothing created on bogus kind");
     await applyUpdate(pi, ctx, { objective: "Build the thing." });
     await applyUpdate(pi, ctx, { draftName: "thing" });
-    const refused = await applyUpdate(pi, ctx, { analysis: "some analysis body" });
-    check(refused.error !== undefined && refused.error.includes("analysis text is for analysis quests"), "analysis refused on standard kind");
+    const accepted = await applyUpdate(pi, ctx, { analysis: "some analysis body" });
+    check(accepted.error === undefined, "analysis accepted on standard kind");
+    check(accepted.applied.includes("analysis recorded in the draft file"), "analysis recorded");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);

@@ -6,7 +6,26 @@ import { emitNow, sendSteer } from "../app/interpreter";
 import { readQuestConfig } from "../config";
 import { recordHumanAnswer } from "../domain/quest";
 import { isFallbackAdvance } from "../domain/intent";
+import { approveDraft } from "../drafting/reviews";
+import { hasInFlight } from "../review/tracker";
+import { bypassesDraftReview } from "../drafting/bypass";
 import type { Pi, PiCtx } from "../hooks/events";
+
+export function isAffirmativeApproval(text: string, extraPhrases: readonly string[] = []): boolean {
+  const trimmed = text.trim();
+  if (trimmed === "") return false;
+  if (isFallbackAdvance(trimmed, extraPhrases)) return true;
+  const norm = trimmed.toLowerCase().replace(/^[!.,;:?\s]+|[!.,;:?\s]+$/g, "");
+  const affirmatives = new Set([
+    "yes", "y", "proceed", "go", "approved", "approve", "looks good", "ok", "okay",
+    "sure", "sim", "bora", "aprovado", "vai em frente", "manda bala", "confirm", "confirmed"
+  ]);
+  if (affirmatives.has(norm)) return true;
+  for (const word of ["yes", "proceed", "go", "approved", "ok", "okay", "sure", "sim", "bora", "aprovado", "confirm"]) {
+    if (norm.startsWith(`${word},`) || norm.startsWith(`${word} `)) return true;
+  }
+  return false;
+}
 
 export interface PendingQuestion {
   question: string;
@@ -33,9 +52,25 @@ export async function askWithDefault(pi: Pi, ctx: PiCtx, args: AskArgs): Promise
   const qid = state.qid ?? "none";
   const config = await readQuestConfig(ctx.cwd);
   const timeoutMs = args.timeoutMs ?? config.askTimeoutMs;
-  const finish = (answer: string, source: AskResult["source"], late: boolean): AskResult => {
+  const finish = async (answer: string, source: AskResult["source"], late: boolean): Promise<AskResult> => {
     updateState((s) => recordHumanAnswer(s, args.question, answer, late));
     emitNow(pi);
+    const curr = getState();
+    if (curr.phase === "drafting" && curr.qid !== null && curr.draft !== null) {
+      if (source === "user") {
+        if (isAffirmativeApproval(answer, config.steeringPhrases)) {
+          await approveDraft(pi, ctx, curr.qid, "user");
+        }
+      } else if (source === "default") {
+        const isValidated = curr.lastReview?.verdict === "PASS" ||
+          (bypassesDraftReview(config, curr, ctx) && curr.draft.planAuthored);
+        if (isValidated) {
+          await approveDraft(pi, ctx, curr.qid, "review");
+        } else if (hasInFlight(curr.qid)) {
+          updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, timeoutAwaitingValidation: true } });
+        }
+      }
+    }
     return { answer, source };
   };
   if (!ctx.hasUI || timeoutMs === 0) {
@@ -47,7 +82,7 @@ export async function askWithDefault(pi: Pi, ctx: PiCtx, args: AskArgs): Promise
       sendSteer(pi, `No interactive UI present — this question was not shown to a human. Answering with default "${args.defaultAnswer}". A quest_ask_human default is not live human approval.`);
       ctx.ui.notify(`Question (no UI): ${args.question.slice(0, 120)} — defaulting to "${args.defaultAnswer}"`, "warning");
     }
-    return finish(args.defaultAnswer, "default", false);
+    return await finish(args.defaultAnswer, "default", false);
   }
   const answer = await new Promise<string | null>((resolve) => {
     pendingByQid.set(qid, { question: args.question, at: Date.now(), resolve });
@@ -69,8 +104,8 @@ export async function askWithDefault(pi: Pi, ctx: PiCtx, args: AskArgs): Promise
   });
   const pending = pendingByQid.get(qid);
   if (pending) pending.resolve = null;
-  if (answer === null) return finish(args.defaultAnswer, "default", false);
-  return finish(answer, "user", false);
+  if (answer === null) return await finish(args.defaultAnswer, "default", false);
+  return await finish(answer, "user", false);
 }
 
 export function noteLateAnswer(pi: Pi, text: string): boolean {

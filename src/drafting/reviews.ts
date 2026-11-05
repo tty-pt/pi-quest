@@ -190,9 +190,34 @@ export async function bootDraftReview(
       sendSteer(pi, `Reviewer PASS recorded for ${qid}, but promotion needs recorded research: no evidence, refinements, or setback evidence on file. Record research via quest_update_state, or a live user may reply "go".`);
       return;
     }
+    updateState((s) => ({
+      ...s,
+      lastReview: {
+        verdict: "PASS",
+        target,
+        findings: outcome.review.findings,
+        reviewText: outcome.review.text.trim(),
+      },
+    }));
+
+    const currentDraft = getState().draft;
+    if (kind !== "analysis" && config.approvalGate && !currentDraft?.timeoutAwaitingValidation && currentDraft?.approvedBy !== "user") {
+      updateState((s) => ({
+        ...s,
+        exactNextAction: "Draft validated (PASS). Present analysis summary to operator and call quest_ask_human to request implementation approval.",
+      }));
+      emitNow(pi);
+      sendWake(
+        pi,
+        `Reviewer PASS recorded for ${qid} (target ${target.slice(0, 12)}). Draft is validated!\n` +
+        `Next: (1) Present the deep analysis summary to the operator in your response, and (2) Call quest_ask_human to request approval for implementation.`,
+      );
+      return;
+    }
+
     // Route by kind: standard quests promote to implementing; analysis quests
     // auto-claim straight to validating (D3) unless sub-quests still run.
-    const message = await promoteAfterPass(pi, ctx, qid, "review");
+    const message = await promoteAfterPass(pi, ctx, qid, currentDraft?.approvedBy === "user" ? "user" : "review");
     if (message === null) {
       sendSteer(pi, `Reviewer PASS recorded for ${qid}, but the quest did not promote (it is no longer an unapproved draft). Check its phase; a live user "go" promotes a draft.`);
       return;

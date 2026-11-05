@@ -96,6 +96,7 @@ export interface DraftInfo {
   approvedPlanHash: string | null;
   // HIGH_LEVEL: #plan revision — append-only record of superseded plan texts.
   planRevisions: PlanRevision[];
+  timeoutAwaitingValidation?: boolean;
 }
 
 export interface PlanRevision {
