@@ -1,6 +1,8 @@
 import { check } from "../check.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
+import { createDraft } from "../../src/domain/transitions.ts";
+import type { Qid } from "../../src/domain/qid.ts";
 import { askHumanTool } from "../../src/surface/tools/ask-human.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 
@@ -55,5 +57,61 @@ Deno.test("quest_ask_human honors the settings timeout without an explicit one",
   const details = result.details as Record<string, unknown>;
   check(details["source"] === "default", "source is default");
   check(getState().humanAnswers.length === 1, "default recorded");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("quest_ask_human renderCall prints plain analysis text directly before question", async () => {
+  const dir = await Deno.makeTempDir();
+  const qid = "rend01" as Qid;
+  const draftDoc = [
+    "## Requirements",
+    "- req 1",
+    "",
+    "## Analysis",
+    "Root cause identified: off-by-one error in allocator.",
+    "Fix: adjust buffer size by 1.",
+    "",
+    "## Implementation Plan",
+    "1. Fix allocator",
+    "",
+  ].join("\n");
+  await Deno.mkdir(`${dir}/.pi/quest/future`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/.pi/quest/future/${qid}.md`, draftDoc);
+
+  const drafting = createDraft(createQuest("fix bug", qid), "fix bug");
+  replaceState(drafting);
+  const pi = fakePi();
+  const tool = askHumanTool(pi);
+
+  check(tool.renderShell === "self", "renderShell is self to avoid boxed wrapping");
+  check(typeof tool.renderCall === "function", "renderCall is defined");
+
+  const component = tool.renderCall!({ question: "Approve implementation?" }, undefined, { cwd: dir });
+  check(component !== undefined, "component returned");
+  const lines = component.render(80);
+  const fullText = lines.join("\n");
+
+  check(fullText.includes("### Analysis (rend01)"), "analysis header rendered");
+  check(fullText.includes("Root cause identified: off-by-one error in allocator."), "analysis body line 1 rendered");
+  check(fullText.includes("Fix: adjust buffer size by 1."), "analysis body line 2 rendered");
+  check(fullText.includes("Approve implementation?"), "question rendered immediately after analysis");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("quest_ask_human renderCall gracefully renders question when no analysis exists", async () => {
+  const dir = await Deno.makeTempDir();
+  const qid = "rend02" as Qid;
+  const drafting = createDraft(createQuest("fix bug", qid), "fix bug");
+  replaceState(drafting);
+  const pi = fakePi();
+  const tool = askHumanTool(pi);
+
+  const component = tool.renderCall!({ question: "Proceed?" }, undefined, { cwd: dir });
+  check(component !== undefined, "component returned");
+  const lines = component.render(80);
+  const fullText = lines.join("\n");
+
+  check(fullText.includes("Proceed?"), "question rendered");
+  check(!fullText.includes("### Analysis"), "no analysis header when analysis absent");
   replaceState(IDLE_STATE);
 });

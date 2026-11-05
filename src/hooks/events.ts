@@ -134,11 +134,20 @@ export interface AgentToolResult {
   details?: unknown;
 }
 
+export interface PiComponent {
+  render: (width: number) => string[];
+  handleInput?: (data: string) => void;
+  invalidate?: () => void;
+}
+
 export interface PiToolSpec {
   name: string;
   label: string;
   description: string;
   parameters: unknown;
+  renderShell?: "self";
+  renderCall?: (args: Record<string, unknown>, theme?: unknown, context?: { cwd: string; [key: string]: unknown }) => PiComponent;
+  renderResult?: (result: AgentToolResult, options?: unknown, theme?: unknown, context?: unknown) => PiComponent;
   execute: (
     toolCallId: string,
     params: Record<string, unknown>,
