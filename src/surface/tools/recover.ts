@@ -4,27 +4,28 @@ import { getState, replaceState } from "../../app/store";
 import { IDLE_STATE } from "../../domain/quest";
 import { draftPath } from "../../domain/paths";
 import { newestSnapshot, newestSnapshotFor } from "../../durability/snapshots";
-import { scanSiblingSessions } from "../../durability/siblings";
+import { scanSiblingSessions, workspaceSessionFolder } from "../../durability/siblings";
 import type { Pi, PiCtx, PiToolSpec } from "../../hooks/events";
 import { textResult } from "./reply";
 
 export async function recoverQuest(ctx: PiCtx, qid: string | null): Promise<{ qid: string | null; source: string }> {
   const entries = ctx.sessionManager.getEntries();
   const target = qid ?? getState().qid;
+  const workspaceFolder = ctx?.cwd ? workspaceSessionFolder(ctx.cwd) : undefined;
   if (target !== null) {
     const onBranch = newestSnapshotFor(entries, target);
     if (onBranch !== null) {
       replaceState({ ...onBranch, snapshotPending: false });
       return { qid: onBranch.qid, source: "transcript" };
     }
-    const sibling = await scanSiblingSessions(target);
+    const sibling = await scanSiblingSessions(target, undefined, workspaceFolder);
     if (sibling !== null) {
       replaceState({ ...sibling, snapshotPending: false });
       return { qid: sibling.qid, source: "sibling session" };
     }
     return { qid: null, source: `no snapshot for ${target}` };
   }
-  const newest = newestSnapshot(entries) ?? await scanSiblingSessions(null);
+  const newest = newestSnapshot(entries) ?? await scanSiblingSessions(null, undefined, workspaceFolder);
   if (newest?.qid) {
     replaceState({ ...newest, snapshotPending: false });
     return { qid: newest.qid, source: "transcript" };

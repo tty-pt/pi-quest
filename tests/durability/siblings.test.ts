@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createQuest } from "../../src/domain/quest.ts";
 import { loadQuestState } from "../../src/durability/index.ts";
-import { scanSiblingSessions } from "../../src/durability/siblings.ts";
+import { scanSiblingSessions, workspaceSessionFolder } from "../../src/durability/siblings.ts";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../src/durability/snapshots.ts";
 
 function fixture(): string {
@@ -42,4 +42,29 @@ Deno.test("boot prefers the branch, then stays idle", async () => {
   check(fresh.phase === "idle" && fresh.qid === null, "empty branch never auto-adopts siblings");
   const cold = await loadQuestState([], join(root, "absent"));
   check(cold.phase === "idle" && cold.qid === null, "nothing anywhere cold-starts");
+});
+
+Deno.test("sibling scan scopes to workspace project folder", async () => {
+  check(workspaceSessionFolder("/home/user/my-repo") === "--home-user-my-repo--", "folder encoding");
+  const root = mkdtempSync(join(tmpdir(), "pi-quest-workspace-"));
+  const siteDir = "--home-user-site--";
+  const otherDir = "--home-user-other--";
+  mkdirSync(join(root, siteDir), { recursive: true });
+  mkdirSync(join(root, otherDir), { recursive: true });
+
+  const siteLines = [
+    JSON.stringify({ customType: SNAPSHOT_TYPE, data: encodeSnapshot(createQuest("site quest", "site111")) }),
+  ];
+  writeFileSync(join(root, siteDir, "sess.jsonl"), siteLines.join("\n"));
+
+  const otherLines = [
+    JSON.stringify({ customType: SNAPSHOT_TYPE, data: encodeSnapshot(createQuest("other quest", "oth222")) }),
+  ];
+  writeFileSync(join(root, otherDir, "sess.jsonl"), otherLines.join("\n"));
+
+  const foundSite = await scanSiblingSessions(null, root, siteDir);
+  check(foundSite?.qid === "site111", "scopes to site project folder");
+
+  const foundOther = await scanSiblingSessions(null, root, otherDir);
+  check(foundOther?.qid === "oth222", "scopes to other project folder");
 });

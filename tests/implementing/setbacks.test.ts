@@ -26,6 +26,7 @@ Deno.test("setbacks key on exit status, not on words in the output", () => {
 
 Deno.test("setbacks never read a passing run as failed (the '0 failed' false positive)", () => {
   check(detectSetback(bash("npm test", "519 passed, 0 failed", false, { exitCode: 0 })) === null, "0 failed is a pass");
+  check(detectSetback(bash("make", "compiler warning on stderr", true, { exitCode: 0 })) === null, "stderr warnings with exit 0 are not a failure");
   check(detectSetback(bash("npm test | grep failed", "test names containing failed ... ok", false)) === null, "words in output ignored");
   check(detectSetback(bash("make -j4", "4 errors generated.", false)) === null, "output text alone is not a failure");
 });

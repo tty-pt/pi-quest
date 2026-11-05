@@ -193,7 +193,7 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
     threw = true;
   }
   check(threw, "completed without PASS rejected");
-  const claimed = claimComplete({ ...authored(), phase: "implementing" as const });
+  const claimed = claimComplete({ ...authored(), phase: "implementing" as const, touchedFiles: ["src/custom_feature.ts"] });
   const target = implementationFingerprint(claimed);
   replaceState({ ...claimed, lastReview: { verdict: "PASS", target, findings: "clean" } });
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", "shipped");
@@ -202,6 +202,7 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
   check(done.kind === "standard", "kind preserved in archive result");
   check(done.difficulty === "standard", "difficulty preserved in archive result");
   check(Array.isArray(done.modifiedFiles), "modifiedFiles is array");
+  check(done.modifiedFiles.includes("src/custom_feature.ts"), "modifiedFiles includes touchedFiles");
   check(Array.isArray(done.findings), "findings is array");
   check(done.findings.includes("shipped"), "summary included in findings");
   check(getState().phase === "idle", "top-level archive clears");

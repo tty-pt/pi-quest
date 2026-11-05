@@ -40,7 +40,7 @@ export function detectSetback(event: ToolResultEvent): SetbackSignal | null {
     // The exit status is the only language-neutral failure signal. Output text is
     // never scraped: "0 failed" in a passing run must not read as a failure.
     const code = exitCode(event);
-    const failed = event.isError || (typeof code === "number" && code !== 0);
+    const failed = typeof code === "number" ? code !== 0 : Boolean(event.isError);
     if (!failed) return null;
     if (code === 1 && commandNames(cmd).every((name) => NO_MATCH_EXIT_ONE.has(name))) return null;
     if (isTestCommand(cmd)) {

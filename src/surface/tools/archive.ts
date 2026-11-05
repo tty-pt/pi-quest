@@ -90,8 +90,23 @@ function assertArchiveAllowed(
   }
 }
 
-async function getModifiedFiles(pi: Pi, cwd: string): Promise<string[]> {
+async function getModifiedFiles(
+  pi: Pi,
+  cwd: string,
+  baseCommit?: string | null,
+  touchedFiles?: string[],
+): Promise<string[]> {
   const files = new Set<string>();
+  if (touchedFiles) {
+    for (const f of touchedFiles) {
+      if (f && !f.startsWith(".pi/quest/")) {
+        const rel = f.startsWith(cwd) ? f.slice(cwd.length).replace(/^[/\\]+/, "") : f;
+        if (rel && !rel.startsWith(".pi/quest/")) {
+          files.add(rel);
+        }
+      }
+    }
+  }
   try {
     const res = (await pi.exec("git", ["status", "--porcelain"], { cwd })) as
       | { code?: number; exitCode?: number; stdout?: string; output?: string }
@@ -109,6 +124,29 @@ async function getModifiedFiles(pi: Pi, cwd: string): Promise<string[]> {
       }
     }
   } catch { /* ignore */ }
+
+  if (baseCommit) {
+    try {
+      const verifyRes = (await pi.exec("git", ["rev-parse", "--verify", `${baseCommit}^{commit}`], { cwd })) as
+        | { code?: number; exitCode?: number }
+        | undefined;
+      if ((verifyRes?.code ?? verifyRes?.exitCode) === 0) {
+        const diffRes = (await pi.exec("git", ["diff", "--name-only", `${baseCommit}..HEAD`], { cwd })) as
+          | { code?: number; exitCode?: number; stdout?: string; output?: string }
+          | undefined;
+        const diffOut = diffRes?.stdout ?? diffRes?.output ?? "";
+        if ((diffRes?.code ?? diffRes?.exitCode) === 0 && diffOut) {
+          for (const line of diffOut.split("\n")) {
+            const f = line.trim();
+            if (f && !f.startsWith(".pi/quest/")) {
+              files.add(f);
+            }
+          }
+        }
+        return Array.from(files);
+      }
+    } catch { /* ignore */ }
+  }
 
   for (const ref of ["HEAD~1", "HEAD"]) {
     try {
@@ -216,7 +254,7 @@ export async function archiveActiveQuest(
   assertArchiveAllowed(state, outcome, summary, opts);
   cancelReview(qid);
 
-  const modifiedFiles = await getModifiedFiles(pi, ctx.cwd);
+  const modifiedFiles = await getModifiedFiles(pi, ctx.cwd, state.baseCommit, state.touchedFiles);
   const findingsList: string[] = [];
   if (summary && summary.trim().length > 0) {
     findingsList.push(summary.trim());

@@ -3,7 +3,7 @@
 import { emitNow } from "../../app/interpreter";
 import { getState, replaceState } from "../../app/store";
 import type { QuestState } from "../../domain/quest";
-import { scanSiblingStates } from "../../durability/siblings";
+import { scanSiblingStates, workspaceSessionFolder } from "../../durability/siblings";
 import { newestSnapshotPerQid } from "../../durability/snapshots";
 import type { Pi, PiCtx } from "../../hooks/events";
 import { listDraftQids, readDraftObjective, resumeQuest, summarizeActive } from "./quest";
@@ -30,7 +30,8 @@ export async function collectCandidates(ctx: PiCtx, sessionsDir?: string): Promi
   for (const [qid, state] of newestSnapshotPerQid(ctx.sessionManager.getEntries())) {
     found.set(qid, { qid, label: candidateLabel(qid, state.phase, state), state });
   }
-  for (const [qid, state] of await scanSiblingStates(sessionsDir)) {
+  const workspaceFolder = ctx?.cwd ? workspaceSessionFolder(ctx.cwd) : undefined;
+  for (const [qid, state] of await scanSiblingStates(sessionsDir, workspaceFolder)) {
     if (!found.has(qid)) found.set(qid, { qid, label: candidateLabel(qid, state.phase, state), state });
   }
   for (const qid of await listDraftQids(ctx.cwd)) {
