@@ -3,7 +3,7 @@
 // command line ("git commit -m 'make it work'" is not a build).
 import type { SubQuestContract } from "../domain/contract";
 
-const RUNNERS_ANY = new Set(["make", "pytest", "jest", "vitest", "tsc"]);
+const RUNNERS_ANY = new Set(["make", "pytest", "jest", "vitest", "tsc", "ctest"]);
 const RUNNERS_WITH_SUBCOMMAND: Record<string, string> = {
   npm: "test",
   pnpm: "test",
@@ -12,8 +12,9 @@ const RUNNERS_WITH_SUBCOMMAND: Record<string, string> = {
   cargo: "test",
   deno: "test",
   go: "test",
+  node: "--test",
 };
-const TEST_SCRIPT_BASENAMES = new Set(["test", "test.sh"]);
+const TEST_SCRIPT_BASENAMES = new Set(["test", "test.sh", "run-tests.sh", "run-test.sh", "verify.sh", "test.py", "test.js", "test.mjs"]);
 const WRAPPERS = new Set(["sudo", "time", "env", "nice", "npx", "exec", "command"]);
 
 function basename(token: string): string {
@@ -36,8 +37,9 @@ function isRunnerSegment(segment: string, extra: readonly string[]): boolean {
   if (RUNNERS_ANY.has(program)) return true;
   const sub = RUNNERS_WITH_SUBCOMMAND[program];
   if (sub !== undefined && tokens.slice(1).includes(sub)) return true;
-  // "./test", "bash test.sh", "sh ./test.sh"
-  return tokens.some((t, i) => (i === 0 || program === "bash" || program === "sh") && TEST_SCRIPT_BASENAMES.has(basename(t)));
+  if ((program === "python" || program === "python3") && tokens.includes("-m") && (tokens.includes("unittest") || tokens.includes("pytest"))) return true;
+  // "./test", "bash test.sh", "sh ./test.sh", "./run-tests.sh", etc.
+  return tokens.some((t, i) => (i === 0 || program === "bash" || program === "sh" || program === "python" || program === "node") && TEST_SCRIPT_BASENAMES.has(basename(t)));
 }
 
 export function isTestCommand(

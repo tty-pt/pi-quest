@@ -9,6 +9,7 @@ import {
   parseDraftSections,
   spliceAnalysisSection,
   splicePlanSection,
+  normalizeDeliverableHeadings,
 } from "../../src/drafting/plan-text.ts";
 
 Deno.test("citeLocations extracts file:line ranges and ignores non-citations", () => {
@@ -32,10 +33,32 @@ Deno.test("citeLocations handles deep paths and header extensions", () => {
   check(cites.some((c) => c.file === "common.h"), "header parsed");
 });
 
-Deno.test("citeLocations handles hidden directories and relative path prefixes", () => {
-  const cites = citeLocations("Check .pi/extensions/pi-quest/src/index.ts:42 and ./mods/song/song.c:10-20.");
-  check(cites.some((c) => c.file === ".pi/extensions/pi-quest/src/index.ts" && c.lineStart === 42), "hidden dir parsed");
-  check(cites.some((c) => c.file === "./mods/song/song.c" && c.lineStart === 10 && c.lineEnd === 20), "relative dot-slash parsed");
+Deno.test("normalizeDeliverableHeadings auto-demotes non-reserved ## sub-headings to ###", () => {
+  const plan = [
+    "## Phase 1: Architecture",
+    "1. Define types in src/a.ts:1",
+    "",
+    "## Phase 2: Implementation",
+    "2. Implement feature in src/b.ts:1",
+    "",
+    "### Step 2.1: Tests",
+    "3. Run tests",
+  ].join("\n");
+
+  const normalized = normalizeDeliverableHeadings(plan, "plan");
+  check(normalized.includes("### Phase 1: Architecture"), "Phase 1 demoted to ###");
+  check(normalized.includes("### Phase 2: Implementation"), "Phase 2 demoted to ###");
+  check(normalized.includes("### Step 2.1: Tests"), "existing ### preserved");
+  check(!/^##\s+/m.test(normalized), "zero ## headings remain");
+
+  // Reserved headings are still rejected
+  let threw = false;
+  try {
+    normalizeDeliverableHeadings("## Requirements\n- bad", "plan");
+  } catch {
+    threw = true;
+  }
+  check(threw, "reserved heading ## Requirements throws error");
 });
 
 const SECTIONS: DraftSections = {

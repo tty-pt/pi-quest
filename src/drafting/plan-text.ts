@@ -144,17 +144,50 @@ export function hasAuthoredText(text: string): boolean {
   return text.replace(/<!--[\s\S]*?-->/g, "").trim().length > 0;
 }
 
-// The doc is ##-sectioned: a "## " line inside a deliverable body ends its
-// section, silently orphaning everything after it (a plan written with its own
-// ## Requirements / ## Steps parses as an empty plan). Refuse it at the write.
-export function assertNoSectionHeadings(body: string, noun: "plan" | "analysis"): void {
-  const bad = body.split(/\r?\n/).find((line) => /^##\s+\S/.test(line));
-  if (bad !== undefined) {
-    throw new Error(
-      `the ${noun} text contains a section heading (${JSON.stringify(bad.trim())}): "## " lines end the ${noun} section in the quest doc. Use "###" for sub-headings inside the ${noun}; requirements and evidence belong in the doc's own ## Requirements and ## Evidence sections (edit the draft file directly).`,
-    );
+const RESERVED_SECTIONS = new Set([
+  "requirements",
+  "evidence",
+  "sub-quests",
+  "subquests",
+  "amendments",
+  "analysis",
+  "implementation plan",
+  "plan",
+  "context / background discussion",
+  "context",
+  "original request",
+]);
+
+// The doc is ##-sectioned: reserved top-level sections (## Requirements, ## Evidence)
+// cannot be inside a deliverable. Non-reserved ## sub-headings (e.g. ## Phase 1)
+// are automatically normalized to ### sub-headings to preserve valid markdown.
+export function normalizeDeliverableHeadings(body: string, noun: "plan" | "analysis"): string {
+  const lines = body.split(/\r?\n/);
+  const normalized: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^##\s+(.+)$/);
+    if (match) {
+      const headingText = match[1].trim().toLowerCase();
+      if (RESERVED_SECTIONS.has(headingText)) {
+        throw new Error(
+          `the ${noun} text contains a reserved section heading (${JSON.stringify(line.trim())}): "## " lines end the ${noun} section in the quest doc. Use "###" for sub-headings inside the ${noun}; requirements and evidence belong in the doc's own ## Requirements and ## Evidence sections (edit the draft file directly).`,
+        );
+      }
+      // Auto-demote non-reserved ## sub-heading to ###
+      normalized.push(`### ${match[1].trim()}`);
+    } else {
+      normalized.push(line);
+    }
   }
-  if (!hasAuthoredText(body)) throw new Error(`the ${noun} text has no content beyond comments`);
+
+  const result = normalized.join("\n");
+  if (!hasAuthoredText(result)) throw new Error(`the ${noun} text has no content beyond comments`);
+  return result;
+}
+
+export function assertNoSectionHeadings(body: string, noun: "plan" | "analysis"): string {
+  return normalizeDeliverableHeadings(body, noun);
 }
 
 export function meetsReviewThresholds(

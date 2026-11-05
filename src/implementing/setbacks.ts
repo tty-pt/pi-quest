@@ -9,8 +9,11 @@ export interface SetbackSignal {
 }
 
 // Commands whose exit status 1 means "nothing found" by long-standing Unix
-// convention (grep, diff, find ...), not failure. Tool vocabulary, not language.
-const NO_MATCH_EXIT_ONE = new Set(["rg", "grep", "egrep", "fgrep", "ag", "ack", "diff", "cmp", "test", "["]);
+// convention (grep, diff, find, which ...), not failure. Tool vocabulary, not language.
+const NO_MATCH_EXIT_ONE = new Set([
+  "rg", "grep", "egrep", "fgrep", "ag", "ack", "diff", "cmp", "test", "[",
+  "which", "command", "type", "find",
+]);
 
 function commandNames(cmd: string): string[] {
   return cmd

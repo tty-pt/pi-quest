@@ -190,6 +190,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       ownerRunId: qid,
       toolName: runnerTool,
       ...(candidateModel ? { model: candidateModel } : {}),
+      ...(args.routerDefault ? { routerDefault: Array.isArray(args.routerDefault) ? args.routerDefault[0] : args.routerDefault } : {}),
       ...(thinking ? { thinking } : {}),
       ...(args.maxDurationMs !== undefined ? { maxDurationMs: args.maxDurationMs } : {}),
       ...(args.inactivityLimitMs !== undefined ? { inactivityLimitMs: args.inactivityLimitMs } : {}),

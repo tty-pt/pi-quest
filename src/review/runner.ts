@@ -36,6 +36,7 @@ export interface RunnerEnv {
   ctx: PiCtx;
   ownerRunId: string;
   model?: string;
+  routerDefault?: string;
   thinking?: string;
   toolName?: string;
   maxDurationMs?: number;
@@ -168,6 +169,13 @@ function runReview(
           const physical = lastRoutedModel();
           if (physical && !physical.toLowerCase().startsWith("quest/")) {
             subagentModel = physical;
+          } else if (env.routerDefault && !env.routerDefault.toLowerCase().startsWith("quest/")) {
+            subagentModel = env.routerDefault;
+          } else {
+            const envDefault = process.env.PI_QUEST_ROUTER_DEFAULT;
+            if (envDefault && !envDefault.toLowerCase().startsWith("quest/")) {
+              subagentModel = envDefault;
+            }
           }
         }
       }

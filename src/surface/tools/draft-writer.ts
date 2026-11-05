@@ -26,10 +26,10 @@ export async function writePlanToDraft(
   if (state.kind !== "standard") {
     throw new Error("plan text is for standard quests — author the ## Analysis via {analysis: ...} instead");
   }
-  assertNoSectionHeadings(planText, "plan");
+  const cleanPlan = assertNoSectionHeadings(planText, "plan");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
-  const updated = splicePlanSection(current, seedReviewCount(planText));
+  const updated = splicePlanSection(current, seedReviewCount(cleanPlan));
   if (updated === current) throw new Error("plan text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
@@ -54,10 +54,10 @@ export async function writeAnalysisToDraft(
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
     throw new Error(`analysis text needs an active draft (phase ${state.phase}); the analysis is drafting-only`);
   }
-  assertNoSectionHeadings(analysisText, "analysis");
+  const cleanAnalysis = assertNoSectionHeadings(analysisText, "analysis");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
-  const updated = spliceAnalysisSection(current, seedReviewCount(analysisText));
+  const updated = spliceAnalysisSection(current, seedReviewCount(cleanAnalysis));
   if (updated === current) throw new Error("analysis text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
@@ -93,11 +93,11 @@ export async function writePlanRevision(
       throw new Error("plan revision keeps the quest objective — a new goal is a scope change, start a new quest");
     }
   }
-  assertNoSectionHeadings(planText, "plan");
+  const cleanRevision = assertNoSectionHeadings(planText, "plan");
   const path = join(ctx.cwd, draftPath(state.qid));
   const current = await readFile(path, "utf8");
   const previousPlan = parseDraftSections(current).plan;
-  const updated = splicePlanSection(current, seedReviewCount(planText));
+  const updated = splicePlanSection(current, seedReviewCount(cleanRevision));
   if (updated === current) throw new Error("plan revision identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
