@@ -33,7 +33,7 @@ function contextLine(state: QuestState): string {
 
   if (state.phase === "drafting") {
     const criteria = getReviewCriteriaSummary(state.phase, state.kind);
-    line += `\n[Analysis-First & Approval Workflow]: (1) Investigate deeply. (2) Author ## Analysis and/or ## Implementation Plan. (3) Present analysis summary in chat and call quest_ask_human to request approval before implementing.`;
+    line += `\n[Analysis-First Workflow]: (1) Investigate root cause & architecture deeply. (2) Author ## Implementation Plan (or ## Analysis for analysis quests) via quest_update_state. (3) Automated review validates the draft before implementation begins.`;
     line += `\n[Compliance Criteria]\n${criteria}`;
   }
   return line;

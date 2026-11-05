@@ -187,7 +187,7 @@ export const DEFAULT_CONFIG: QuestConfig = {
   bindings: { reviewRunner: { tool: "subagent" } },
   statusStyle: "icon",
   autoArchive: true,
-  approvalGate: true,
+  approvalGate: false,
   reviewPolicy: "strict",
   strictMode: false,
   policyByModel: [],

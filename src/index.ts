@@ -26,7 +26,7 @@ export default function install(pi: Pi): void {
   onSessionStart(pi, (_e, ctx) => {
     resetNoticedReviews();
     resetAnnouncements();
-    ctx.ui?.setStatus?.("auren-model", "🔌 off");
+    ctx.ui?.setStatus?.("auren-model", undefined);
     if (typeof ctx.ui?.onTerminalInput === "function") {
       ctx.ui.onTerminalInput((data: string) => {
         if (normalizeKey(data) !== "ctrlQ") return undefined;
@@ -67,7 +67,8 @@ export default function install(pi: Pi): void {
           settings: { autoStart: cfg.autoStartAuren, autoDownloadModels: cfg.autoDownloadModels },
           confirm: confirmFn,
           onUpdate: (st) => {
-            const statusText = describeModelStatus(st);
+            const hasActivity = st.downloads.length > 0 || (st.running && st.activeModel);
+            const statusText = hasActivity ? describeModelStatus(st) : undefined;
             ctx.ui?.setStatus?.("auren-model", statusText);
             if (st.downloads.length > 0) {
               const dl = st.downloads[0];

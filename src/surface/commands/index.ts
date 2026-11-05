@@ -97,11 +97,12 @@ export function installCommands(pi: Pi): void {
     handler: async (_args, ctx) => {
       const rows = await listQuests(ctx);
       try {
-        ctx.ui.setWidget("quest", rows);
+        ctx.ui.setWidget("quest", undefined);
       } catch {
         // Widget is best-effort.
       }
       refreshStatus(ctx);
+      notify(ctx, rows.join("\n"));
     },
   });
   pi.registerCommand("quest-del", {

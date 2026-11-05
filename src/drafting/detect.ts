@@ -9,7 +9,7 @@ import { fetchActiveInvariants, formatInvariantsComment } from "../surface/invar
 import { extractRecentConversationContext } from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
-import { parseExplicitSyntax } from "../domain/intent";
+import { isFallbackAdvance, normalizeSteeringText, parseExplicitSyntax } from "../domain/intent";
 import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../config";
 import { evaluateQuestIntent, evaluateQuestKind } from "./judge";
 import { evaluateQuestDifficulty } from "./difficulty";
@@ -80,7 +80,7 @@ export async function detectSubstantiveRequest(
       `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened via trigger '${trigger.prefix}': "${objective.slice(0, 200)}". Flow: (1) investigate root cause & architecture deeply (proportional to difficulty), record findings via quest_update_state; ` +
         `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
         `(3) author that file's ## Analysis via quest_update_state {analysis: ...} and/or ## Implementation Plan via quest_update_state {plan: ...}; ` +
-        `(4) present the analysis summary clearly to the operator in your response and call quest_ask_human to request approval for implementation.${complexHint} (Hint: the operator can reply "go" or "proceed" at any point to approve immediately, or if the question times out and validation is green, the quest proceeds to implementation automatically).`,
+        `(4) the draft reviewer validates the deliverable against requirements and evidence.${complexHint} (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
     );
     return true;
   }
@@ -88,6 +88,16 @@ export async function detectSubstantiveRequest(
   // Explicit chat sigils ("? ", !chat) are never new quests.
   const explicit = parseExplicitSyntax(trimmed);
   if (explicit !== null && explicit.kind === "chat") return false;
+
+  // Conversational continuations and steering phrases when idle are never new quests.
+  const norm = normalizeSteeringText(trimmed);
+  if (
+    isFallbackAdvance(trimmed, cfg.steeringPhrases) ||
+    norm === "go on" || norm === "continue" || norm === "keep going" || norm === "carry on" ||
+    norm === "tell me more" || norm === "what else" || norm === "continua" || norm === "prossegue"
+  ) {
+    return false;
+  }
 
   // The judge decides (any language); structural header check is the judge-less fallback.
   let isQuest = isQuestLikeRequest(trimmed);
@@ -117,7 +127,7 @@ export async function detectSubstantiveRequest(
     `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate root cause & architecture deeply (proportional to difficulty), record findings via quest_update_state; ` +
       `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
       `(3) author that file's ## Analysis via quest_update_state {analysis: ...} and/or ## Implementation Plan via quest_update_state {plan: ...}; ` +
-      `(4) present the analysis summary clearly to the operator in your response and call quest_ask_human to request approval for implementation.${complexHint} (Hint: the operator can reply "go" or "proceed" at any point to approve immediately, or if the question times out and validation is green, the quest proceeds to implementation automatically).`,
+      `(4) the draft reviewer validates the deliverable against requirements and evidence.${complexHint} (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
   );
   return true;
 }
