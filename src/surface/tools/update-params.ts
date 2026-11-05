@@ -2,7 +2,7 @@
 // Separated from update-state.ts to maintain safe complexity margins (<350 LOC).
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { readQuestConfig } from "../../config.ts";
 import { getState, replaceState, updateState } from "../../app/store.ts";
 import { emitNow, sendSteer } from "../../app/interpreter.ts";
@@ -112,11 +112,35 @@ export async function claimForValidation(
   let getDiffPatch: () => Promise<string>;
 
   if (hasGit) {
+    const touched = state.touchedFiles ?? [];
+    const relTouched: string[] = [];
+    for (const f of touched) {
+      const full = isAbsolute(f) ? f : resolve(ctx.cwd, f);
+      if (full.startsWith(ctx.cwd + "/")) {
+        const r = full.slice(ctx.cwd.length + 1);
+        if (!r.startsWith(".pi/quest/")) relTouched.push(r);
+      }
+    }
+    const pathArgs = relTouched.length > 0 ? ["--", ...relTouched] : [];
+
     const runGitDiff = async (...args: string[]) => {
-      const refs = state.baseCommit ? [state.baseCommit, "HEAD", "HEAD~1"] : ["HEAD", "HEAD~1"];
-      for (const ref of refs) {
+      if (state.baseCommit) {
         try {
-          const res = (await pi.exec("git", ["diff", ...args, ref], { cwd: ctx.cwd })) as
+          const verify = (await pi.exec("git", ["rev-parse", "--verify", `${state.baseCommit}^{commit}`], { cwd: ctx.cwd })) as
+            | { code?: number; exitCode?: number }
+            | undefined;
+          if ((verify?.code ?? verify?.exitCode) === 0) {
+            const res = (await pi.exec("git", ["diff", ...args, state.baseCommit, ...pathArgs], { cwd: ctx.cwd })) as
+              | { code?: number; exitCode?: number; stdout?: string; output?: string }
+              | undefined;
+            const out = res?.stdout ?? res?.output ?? "";
+            if ((res?.code ?? res?.exitCode) === 0) return out;
+          }
+        } catch { /* continue */ }
+      }
+      for (const ref of ["HEAD", "HEAD~1"]) {
+        try {
+          const res = (await pi.exec("git", ["diff", ...args, ref, ...pathArgs], { cwd: ctx.cwd })) as
             | { code?: number; exitCode?: number; stdout?: string; output?: string }
             | undefined;
           const out = res?.stdout ?? res?.output ?? "";
@@ -128,7 +152,6 @@ export async function claimForValidation(
     getDiffStat = async () => {
       const stat = await runGitDiff("--stat");
       if (stat.trim().length > 0) return stat;
-      const touched = state.touchedFiles ?? [];
       return touched.length > 0 ? `${touched.length} file(s) modified in session` : "";
     };
     getDiffPatch = () => runGitDiff();

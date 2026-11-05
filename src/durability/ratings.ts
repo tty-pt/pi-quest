@@ -232,6 +232,13 @@ export async function checkPostQuestReversions(
       const res = await execGit(["merge-base", "--is-ancestor", hash, "HEAD"]);
       const code = res?.code ?? res?.exitCode ?? 1;
       if (code !== 0) {
+        const branchRes = await execGit(["branch", "--contains", hash]);
+        const branchCode = branchRes?.code ?? branchRes?.exitCode ?? 1;
+        const branchOut = (branchRes?.stdout ?? branchRes?.output ?? "").trim();
+        if (branchCode === 0 && branchOut.length > 0) {
+          continue;
+        }
+
         await applyModelPenalty(cwd, receipt.model, 0.0);
         await clearHandoffReceipt(cwd);
         return { reverted: true, reason: `Commit ${hash.slice(0, 8)} from quest ${receipt.qid} was reset or reverted.` };

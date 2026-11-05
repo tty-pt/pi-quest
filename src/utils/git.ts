@@ -39,46 +39,62 @@ export function findRepoRoot(startPath: string): string | undefined {
   return undefined;
 }
 
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Executes a git command safely using pi.exec if available,
- * with fallback to node:child_process execFile.
+ * with fallback to node:child_process execFile, with backoff
+ * retries on index.lock contention.
  */
 export async function runGit(
   args: string[],
   cwd: string,
   pi?: Pi,
+  maxRetries = 3,
 ): Promise<{ exitCode: number; stdout: string }> {
-  if (pi && typeof pi.exec === "function") {
-    try {
-      const res = (await pi.exec("git", args, { cwd })) as
-        | { code?: number; exitCode?: number; stdout?: string; output?: string }
-        | undefined;
-      const code = res?.exitCode ?? res?.code ?? 1;
-      const stdout = res?.stdout ?? res?.output ?? "";
-      return { exitCode: code, stdout };
-    } catch {
-      /* fallback */
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let result: { exitCode: number; stdout: string };
+    if (pi && typeof pi.exec === "function") {
+      try {
+        const res = (await pi.exec("git", args, { cwd })) as
+          | { code?: number; exitCode?: number; stdout?: string; output?: string; stderr?: string }
+          | undefined;
+        const code = res?.exitCode ?? res?.code ?? 1;
+        const stdout = res?.stdout ?? res?.output ?? "";
+        result = { exitCode: code, stdout };
+      } catch (err: unknown) {
+        result = { exitCode: 1, stdout: String(err) };
+      }
+    } else {
+      try {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileAsync = promisify(execFile);
+        const { stdout } = await execFileAsync("git", args, {
+          cwd,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        result = { exitCode: 0, stdout: stdout ?? "" };
+      } catch (err: unknown) {
+        const exitCode = typeof (err as { code?: number })?.code === "number"
+          ? (err as { code: number }).code
+          : 1;
+        const stdout = typeof (err as { stdout?: string })?.stdout === "string"
+          ? (err as { stdout: string }).stdout
+          : (typeof (err as { message?: string })?.message === "string" ? (err as { message: string }).message : "");
+        result = { exitCode, stdout };
+      }
     }
-  }
 
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    return { exitCode: 0, stdout: stdout ?? "" };
-  } catch (err: unknown) {
-    const exitCode = typeof (err as { code?: number })?.code === "number"
-      ? (err as { code: number }).code
-      : 1;
-    const stdout = typeof (err as { stdout?: string })?.stdout === "string"
-      ? (err as { stdout: string }).stdout
-      : "";
-    return { exitCode, stdout };
+    if (result.exitCode !== 0 && result.stdout.includes("index.lock") && attempt < maxRetries) {
+      await sleep(100 * (attempt + 1));
+      continue;
+    }
+    return result;
   }
+  return { exitCode: 1, stdout: "git failed after index.lock retries" };
 }
 
 /**
@@ -183,6 +199,12 @@ export async function captureUnifiedDiff(
         if (rawLine.startsWith("?? ")) {
           const relUntracked = rawLine.slice(3).trim();
           const fullUntracked = join(repo, relUntracked);
+          if (touchedFiles.length > 0 && !touchedFiles.some((tf) => {
+            const fullTf = isAbsolute(tf) ? tf : resolve(ctx.cwd, tf);
+            return fullTf === fullUntracked;
+          })) {
+            continue;
+          }
           if (!untrackedFiles.includes(fullUntracked)) {
             untrackedFiles.push(fullUntracked);
           }
@@ -190,13 +212,25 @@ export async function captureUnifiedDiff(
       }
     }
 
+    const repoTouchedRelPaths: string[] = [];
+    for (const f of touchedFiles) {
+      const fullPath = isAbsolute(f) ? f : resolve(ctx.cwd, f);
+      if (fullPath === repo || fullPath.startsWith(repo + "/")) {
+        const rel = fullPath === repo ? "." : fullPath.slice(repo.length + 1);
+        if (rel && !rel.startsWith(".pi/quest/")) {
+          repoTouchedRelPaths.push(rel);
+        }
+      }
+    }
+    const pathArgs = repoTouchedRelPaths.length > 0 ? ["--", ...repoTouchedRelPaths] : [];
+
     // B. Check if baseCommit is valid in this specific repo
     let diffWithBase = false;
     if (options.baseCommit) {
       const verifyRes = await runGit(["rev-parse", "--verify", `${options.baseCommit}^{commit}`], repo, pi);
       if (verifyRes.exitCode === 0) {
         diffWithBase = true;
-        const diffRes = await runGit(["diff", options.baseCommit], repo, pi);
+        const diffRes = await runGit(["diff", options.baseCommit, ...pathArgs], repo, pi);
         if (diffRes.exitCode === 0 && diffRes.stdout.trim().length > 0) {
           repoDiff = diffRes.stdout.trim();
         }
@@ -205,16 +239,13 @@ export async function captureUnifiedDiff(
 
     // C. Fallback to uncommitted HEAD changes, then HEAD~1 if not diffed with base
     if (!diffWithBase) {
-      const isExplicitlyTouched = touchedFiles.some((f) => {
-        const fullPath = isAbsolute(f) ? f : resolve(ctx.cwd, f);
-        return findRepoRoot(fullPath) === repo;
-      });
+      const isExplicitlyTouched = repoTouchedRelPaths.length > 0;
       const refs = isExplicitlyTouched || repoRoots.size === 1
         ? ["HEAD", "HEAD~1"]
         : ["HEAD"];
 
       for (const ref of refs) {
-        const diffRes = await runGit(["diff", ref], repo, pi);
+        const diffRes = await runGit(["diff", ref, ...pathArgs], repo, pi);
         if (diffRes.exitCode === 0 && diffRes.stdout.trim().length > 0) {
           repoDiff = diffRes.stdout.trim();
           break;

@@ -28,9 +28,12 @@ export function installValidation(pi: Pi): void {
         const text = Array.isArray(event.content)
           ? event.content.map((c) => c.text ?? "").join("\n")
           : "";
+        const details = event.details as Record<string, unknown> | undefined;
+        const rawCode = details?.["exitCode"] ?? details?.["code"];
+        const exitCode = typeof rawCode === "number" ? rawCode : (event.isError ? 1 : 0);
         const receipt: VerificationReceipt = {
           command,
-          exitCode: event.isError ? 1 : 0,
+          exitCode,
           tailOutput: text.slice(-2000),
           executedAt: Date.now(),
         };
