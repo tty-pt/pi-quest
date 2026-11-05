@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getState } from "../../app/store";
 import { draftPath } from "../../domain/paths";
+import { draftFilePath } from "../../files";
 import type { Qid } from "../../domain/qid";
 import { parseDraftSections } from "../../drafting/plan-text";
 import { selectProvider } from "../../absence/providers";
@@ -15,7 +16,7 @@ import { textResult } from "./reply";
 function extractDraftAnalysis(cwd: string, qid: string | null): string {
   if (!qid) return "";
   try {
-    const fullPath = join(cwd, draftPath(qid as Qid));
+    const fullPath = draftFilePath(cwd, qid as Qid);
     const content = readFileSync(fullPath, "utf8");
     const sections = parseDraftSections(content);
     return sections.analysis.trim();

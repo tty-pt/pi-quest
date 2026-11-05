@@ -5,8 +5,9 @@ import { getState, replaceState } from "../../app/store.ts";
 import { emitNow } from "../../app/interpreter.ts";
 import { createQuest } from "../../domain/quest.ts";
 import { createDraft } from "../../domain/transitions.ts";
-import { isQid } from "../../domain/qid.ts";
+import { isQid, type Qid } from "../../domain/qid.ts";
 import { FUTURE_DIR } from "../../domain/paths.ts";
+import { draftFilePath } from "../../files.ts";
 import { newestSnapshot, newestSnapshotFor } from "../../durability/snapshots.ts";
 import type { Pi, PiCtx } from "../../hooks/events.ts";
 import { listDraftQids } from "../../files.ts";
@@ -25,7 +26,7 @@ export function summarizeActive(): string {
 
 export async function readDraftObjective(cwd: string, qid: string): Promise<string | null> {
   try {
-    const text = await readFile(join(cwd, FUTURE_DIR, `${qid}.md`), "utf8");
+    const text = await readFile(draftFilePath(cwd, qid as Qid), "utf8");
     return text.match(/^##\s+Original request\s*\n+(.+?)(?:\n##\s|\n*$)/ims)?.[1]?.trim() ||
       text.split("\n")[0] ||
       qid;

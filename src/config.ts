@@ -2,6 +2,7 @@
 // HIGH_LEVEL: #interfaces — the review binding names the peer runner; built-ins apply otherwise.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { findPrimaryRepoRoot } from "./utils/git.ts";
 import type { QuestDifficulty } from "./domain/quest.ts";
 import type { RouterConfig, ModelSpec } from "./router/types.ts";
 import { parsePolicyRules, type PolicyRule } from "./policy/effective.ts";
@@ -690,12 +691,23 @@ export async function readQuestSettings(cwd: string): Promise<unknown> {
 }
 
 export async function readQuestConfig(cwd: string): Promise<QuestConfig> {
+  const root = findPrimaryRepoRoot(cwd);
   try {
-    const raw = await readFile(join(cwd, ".pi", "settings.json"), "utf8");
+    const raw = await readFile(join(root, ".pi", "settings.json"), "utf8");
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return DEFAULT_CONFIG;
     return loadConfig((parsed as Record<string, unknown>)["pi-quest"]);
   } catch {
+    if (root !== cwd) {
+      try {
+        const raw = await readFile(join(cwd, ".pi", "settings.json"), "utf8");
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null) return DEFAULT_CONFIG;
+        return loadConfig((parsed as Record<string, unknown>)["pi-quest"]);
+      } catch {
+        return DEFAULT_CONFIG;
+      }
+    }
     return DEFAULT_CONFIG;
   }
 }

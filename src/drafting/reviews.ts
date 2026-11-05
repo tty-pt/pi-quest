@@ -13,6 +13,7 @@ import { bypassDraftReview, bypassesDraftReview } from "./bypass";
 import { assessDraftQuality } from "./quality";
 import { withEffectivePolicy } from "../policy/effective";
 import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
 import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
 import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
@@ -63,7 +64,7 @@ export {
 async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | null> {
   if (state.qid === null) return null;
   try {
-    return await readFile(join(ctx.cwd, draftPath(state.qid)), "utf8");
+    return await readFile(draftFilePath(ctx.cwd, state.qid), "utf8");
   } catch {
     return null;
   }

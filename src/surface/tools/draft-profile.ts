@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { PiCtx } from "../../hooks/events";
 import type { QuestKind, QuestState } from "../../domain/quest";
 import { draftPath } from "../../domain/paths";
+import { draftFilePath } from "../../files";
 import { getState } from "../../app/store";
 import { readQuestConfig, getThresholdsForDifficulty, type QuestConfig } from "../../config";
 import { draftProfileText, parseDraftSections, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
@@ -30,7 +31,7 @@ async function deliverableProfile(
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
     return { error: `${param} needs a draft in drafting (phase ${state.phase}); author one via draftName first` };
   }
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   let current: string;
   try {
     current = await readFile(path, "utf8");

@@ -19,6 +19,8 @@ export interface ChildQuestContractParams {
   requiredTestCommands?: string[];
   acceptanceCriteria?: string[];
   maxTurns?: number;
+  worktreePath?: string;
+  worktreeBranch?: string;
 }
 
 export async function createChildQuest(
@@ -46,6 +48,8 @@ export async function createChildQuest(
     requiredTestCommands: contractParams?.requiredTestCommands ?? (config.testCommands.length > 0 ? config.testCommands : []),
     acceptanceCriteria: contractParams?.acceptanceCriteria ?? [goal.trim()],
     maxTurns: contractParams?.maxTurns ?? 15,
+    worktreePath: contractParams?.worktreePath,
+    worktreeBranch: contractParams?.worktreeBranch,
   };
 
   if (switchNow) {
@@ -82,6 +86,8 @@ export function subquestTool(pi: Pi): PiToolSpec {
         requiredTestCommands: { type: "array", items: { type: "string" }, description: "Test commands required before completion." },
         acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Observable conditions for completion." },
         maxTurns: { type: "number", description: "Maximum turns before warning." },
+        worktreePath: { type: "string", description: "Optional isolated worktree path for this sub-quest." },
+        worktreeBranch: { type: "string", description: "Optional git branch for the isolated worktree." },
       },
       required: ["goal"],
       additionalProperties: false,
@@ -101,6 +107,8 @@ export function subquestTool(pi: Pi): PiToolSpec {
         requiredTestCommands: Array.isArray(params["requiredTestCommands"]) ? params["requiredTestCommands"] as string[] : undefined,
         acceptanceCriteria: Array.isArray(params["acceptanceCriteria"]) ? params["acceptanceCriteria"] as string[] : undefined,
         maxTurns: typeof params["maxTurns"] === "number" ? params["maxTurns"] as number : undefined,
+        worktreePath: typeof params["worktreePath"] === "string" ? params["worktreePath"] as string : undefined,
+        worktreeBranch: typeof params["worktreeBranch"] === "string" ? params["worktreeBranch"] as string : undefined,
       };
       try {
         const done = await createChildQuest(pi, ctx, goal.trim(), brief, switchNow, contractParams);

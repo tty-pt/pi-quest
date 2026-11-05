@@ -17,6 +17,8 @@ export interface SubQuestContract {
   requiredTestCommands: string[];
   acceptanceCriteria: string[];
   maxTurns?: number;
+  worktreePath?: string;
+  worktreeBranch?: string;
 }
 
 export interface HandbackReceipt {

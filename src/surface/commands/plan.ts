@@ -4,7 +4,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getState } from "../../app/store";
+import type { Qid } from "../../domain/qid";
 import { draftPath } from "../../domain/paths";
+import { draftFilePath } from "../../files";
 import type { Pi, PiCtx } from "../../hooks/events";
 import { readQuestConfig } from "../../config";
 import { openPlanViewer, OVERLAY_FRAME } from "../../views/plan-overlay";
@@ -29,13 +31,13 @@ export async function viewActivePlan(ctx: PiCtx): Promise<void> {
   let file = draftPath(qid);
   let content: string;
   try {
-    content = await readFile(join(ctx.cwd, file), "utf8");
+    content = await readFile(draftFilePath(ctx.cwd, qid as Qid), "utf8");
   } catch {
     // If this is a child sub-quest mounted in memory, fall back to the parent quest plan
     if (state.parentQid) {
       try {
         const parentFile = draftPath(state.parentQid);
-        content = await readFile(join(ctx.cwd, parentFile), "utf8");
+        content = await readFile(draftFilePath(ctx.cwd, state.parentQid as Qid), "utf8");
         qid = state.parentQid;
         file = parentFile;
       } catch {

@@ -9,6 +9,7 @@ import { sendSteer } from "../app/interpreter";
 import { recordAmendment, recordRefinement } from "../domain/quest";
 import { demoteToDrafting } from "../domain/transitions";
 import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
 import { isHeading } from "../domain/sections";
 import { hashContent } from "../drafting/plan-text";
 import { appendAmendmentToDoc, appendRequirementToDoc, appendSubQuestBacklogItem } from "../domain/quest-doc";
@@ -25,7 +26,7 @@ let followUpQueue: Promise<void> = Promise.resolve();
 export async function appendSubQuestToDraft(ctx: PiCtx, qid: Qid, goal: string): Promise<void> {
   followUpQueue = followUpQueue.then(async () => {
     try {
-      const filePath = join(ctx.cwd, draftPath(qid));
+      const filePath = draftFilePath(ctx.cwd, qid);
       if (!existsSync(filePath)) return;
       const content = await readFile(filePath, "utf8");
       const updated = appendSubQuestBacklogItem(content, goal);
@@ -57,7 +58,7 @@ export async function appendRequirementAndAmendmentToDraft(
 ): Promise<void> {
   followUpQueue = followUpQueue.then(async () => {
     try {
-      const filePath = join(ctx.cwd, draftPath(qid));
+      const filePath = draftFilePath(ctx.cwd, qid);
       if (!existsSync(filePath)) return;
       const content = await readFile(filePath, "utf8");
       let updated = appendRequirementToDoc(content, requirementText);
@@ -85,7 +86,7 @@ export async function appendRequirementAndAmendmentToDraft(
 export async function appendFollowUpToDraft(ctx: PiCtx, qid: Qid, followUpText: string): Promise<void> {
   followUpQueue = followUpQueue.then(async () => {
     try {
-      const filePath = join(ctx.cwd, draftPath(qid));
+      const filePath = draftFilePath(ctx.cwd, qid);
       if (!existsSync(filePath)) return;
       const content = await readFile(filePath, "utf8");
       

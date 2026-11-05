@@ -1,6 +1,7 @@
 // HIGH_LEVEL: #storage — post-quest telemetry and Bayesian Beta-Binomial accuracy tracking.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { findPrimaryRepoRoot } from "../utils/git.ts";
 import type { QuestDifficulty, QuestKind, QuestState } from "../domain/quest.ts";
 import { readQuestConfig, type QuestConfig } from "../config.ts";
 import { gate, mergeExemplars, nearestExemplar, type ExemplarTable } from "../judge/nearest.ts";
@@ -67,7 +68,8 @@ export function updateBetaDistribution(
 }
 
 export async function readRatingsStore(cwd: string): Promise<RatingsStore> {
-  const path = join(cwd, RATINGS_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, RATINGS_RELATIVE_PATH);
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw);
@@ -81,7 +83,8 @@ export async function readRatingsStore(cwd: string): Promise<RatingsStore> {
 }
 
 export async function writeRatingsStore(cwd: string, store: RatingsStore): Promise<void> {
-  const path = join(cwd, RATINGS_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, RATINGS_RELATIVE_PATH);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2), "utf8");
 }
@@ -144,7 +147,8 @@ export interface QuestHandoffReceipt {
 export const HANDOFF_RELATIVE_PATH = join(".pi", "quest", "recent-handoff.json");
 
 export async function readHandoffReceipt(cwd: string): Promise<QuestHandoffReceipt | null> {
-  const path = join(cwd, HANDOFF_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, HANDOFF_RELATIVE_PATH);
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw);
@@ -158,13 +162,15 @@ export async function readHandoffReceipt(cwd: string): Promise<QuestHandoffRecei
 }
 
 export async function writeHandoffReceipt(cwd: string, receipt: QuestHandoffReceipt): Promise<void> {
-  const path = join(cwd, HANDOFF_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, HANDOFF_RELATIVE_PATH);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(receipt, null, 2), "utf8");
 }
 
 export async function clearHandoffReceipt(cwd: string): Promise<void> {
-  const path = join(cwd, HANDOFF_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, HANDOFF_RELATIVE_PATH);
   try {
     await writeFile(path, "{}", "utf8");
   } catch {

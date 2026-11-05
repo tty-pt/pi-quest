@@ -11,6 +11,7 @@ import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRol
 import { difficultyLevel, type QuestState } from "../domain/quest";
 import { approvePlanRevision, recordPlanRevision, revertPlanRevision } from "../domain/plan-revision";
 import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onSessionStart, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
@@ -53,7 +54,7 @@ const REVISION_NOTE = "Mid-implementation plan revision: the remaining steps cha
 async function readPlanFile(ctx: PiCtx, state: QuestState): Promise<string | null> {
   if (state.qid === null) return null;
   try {
-    return await readFile(join(ctx.cwd, draftPath(state.qid)), "utf8");
+    return await readFile(draftFilePath(ctx.cwd, state.qid), "utf8");
   } catch {
     return null;
   }
@@ -182,7 +183,7 @@ async function restoreApprovedPlan(pi: Pi, ctx: PiCtx): Promise<void> {
   if (content === null) return;
   const restored = splicePlanSection(content, approved);
   if (restored !== content) {
-    await writeFile(join(ctx.cwd, draftPath(state.qid)), restored, "utf8");
+    await writeFile(draftFilePath(ctx.cwd, state.qid), restored, "utf8");
   }
   updateState((s) => revertPlanRevision(s));
 }

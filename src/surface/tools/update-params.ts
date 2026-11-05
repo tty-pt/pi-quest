@@ -24,6 +24,7 @@ import {
 import { unfinishedChildren } from "../../domain/children.ts";
 import { nextQid, type Qid } from "../../domain/qid.ts";
 import { draftPath } from "../../domain/paths.ts";
+import { draftFilePath } from "../../files.ts";
 import type { Pi, PiCtx } from "../../hooks/events.ts";
 import { ensureValidationFlow } from "../../validation/flow.ts";
 import {
@@ -50,7 +51,7 @@ export async function syncAmendmentsToDraft(
   qid: Qid,
   amendments: Amendment[],
 ): Promise<void> {
-  const filePath = join(ctx.cwd, draftPath(qid));
+  const filePath = draftFilePath(ctx.cwd, qid);
   if (!existsSync(filePath)) return;
   try {
     const content = await readFile(filePath, "utf8");
@@ -247,7 +248,7 @@ export async function applyPlanParam(
     applied.push("plan recorded in the draft file");
     const claims = await checkPlanCitations(ctx, plan.trim());
     if (claims !== "") applied.push(claims);
-    const docAfter = await readFile(join(ctx.cwd, draftPath(planQid)), "utf8");
+    const docAfter = await readFile(draftFilePath(ctx.cwd, planQid), "utf8");
     applied.push(await profileForSavedDoc(ctx, docAfter, state.kind));
     return { state: next };
   } catch (err) {
@@ -272,7 +273,7 @@ export async function applyAnalysisParam(
     applied.push("analysis recorded in the draft file");
     const claims = await checkPlanCitations(ctx, analysis.trim());
     if (claims !== "") applied.push(claims);
-    const docAfter = await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
+    const docAfter = await readFile(draftFilePath(ctx.cwd, qid), "utf8");
     applied.push(await profileForSavedDoc(ctx, docAfter, state.kind));
     return { state: next };
   } catch (err) {

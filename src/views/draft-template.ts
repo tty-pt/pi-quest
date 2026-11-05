@@ -70,6 +70,8 @@ export function renderChildDraftTemplate(
     allowedPaths?: string[];
     requiredTestCommands?: string[];
     acceptanceCriteria?: string[];
+    worktreePath?: string;
+    worktreeBranch?: string;
   },
   goal: string,
 ): string {
@@ -83,6 +85,10 @@ export function renderChildDraftTemplate(
     ? contract.requiredTestCommands.map((t) => `- ${t}`).join("\n")
     : "- npm test";
 
+  const wtBlock = contract.worktreePath
+    ? `\n## Isolated Worktree\n- Path: ${contract.worktreePath}${contract.worktreeBranch ? ` (branch: ${contract.worktreeBranch})` : ""}\n`
+    : "";
+
   return `# Quest ${childQid}: ${contract.title}
 
 > Sub-quest of parent ${parentQid}. Active in implementation mode.
@@ -93,7 +99,7 @@ ${goal}
 
 ## Parent Quest Link
 - Parent: ${parentQid} (.pi/quest/future/${parentQid}.md)
-
+${wtBlock}
 ## Assigned Requirements
 ${reqs}
 

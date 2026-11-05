@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { updateState } from "../app/store";
 import { hashContent } from "../drafting/plan-text";
 import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
 import { reconcileDocContent, upsertDocStatus } from "../domain/quest-doc";
 import type { HandbackReceipt } from "../domain/contract";
 import type { Qid } from "../domain/qid";
@@ -16,7 +17,7 @@ import type { PiCtx } from "../hooks/events";
 
 export async function readQuestDoc(ctx: PiCtx, qid: Qid): Promise<string | null> {
   try {
-    return await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
+    return await readFile(draftFilePath(ctx.cwd, qid), "utf8");
   } catch {
     return null;
   }
@@ -36,7 +37,7 @@ export async function setDocStatus(
   const updated = upsertDocStatus(content, phase, complete);
   if (updated === content) return;
   try {
-    await writeFile(join(ctx.cwd, draftPath(qid)), updated, "utf8");
+    await writeFile(draftFilePath(ctx.cwd, qid), updated, "utf8");
   } catch {
     return;
   }
@@ -55,7 +56,7 @@ export async function reconcileParentDocOnReturn(
   parentQid: Qid,
   receipt: HandbackReceipt,
 ): Promise<void> {
-  const filePath = join(cwd, draftPath(parentQid));
+  const filePath = draftFilePath(cwd, parentQid);
   try {
     const content = await readFile(filePath, "utf8");
     const updated = reconcileDocContent(content, receipt);

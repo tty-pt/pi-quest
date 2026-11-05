@@ -3,7 +3,8 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PiCtx } from "./hooks/events.ts";
-import { ARCHIVE_DIR, draftPath, FUTURE_DIR } from "./domain/paths.ts";
+import { findPrimaryRepoRoot } from "./utils/git.ts";
+import { ARCHIVE_DIR, archivePath, draftPath, FUTURE_DIR, stageDir } from "./domain/paths.ts";
 import { isQid, type Qid } from "./domain/qid.ts";
 import type { QuestDifficulty } from "./config.ts";
 import {
@@ -12,9 +13,26 @@ import {
 } from "./views/draft-template.ts";
 import type { SubQuestContract } from "./domain/contract.ts";
 
+export function canonicalWorkspaceRoot(cwd: string): string {
+  return findPrimaryRepoRoot(cwd);
+}
+
+export function draftFilePath(cwd: string, qid: Qid): string {
+  return join(canonicalWorkspaceRoot(cwd), draftPath(qid));
+}
+
+export function stageDirPath(cwd: string, qid: Qid): string {
+  return join(canonicalWorkspaceRoot(cwd), stageDir(qid));
+}
+
+export function archiveFilePath(cwd: string, qid: Qid): string {
+  return join(canonicalWorkspaceRoot(cwd), archivePath(qid));
+}
+
 async function listQidsInDir(cwd: string, dir: string, ext: string): Promise<string[]> {
+  const root = canonicalWorkspaceRoot(cwd);
   try {
-    const files = await readdir(join(cwd, dir));
+    const files = await readdir(join(root, dir));
     return files
       .filter((f) => f.endsWith(ext))
       .map((f) => f.slice(0, -ext.length))
@@ -45,9 +63,10 @@ async function writeDraftFileIfNotExists(
   qid: Qid,
   content: string,
 ): Promise<void> {
-  await mkdir(join(cwd, FUTURE_DIR), { recursive: true });
+  const root = canonicalWorkspaceRoot(cwd);
+  await mkdir(join(root, FUTURE_DIR), { recursive: true });
   try {
-    await writeFile(join(cwd, draftPath(qid)), content, { flag: "wx" });
+    await writeFile(draftFilePath(cwd, qid), content, { flag: "wx" });
   } catch (err) {
     if ((err as { code?: string }).code !== "EEXIST") throw err;
   }

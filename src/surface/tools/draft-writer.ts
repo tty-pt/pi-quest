@@ -8,6 +8,7 @@ import { emitNow } from "../../app/interpreter";
 import type { QuestState } from "../../domain/quest";
 import { recordPlanRevision } from "../../domain/plan-revision";
 import { draftPath } from "../../domain/paths";
+import { draftFilePath } from "../../files";
 import { bootPlanRevisionReview, clearPlanRevisionRetries } from "../../implementing/plan-revision";
 import { clearDraftReviewRetry, maybeBootDraftReview } from "../../drafting/reviews";
 import { assertNoSectionHeadings, hashContent, parseDraftSections, seedReviewCount, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
@@ -27,7 +28,7 @@ export async function writePlanToDraft(
     throw new Error("plan text is for standard quests — author the ## Analysis via {analysis: ...} instead");
   }
   const cleanPlan = assertNoSectionHeadings(planText, "plan");
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
   const updated = splicePlanSection(current, seedReviewCount(cleanPlan));
   if (updated === current) throw new Error("plan text identical to the draft file");
@@ -55,7 +56,7 @@ export async function writeAnalysisToDraft(
     throw new Error(`analysis text needs an active draft (phase ${state.phase}); the analysis is drafting-only`);
   }
   const cleanAnalysis = assertNoSectionHeadings(analysisText, "analysis");
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
   const updated = spliceAnalysisSection(current, seedReviewCount(cleanAnalysis));
   if (updated === current) throw new Error("analysis text identical to the draft file");
@@ -94,7 +95,7 @@ export async function writePlanRevision(
     }
   }
   const cleanRevision = assertNoSectionHeadings(planText, "plan");
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
   const previousPlan = parseDraftSections(current).plan;
   const updated = splicePlanSection(current, seedReviewCount(cleanRevision));
@@ -113,7 +114,7 @@ export async function writePlanRevision(
 export async function carryRefinementsToDraft(ctx: PiCtx, state: QuestState): Promise<QuestState> {
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) return state;
   if (state.refinements.length === 0) return state;
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
   const items = state.refinements.map((refinement) => `- ${refinement}`).join("\n");
   const body = current.endsWith("\n") ? current : `${current}\n`;

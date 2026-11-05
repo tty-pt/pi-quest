@@ -11,6 +11,7 @@ import { recordReviewResult, difficultyLevel } from "../domain/quest";
 import { demoteToDrafting, demoteToImplementing } from "../domain/transitions";
 import type { Qid } from "../domain/qid";
 import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
 import type { Pi, PiCtx } from "../hooks/events";
 import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
 import { isReviewerAvailable } from "../review/runner";
@@ -43,7 +44,7 @@ import { interpretUserTurn } from "../domain/intent";
 async function approvedPlan(ctx: PiCtx, state: QuestState): Promise<string> {
   if (state.qid === null) return "(none)";
   try {
-    return await readFile(join(ctx.cwd, draftPath(state.qid)), "utf8");
+    return await readFile(draftFilePath(ctx.cwd, state.qid), "utf8");
   } catch {
     return "(draft file removed after promotion)";
   }
