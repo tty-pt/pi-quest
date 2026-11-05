@@ -91,10 +91,29 @@ Deno.test("quest_ask_human renderCall prints plain analysis text directly before
   const lines = component.render(80);
   const fullText = lines.join("\n");
 
-  check(fullText.includes("### Analysis (rend01)"), "analysis header rendered");
+  check(fullText.includes("### Analysis (Quest rend01)"), "analysis header rendered with Quest prefix");
   check(fullText.includes("Root cause identified: off-by-one error in allocator."), "analysis body line 1 rendered");
   check(fullText.includes("Fix: adjust buffer size by 1."), "analysis body line 2 rendered");
   check(fullText.includes("Approve implementation?"), "question rendered immediately after analysis");
+
+  // Validate renderResult for operator-answered scenario
+  const userResult = {
+    content: [{ type: "text" as const, text: 'Human answered: "proceed"' }],
+    details: { answer: "proceed", source: "user" },
+  };
+  const userComponent = tool.renderResult!(userResult, undefined, undefined, undefined);
+  const userLines = userComponent.render(80);
+  check(userLines.some((l) => l.includes('Operator answered: "proceed"')), "renderResult formats user answer");
+
+  // Validate renderResult for timeout-to-default scenario
+  const timeoutResult = {
+    content: [{ type: "text" as const, text: 'No human answer (absence) — proceeding with default: "proceed"' }],
+    details: { answer: "proceed", source: "default" },
+  };
+  const timeoutComponent = tool.renderResult!(timeoutResult, undefined, undefined, undefined);
+  const timeoutLines = timeoutComponent.render(80);
+  check(timeoutLines.some((l) => l.includes('No operator answer (timeout): proceeding with default "proceed"')), "renderResult formats timeout default");
+
   replaceState(IDLE_STATE);
 });
 

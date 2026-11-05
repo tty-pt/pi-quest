@@ -57,7 +57,7 @@ export function askHumanTool(pi: Pi): PiToolSpec {
 
       const lines: string[] = [];
       if (analysis) {
-        lines.push(`### Analysis (${qid ?? "Draft"})`, "", analysis, "");
+        lines.push(`### Analysis (${qid ? `Quest ${qid}` : "Draft"})`, "", analysis, "");
       }
       if (question) {
         lines.push(question);
