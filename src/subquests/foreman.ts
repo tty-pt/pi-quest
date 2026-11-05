@@ -67,7 +67,8 @@ export function nextPendingSubQuest(
         completedReqs.add(req.toLowerCase());
       }
       if (r.findings) {
-        const idMatch = r.findings.match(/\b(SQ\d+)\b/i);
+        const idMatch = r.findings.match(/^(?:Sub-Quest\s+)?(SQ\d+)[\s:\-–—]/i) ??
+          r.findings.match(/\b(SQ\d+)\s*(?:completed|passed|finished|verified|done)\b/i);
         if (idMatch) completedIds.add(idMatch[1].toUpperCase());
       }
     }

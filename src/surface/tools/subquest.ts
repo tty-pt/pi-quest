@@ -43,7 +43,7 @@ export async function createChildQuest(
     title: goal.trim(),
     assignedRequirements: contractParams?.assignedRequirements ?? [],
     allowedPaths: contractParams?.allowedPaths ?? [],
-    requiredTestCommands: contractParams?.requiredTestCommands ?? ["make test"],
+    requiredTestCommands: contractParams?.requiredTestCommands ?? (config.testCommands.length > 0 ? config.testCommands : []),
     acceptanceCriteria: contractParams?.acceptanceCriteria ?? [goal.trim()],
     maxTurns: contractParams?.maxTurns ?? 15,
   };

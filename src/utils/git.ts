@@ -195,10 +195,10 @@ export async function captureUnifiedDiff(
     if (options.baseCommit) {
       const verifyRes = await runGit(["rev-parse", "--verify", `${options.baseCommit}^{commit}`], repo, pi);
       if (verifyRes.exitCode === 0) {
+        diffWithBase = true;
         const diffRes = await runGit(["diff", options.baseCommit], repo, pi);
         if (diffRes.exitCode === 0 && diffRes.stdout.trim().length > 0) {
           repoDiff = diffRes.stdout.trim();
-          diffWithBase = true;
         }
       }
     }
