@@ -28,8 +28,8 @@ Every quest executes through three phases:
 2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
 3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately, or reply `decline` / give corrective feedback (or choose `"Cancel archive (stay in quest)"` in the integration prompt) to demote back to `implementing` and continue working in the quest.
 
-### Instant Session Toggle (`Ctrl+Q`)
-Press **`Ctrl+Q`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).
+### Instant Session Toggle (`Alt+Q`)
+Press **`Alt+Q`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).
 
 ---
 
@@ -202,9 +202,10 @@ All operator commands live under **`/quest`** (with interactive tab-completion f
 | `/quest edit` | `/quest plan` | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR` (or `planEditor`). |
 | `/quest list` | `/quest ls` | List active & draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
 | `/quest pick` | `/quest switch` | Interactively select a quest to resume. |
-| `/quest pause` / `/quest on` | `/quest off` / `/quest enable` / `/quest toggle` (`Ctrl+Q`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest new [goal]` | `/quest chain` / `/quest next` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work. |
+| `/quest pause` / `/quest on` | `/quest off` / `/quest enable` / `/quest toggle` (`Alt+Q`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
 | `/quest cancel` | `/quest cancel-review` | Cancel any currently running in-flight review or validation and unblock tool execution. |
-| `/quest del [qid\|flags]` | `/quest drop` | Delete/abandon the active quest, a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`). |
+| `/quest del [qid\|flags]` | `/quest drop` | Delete/abandon the active quest (`--keep-slot` / `-s` to keep slot work intact, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`). |
 | `/quest handoff [qid]` | | Write and show a handoff for the active (or named) quest. |
 | `/quest slots` | `/quest scratches` | Inspect active scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, process health, and working tree state. |
 | `/quest doctor` | | Check live health of decision judge, latency, models, and word families. |
@@ -232,9 +233,34 @@ Context gets lost: compaction, a fresh agent, a new session. pi-quest packages t
 Implementation work runs isolated in dedicated git worktrees to keep the primary workspace stable and clean:
 
 - **Warm Scratch Pool (`.pi/scratch/slot-N`)**: A pool of pre-warmed worktree slots avoids expensive submodule cloning delays during execution. Slots dynamically scale up to capacity (`worktreePoolMaxSize`, default 8) and automatically reclaim orphaned or terminated leases.
-- **Fail-Safe Integration on `/quest del`**: Before any scratch slot is torn down or reset, in-flight work and submodule commits are committed to the quest feature branch (`quest/<qid>`). The operator is given the option to integrate (squash-merge) into the current branch or keep the feature branch intact. Submodule commits are always mirrored to canonical primary `.git/modules/` storage before worktree unmounting.
-- **Tool Interception & Jailing**: During the `implementing` phase, file edits, bash executions, background tasks, and subagent runs are jailed to the active worktree path.
+- **Fail-Safe Integration & Slot Retention on `/quest del`**: When abandoning an active quest via `/quest del`, the operator can choose to:
+  - **Integrate** (`--integrate` / `-i`): squash-merge the feature branch into the primary branch and free the slot.
+  - **Keep work in slot** (`--keep-slot` / `-s`): delete the quest record while leaving `slot-N` and all its committed and uncommitted changes untouched as the active workspace.
+  - **Keep branch unmerged** (`--keep` / `-k`): preserve `quest/<qid>` unmerged and reset/free `slot-N`.
+  - **Discard** (`--discard` / `-d`): discard changes and reset/free `slot-N`.
+- **Tool Interception & Jailing**: During the `implementing` phase (or whenever a slot is retained), file edits, bash executions, background tasks, and subagent runs are jailed to the active worktree path.
 - **Clean Status HUD**: The status bar displays the phase icon (`🔍`, `📝`, `👀` while reviewing, `🔨`, `🧪`, `⏸️` when paused), sub-quest depth (`↳ `, `↳₂ `), readable quest name, scratch slot badge (`(1)`, `(2)`, `(wt)`), and passing test checkmark (`✓`), e.g. `🔨 ↳ fix-seams (1) ✓`. `/quest slots` provides an instant overview of all slots, assigned quests, and working tree states.
+
+---
+
+## 7c. Common Operator Workflows
+
+1. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation.
+   - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest right where you left off.
+2. **Continue work in the same scratch slot with a brand-new quest (`/quest new`)**:
+   - When an active or paused quest has become unwieldy and you want to plan a fresh quest on top of the current `slot-N` worktree without merging or resetting the slot:
+     ```text
+     /quest new Add atmospheric scattering and horizon fog
+     ```
+   - Or run `/quest new` with no arguments (or `/quest del --keep-slot`) to retire the old quest while keeping `slot-N` attached, then describe your next task in chat.
+3. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
+   - Run `/quest del --keep-slot` (or `/quest del -s`, or select `"Keep work in slot (do not reset or free slot)"` in `/quest del`) to delete the quest while keeping all committed and uncommitted work in `.pi/scratch/slot-N`.
+   - To later release and reset a retained idle slot, run `/quest del --discard`.
+4. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
+   - If the validator passes or asks to archive before you are satisfied, reply **`decline`** (or give corrective instructions like `"No, DECLINE. Check what happens when zooming out"`) or choose **`"Cancel archive (stay in quest)"`** (or press `Escape`) at the squash-merge prompt. The quest demotes back to `implementing` with tools unlocked.
+5. **Prune stale or orphan draft quests (`/quest list` & `/quest del`)**:
+   - Inspect all drafts with `/quest list`, preview cleanup with `/quest del --stale --empty --orphans --dry-run`, and delete with `/quest del --stale --empty --orphans` (or `/quest del <qid|name>`).
 
 ---
 

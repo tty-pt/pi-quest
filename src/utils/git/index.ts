@@ -33,7 +33,7 @@ export {
   alignPrimarySubmoduleBranches,
 } from "./submodules";
 
-export { squashSubmoduleCommits } from "./pool-rescue";
+export { squashSubmoduleCommits, retainSlotLease } from "./pool-rescue";
 
 export {
   acquireWarmSlot,

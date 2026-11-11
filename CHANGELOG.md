@@ -8,8 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] (target: v1.12.0)
 
 ### Changed
-- **Unified `/quest` Command Surface & Default Disabled Mode** (`src/surface/commands/index.ts`, `src/surface/commands/quest.ts`, `src/config/defaults.ts`, `src/durability/status.ts`):
-  - Consolidated all operator commands under `/quest` (`list`, `pick`, `edit`, `pause`/`on`, `cancel`, `del`, `handoff`, `slots`, `doctor`, `policy`, `router`, `ratings`) with tab completion and a self-explaining status card on bare `/quest`.
+- **Unified `/quest` Command Surface, `Alt+Q` Shortcut & Default Disabled Mode** (`src/surface/commands/index.ts`, `src/surface/commands/quest.ts`, `src/config/defaults.ts`, `src/durability/status.ts`):
+  - Consolidated all operator commands under `/quest` (`list`, `pick`, `new`, `edit`, `pause`/`on`/`toggle`, `cancel`, `del`, `handoff`, `slots`, `doctor`, `policy`, `router`, `ratings`) with tab completion and a self-explaining status card on bare `/quest`.
+  - Registered `alt+q` (replacing `ctrl+q`, which conflicts with Pi's reserved `app.message.followUp` binding on WSL/Windows) as the keyboard shortcut to toggle `pi-quest` on or off for the current session.
   - Defaulted `enabled` to `false` unless explicitly configured or toggled via `/quest on` (`⏸️` in status bar), and delegated model readiness status (`⚡ bge-base`) to `pi-mm`.
 - **Consolidated `garden` into `/quest list` and `/quest del`** (`src/surface/commands/quests.ts`, `src/surface/commands/quest-del.ts`, `src/surface/commands/continuity.ts`, `src/surface/commands/index.ts`, `src/domain/garden.ts`):
   - Removed `/quest garden` subcommand.
@@ -20,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Completing (`quest_archive`) or deleting (`/quest del`) a quest now cleans up `.pi/quest/future/<qid>.md` and `.pi/quest/.staging/<qid>` directly without spawning `zip` or writing `.pi/quest/archive/*.zip` files, relying on Git history and `pi-mm` episodic memory distillation.
 
 ### Added
+- **Slot Retention on Delete (`/quest del --keep-slot`) & Same-Slot Quest Chaining (`/quest new`)** (`src/surface/commands/quest-del.ts`, `src/surface/commands/index.ts`, `src/surface/tools/archive/core.ts`, `src/utils/git/pool-rescue.ts`, `src/drafting/detect.ts`, `src/drafting/promote.ts`, `src/surface/tools/handlers/provision.ts`):
+  - Added `--keep-slot` (`--slot`, `-s`) and interactive `"Keep work in slot (do not reset or free slot)"` option to `/quest del` so a quest can be deleted without resetting or freeing its `.pi/scratch/slot-N` worktree.
+  - Added `/quest new [objective]` (aliases: `/quest chain`, `/quest next`) to retire the active/paused quest while keeping its scratch slot and branch intact, re-enable `pi-quest`, and start a brand-new quest on top of that slot's work.
 - **Scratch Workspace Telemetry & Inspection** (`src/utils/git/pool-inspect.ts`, `src/surface/tools/scratches.ts`, `src/surface/commands/index.ts`):
   - Added `quest_scratches` tool and `/quest-scratches` command (with `/quest scratches` and `/quest slots` aliases) to inspect all scratch workspace slots (`.pi/scratch/slot-N`).
   - Reports slot allocation status (`idle` vs. `leased`), assigned Quest ID, checked-out branch, worker PID and liveness check (`alive` vs. `dead/orphaned`), quest objective loaded from `.pi/quest/future/<qid>.md`, current phase, in-flight review status, working-tree dirty counts (staged, unstaged, untracked), and latest commit hash/subject/date.

@@ -1,6 +1,6 @@
 // HIGH_LEVEL: #commands — unified /quest command handle.
 import type { Pi, PiCtx } from "../../hooks/events";
-import { killQuest } from "./quest-del";
+import { killQuest, startNewQuestInSlot } from "./quest-del";
 import { listQuests } from "./quests";
 import { editActivePlan } from "./plan";
 import { pickQuest } from "./pick";
@@ -52,11 +52,12 @@ const SUBCOMMAND_COMPLETIONS: ReadonlyArray<{ value: string; label: string }> = 
   { value: "edit", label: "edit — Open active quest plan in $EDITOR" },
   { value: "list", label: "list — List active & draft quests with triage info" },
   { value: "pick", label: "pick — Interactively select a quest to resume" },
+  { value: "new", label: "new — Start a new quest on the current scratch slot (/quest new [goal])" },
   { value: "pause", label: "pause — Pause pi-quest for this session" },
   { value: "on", label: "on — Re-enable pi-quest for this session" },
-  { value: "toggle", label: "toggle — Toggle pi-quest on or off for this session (Ctrl+Q)" },
+  { value: "toggle", label: "toggle — Toggle pi-quest on or off for this session (Alt+Q)" },
   { value: "cancel", label: "cancel — Cancel in-flight review and unblock tools" },
-  { value: "del", label: "del — Delete/abandon quest or prune drafts (--stale|--empty|--orphans|--all)" },
+  { value: "del", label: "del — Delete quest (--keep-slot|-s) or prune drafts (--stale|--empty|--orphans|--all)" },
   { value: "handoff", label: "handoff — Write and show handoff document" },
   { value: "slots", label: "slots — Inspect scratch worktree slots" },
   { value: "doctor", label: "doctor — Check judge, models & engine versions" },
@@ -186,6 +187,12 @@ async function handleUnifiedQuestCommand(pi: Pi, args: string, ctx: PiCtx): Prom
     notify(ctx, out);
     return;
   }
+  if (head === "new" || head === "chain" || head === "next") {
+    const out = await startNewQuestInSlot(pi, ctx, rest);
+    refreshStatus(ctx);
+    notify(ctx, out);
+    return;
+  }
   if (head === "pause" || head === "off" || head === "disable") {
     const out = await toggleQuestDisabled(pi, ctx, true);
     refreshStatus(ctx);
@@ -229,7 +236,7 @@ export function installCommands(pi: Pi): void {
   registerDoctorRenderer(pi);
 
   const spec = {
-    description: "Manage quests: /quest [edit|list|pick|pause|on|toggle|cancel|del|handoff|slots|doctor|policy|router|ratings|<name|qid>]",
+    description: "Manage quests: /quest [edit|list|pick|new|pause|on|toggle|cancel|del|handoff|slots|doctor|policy|router|ratings|<name|qid>]",
     getArgumentCompletions: (prefix: string) => getQuestCompletions(prefix),
     handler: async (args: string, ctx: PiCtx) => {
       await handleUnifiedQuestCommand(pi, args, ctx);
@@ -239,7 +246,7 @@ export function installCommands(pi: Pi): void {
   pi.registerCommand("quest", spec);
 
   if (typeof pi.registerShortcut === "function") {
-    pi.registerShortcut("ctrl+q", {
+    pi.registerShortcut("alt+q", {
       description: "Toggle pi-quest on or off for this session (/quest on | /quest off)",
       handler: async (ctx: PiCtx) => {
         const out = await toggleQuestDisabled(pi, ctx, !getState().disabled);

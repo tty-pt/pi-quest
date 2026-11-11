@@ -116,7 +116,7 @@ export async function handoffBeforeCompaction(pi: Pi, ctx: PiCtx): Promise<void>
     const inFlightTarget = getInFlightTarget(state.qid);
     const inFlightReview = state.activeReview !== null
       ? { kind: state.activeReview.kind, target: state.activeReview.target }
-      : (inFlightTarget !== null && !state.draft?.findingsOutstanding
+      : (inFlightTarget !== null && !state.draft?.outstandingFindings
         ? { kind: state.phase === "validating" ? "validation" : "draft", target: inFlightTarget }
         : undefined);
     const nextAction = inFlightReview !== undefined

@@ -1,8 +1,40 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Pi } from "../../hooks/events";
 import { runGit } from "./exec";
 import { commitDirtySubmodules, syncWorktreeSubmodulesToPrimary } from "./submodules";
+
+/**
+ * Updates or writes a slot lease to remain leased to the current process while optionally
+ * clearing or rebinding leasedToQid (used when deleting a quest with --keep-slot or
+ * chaining a new quest onto the same scratch slot).
+ */
+export function retainSlotLease(
+  slotDir: string,
+  branch?: string | null,
+  qid: string | null = null,
+): void {
+  if (!existsSync(slotDir)) return;
+  const leaseFile = join(slotDir, ".lease.json");
+  let existing: Record<string, unknown> = {};
+  try {
+    if (existsSync(leaseFile)) existing = JSON.parse(readFileSync(leaseFile, "utf8"));
+  } catch { /* ignore */ }
+  const match = /(?:^|\/)(slot-\d+)$/.exec(slotDir.replace(/\/+$/, ""));
+  const slotId = (typeof existing["slotId"] === "string" && existing["slotId"]) || (match ? match[1] : "slot-1");
+  const updated = {
+    slotId,
+    status: "leased" as const,
+    leasedToQid: qid,
+    leasedAt: typeof existing["leasedAt"] === "number" ? existing["leasedAt"] : Date.now(),
+    pid: process.pid,
+    branch: branch ?? (typeof existing["branch"] === "string" ? existing["branch"] : null),
+    baseCommit: typeof existing["baseCommit"] === "string" ? existing["baseCommit"] : null,
+  };
+  try {
+    writeFileSync(leaseFile, JSON.stringify(updated, null, 2) + "\n", "utf8");
+  } catch { /* best-effort */ }
+}
 
 /**
  * Rescues uncommitted changes in an orphaned or resetting slot onto its feature branch

@@ -21,6 +21,7 @@ import {
   syncWorktreeSubmodulesToPrimary,
   squashSubmoduleCommits,
   releaseWarmSlot,
+  retainSlotLease,
   syncHarnessCwd,
   runGit,
   commitMilestone,
@@ -136,7 +137,7 @@ export async function archiveActiveQuest(
   ctx: PiCtx,
   outcome: ArchivedOutcome,
   summary: string | null = null,
-  opts?: { confirmDiscard?: boolean; action?: "integrate" | "keep" | "discard" },
+  opts?: { confirmDiscard?: boolean; action?: "integrate" | "keep" | "keep-slot" | "discard" },
 ): Promise<ArchivedQuestResult> {
   const state = getState();
   const qid = state.qid;
@@ -163,9 +164,12 @@ export async function archiveActiveQuest(
     return await handleParentReturn(pi, ctx, state, qid, parentQid, outcome, summary, zipPath, meta);
   }
 
+  let keepSlot = false;
   if (state.worktreePath && state.worktreeBranch) {
     const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
-    await prepareWorktreeForArchive(pi, primaryRoot, state, qid, outcome, meta.findings);
+    if (opts?.action !== "keep-slot") {
+      await prepareWorktreeForArchive(pi, primaryRoot, state, qid, outcome, meta.findings);
+    }
 
     let keepBranch = false;
     const milestones = (state.milestoneCommits ?? []).map((m) => `${m.hash.slice(0, 7)} ${m.label}`);
@@ -231,8 +235,10 @@ export async function archiveActiveQuest(
         } catch { /* best-effort submodule alignment */ }
       }
     } else {
-      const branchCommits = await getBranchCommitSummaries(primaryRoot, "HEAD", state.worktreeBranch, pi);
-      let action: "integrate" | "keep" | "discard" | "cancel" | undefined = opts?.action;
+      const branchCommits = opts?.action === "keep-slot"
+        ? []
+        : await getBranchCommitSummaries(primaryRoot, "HEAD", state.worktreeBranch, pi);
+      let action: "integrate" | "keep" | "keep-slot" | "discard" | "cancel" | undefined = opts?.action;
 
       if (!action && branchCommits.length > 0 && ctx.hasUI && typeof ctx.ui?.select === "function") {
         try {
@@ -240,6 +246,7 @@ export async function archiveActiveQuest(
             `Quest ${qid} has ${branchCommits.length} commit(s) on ${state.worktreeBranch}. Integrate into current branch?`,
             [
               `Integrate (squash-merge) into current branch`,
+              `Keep work in slot (do not reset or free slot)`,
               `Keep branch unmerged (${state.worktreeBranch})`,
               `Discard changes and reset scratch slot`,
               `Cancel archive (stay in quest)`,
@@ -247,6 +254,7 @@ export async function archiveActiveQuest(
           );
           if (selected === undefined || selected.startsWith("Cancel archive")) action = "cancel";
           else if (selected.startsWith("Integrate")) action = "integrate";
+          else if (selected.startsWith("Keep work in slot")) action = "keep-slot";
           else if (selected.startsWith("Keep")) action = "keep";
           else if (selected.startsWith("Discard")) action = "discard";
         } catch {
@@ -258,7 +266,11 @@ export async function archiveActiveQuest(
         throw new Error("Archive cancelled by operator (staying in quest).");
       }
 
-      if (action === "integrate") {
+      if (action === "keep-slot") {
+        meta.findings.push(`Worktree slot ${state.worktreePath} (${state.worktreeBranch}) retained with work intact per operator request`);
+        keepSlot = true;
+        keepBranch = true;
+      } else if (action === "integrate") {
         const res = await confirmAndSquashWorktree(
           pi,
           ctx,
@@ -289,12 +301,15 @@ export async function archiveActiveQuest(
       }
     }
 
-    syncHarnessCwd(null, pi);
-
-    if (state.worktreePath.includes("/scratch/slot-")) {
-      await releaseWarmSlot(primaryRoot, state.worktreePath, state.qid ?? "", pi, undefined, { deleteBranch: !keepBranch });
+    if (keepSlot) {
+      retainSlotLease(state.worktreePath, state.worktreeBranch, null);
     } else {
-      await removeWorktree(primaryRoot, state.worktreePath, keepBranch ? undefined : state.worktreeBranch, pi);
+      syncHarnessCwd(null, pi);
+      if (state.worktreePath.includes("/scratch/slot-")) {
+        await releaseWarmSlot(primaryRoot, state.worktreePath, state.qid ?? "", pi, undefined, { deleteBranch: !keepBranch });
+      } else {
+        await removeWorktree(primaryRoot, state.worktreePath, keepBranch ? undefined : state.worktreeBranch, pi);
+      }
     }
   }
 
@@ -302,8 +317,8 @@ export async function archiveActiveQuest(
   await recordRatingsAndHandoff(pi, ctx, state, outcome, qid, modifiedFiles);
 
   archive(state, outcome);
-  replaceState(IDLE_STATE);
-  syncHarnessCwd(null, pi);
+  replaceState(keepSlot ? { ...IDLE_STATE, worktreePath: state.worktreePath, worktreeBranch: state.worktreeBranch } : IDLE_STATE);
+  syncHarnessCwd(keepSlot ? state.worktreePath : null, pi);
   emitNow(pi);
   sendSteer(pi, `Quest ${qid} archived as ${outcome}.`);
   return { archivedQid: qid, zipPath, returnedToParent: null, ...meta, summary };

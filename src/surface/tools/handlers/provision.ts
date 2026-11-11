@@ -22,6 +22,7 @@ import { ensureDraftFile, listKnownQids } from "../../../files.ts";
 import { fetchActiveInvariants, formatInvariantsComment } from "../../invariants.ts";
 import { carryRefinementsToDraft } from "../draft-writer.ts";
 import { hasInFlight } from "../../../review/tracker.ts";
+import { retainSlotLease } from "../../../utils/git/index.ts";
 
 export async function syncAmendmentsToDraft(
   ctx: PiCtx,
@@ -67,9 +68,16 @@ export async function provisionRootQuest(
   kind: QuestKind = "standard",
   difficulty: QuestDifficulty = "standard",
 ): Promise<Qid> {
+  const prev = getState();
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
   const base = createQuest(objective, qid, null, difficulty);
-  replaceState(markChanged(base, { kind, difficulty }));
+  const wtPatch = prev.worktreePath
+    ? { worktreePath: prev.worktreePath, worktreeBranch: prev.worktreeBranch || `quest/${qid}` }
+    : {};
+  if (prev.worktreePath) {
+    retainSlotLease(prev.worktreePath, wtPatch.worktreeBranch, qid);
+  }
+  replaceState(markChanged(base, { kind, difficulty, ...wtPatch }));
   const context = extractRecentConversationContext(ctx);
   const invariants = await fetchActiveInvariants(ctx.cwd);
   const invBlock = formatInvariantsComment(invariants);

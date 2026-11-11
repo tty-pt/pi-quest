@@ -14,7 +14,7 @@ import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../
 import { evaluateQuestIntent, evaluateQuestKind, detectTaskHeuristic } from "./judge";
 import { evaluateQuestDifficulty } from "./difficulty";
 import { checkPostQuestReversions, checkPostQuestCorrection } from "../durability/ratings";
-import { getGitHead } from "../utils/git";
+import { getGitHead, retainSlotLease } from "../utils/git";
 
 export function matchTriggerPrefix(
   text: string,
@@ -45,20 +45,30 @@ export function isQuestLikeRequest(text: string): boolean {
   return QUEST_HEADER_PATTERN.test(text.trim());
 }
 
-async function openDetectedQuest(
+export async function openDetectedQuest(
   pi: Pi,
   ctx: PiCtx,
   objective: string,
   cfg: QuestConfig,
   triggerPrefix?: string,
 ): Promise<void> {
+  const prev = getState();
+  const retainedWtPath = prev.worktreePath;
+  const retainedWtBranch = prev.worktreeBranch;
   const [diff, kind, baseCommit] = await Promise.all([
     evaluateQuestDifficulty(objective, cfg),
     evaluateQuestKind(objective, cfg),
-    getGitHead(ctx.cwd, pi),
+    getGitHead(retainedWtPath || ctx.cwd, pi),
   ]);
   const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  replaceState(createQuest(objective, qid, null, diff.difficulty, kind, baseCommit));
+  const initial = createQuest(objective, qid, null, diff.difficulty, kind, baseCommit);
+  if (retainedWtPath) {
+    const wtBranch = retainedWtBranch || `${cfg.gitWorkflow?.featureBranchPrefix || "quest/"}${qid}`;
+    retainSlotLease(retainedWtPath, wtBranch, qid);
+    replaceState({ ...initial, worktreePath: retainedWtPath, worktreeBranch: wtBranch });
+  } else {
+    replaceState(initial);
+  }
   const context = extractRecentConversationContext(ctx);
   const invariants = await fetchActiveInvariants(ctx.cwd);
   await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty, formatInvariantsComment(invariants));
@@ -67,9 +77,10 @@ async function openDetectedQuest(
     ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
     : "";
   const sourceText = triggerPrefix ? `via trigger '${triggerPrefix}'` : "as provisional";
+  const slotHint = retainedWtPath ? ` in retained worktree ${retainedWtPath} (${retainedWtBranch ?? `quest/${qid}`})` : "";
   sendSteer(
     pi,
-    `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened ${sourceText}: "${objective.slice(0, 200)}". Flow: (1) investigate root cause & architecture deeply (proportional to difficulty), record findings via quest_update_state; ` +
+    `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened ${sourceText}${slotHint}: "${objective.slice(0, 200)}". Flow: (1) investigate root cause & architecture deeply (proportional to difficulty), record findings via quest_update_state; ` +
       `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
       `(3) author that file's ## Analysis via quest_update_state {analysis: ...} and/or ## Implementation Plan via quest_update_state {plan: ...}; ` +
       `(4) the draft reviewer validates the deliverable against requirements and evidence.${complexHint} (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,

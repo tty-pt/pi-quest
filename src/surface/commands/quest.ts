@@ -23,9 +23,10 @@ export const QUEST_COMMAND_HELP: ReadonlyArray<{ cmd: string; desc: string }> = 
   { cmd: "/quest edit", desc: "Open active quest plan in $EDITOR" },
   { cmd: "/quest list", desc: "List active & draft quests with triage info" },
   { cmd: "/quest <name|qid>", desc: "Switch to or resume a quest (/quest pick to choose)" },
-  { cmd: "/quest pause | on", desc: "Pause or resume pi-quest for this session (Ctrl+Q to toggle)" },
+  { cmd: "/quest new [goal]", desc: "Start a new quest while keeping the current scratch slot" },
+  { cmd: "/quest pause | on", desc: "Pause or resume pi-quest for this session (Alt+Q to toggle)" },
   { cmd: "/quest cancel", desc: "Cancel in-flight review and unblock tools" },
-  { cmd: "/quest del [qid|flags]", desc: "Delete quest or prune drafts (--all|--stale|--empty|--orphans)" },
+  { cmd: "/quest del [qid|flags]", desc: "Delete quest (--keep-slot|-s) or prune drafts (--all|--stale|...)" },
   { cmd: "/quest handoff [qid]", desc: "Write & display a handoff document" },
   { cmd: "/quest slots", desc: "Inspect scratch worktree slots" },
   { cmd: "/quest doctor", desc: "Check judge, router, policy & ratings" },
@@ -57,6 +58,9 @@ export function formatQuestCard(cwd: string = process.cwd()): string {
   if (state.qid === null) {
     const statusLine = state.disabled ? "⏸️ off (paused for this session)" : "💤 idle (no active quest)";
     lines.push(`── Quest Status: ${statusLine} ──────────────────────`);
+    if (state.worktreePath) {
+      lines.push(`  Slot   : ${state.worktreePath}${state.worktreeBranch ? ` (${state.worktreeBranch})` : ""} (retained)`);
+    }
     lines.push("  Describe a task to start a quest, or resume one with /quest <name|qid>.");
   } else {
     const title = state.name && state.name !== state.qid ? `${state.name} (${state.qid})` : state.qid;

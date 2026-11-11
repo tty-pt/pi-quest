@@ -85,6 +85,9 @@ Deno.test("quest-del deletes the active quest or named draft without zip creatio
   check(parseQuestDelArgs("--merge").action === "integrate", "parses --merge");
   check(parseQuestDelArgs("--keep").action === "keep", "parses --keep");
   check(parseQuestDelArgs("-k").action === "keep", "parses -k");
+  check(parseQuestDelArgs("--keep-slot").action === "keep-slot", "parses --keep-slot");
+  check(parseQuestDelArgs("--slot").action === "keep-slot", "parses --slot");
+  check(parseQuestDelArgs("-s").action === "keep-slot", "parses -s");
   check(parseQuestDelArgs("--discard").action === "discard", "parses --discard");
   const targetParsed = parseQuestDelArgs("xyz789 --integrate");
   check(targetParsed.targetQid === "xyz789" && targetParsed.action === "integrate", "parses targetQid and action");
@@ -322,13 +325,60 @@ Deno.test("/quest pause and /quest on pause active quest and bypass auto-detecti
   await questCmd!.options.handler("toggle", ctx);
   check(getState().disabled === false, "disabled flag is false after /quest toggle from disabled");
 
-  // 7. Toggle via ctrl+q shortcut
-  const shortcut = pi.shortcuts.find((s) => s.shortcut === "ctrl+q");
-  check(Boolean(shortcut), "must register 'ctrl+q' shortcut");
+  // 7. Toggle via alt+q shortcut
+  const shortcut = pi.shortcuts.find((s) => s.shortcut === "alt+q");
+  check(Boolean(shortcut), "must register 'alt+q' shortcut");
   await shortcut!.options.handler(ctx);
-  check(getState().disabled === true, "disabled flag is true after ctrl+q shortcut from enabled");
+  check(getState().disabled === true, "disabled flag is true after alt+q shortcut from enabled");
   await shortcut!.options.handler(ctx);
-  check(getState().disabled === false, "disabled flag is false after ctrl+q shortcut from disabled");
+  check(getState().disabled === false, "disabled flag is false after alt+q shortcut from disabled");
+
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("/quest del --keep-slot and /quest new preserve worktree slot and chain a new quest onto the same slot", async () => {
+  const { readSlotLease, writeSlotLease } = await import("../../src/utils/git/pool.ts");
+  const pi = fakePi();
+  installCommands(pi);
+  const cwd = tmp();
+  const slot7 = join(cwd, ".pi", "scratch", "slot-7");
+  mkdirSync(join(slot7, ".git"), { recursive: true });
+  writeSlotLease(slot7, {
+    slotId: "slot-7",
+    status: "leased",
+    leasedToQid: "1xR98r",
+    leasedAt: Date.now(),
+    pid: process.pid,
+    branch: "quest/1xR98r",
+    baseCommit: "abc000",
+  });
+
+  const ctx = fakeCtx(cwd);
+  const questCmd = pi.commands.find((c) => c.name === "quest");
+  check(Boolean(questCmd), "must register 'quest' command");
+
+  // 1. Delete active quest with --keep-slot
+  const active = createDraft(createQuest("horizon-deterministic-scenery", "1xR98r"), "horizon-deterministic-scenery");
+  replaceState({ ...active, phase: "implementing", worktreePath: slot7, worktreeBranch: "quest/1xR98r" });
+  await questCmd!.options.handler("del --keep-slot", ctx);
+
+  check(getState().phase === "idle", "state is idle after /quest del --keep-slot");
+  check(getState().worktreePath === slot7, "worktreePath retained on idle state");
+  check(getState().worktreeBranch === "quest/1xR98r", "worktreeBranch retained on idle state");
+  const leaseAfterDel = readSlotLease(slot7);
+  check(leaseAfterDel?.status === "leased" && leaseAfterDel?.leasedToQid === null, "slot lease stays leased with leasedToQid=null");
+
+  // 2. Chain a new quest directly onto the retained slot via /quest new <objective> (even if paused via /quest off)
+  replaceState({ ...active, phase: "implementing", worktreePath: slot7, worktreeBranch: "quest/1xR98r", disabled: true });
+  await questCmd!.options.handler("new Add atmospheric scattering on top of horizon work", ctx);
+
+  const chained = getState();
+  check(chained.disabled === false, "re-enables pi-quest when starting /quest new");
+  check(chained.qid !== null && chained.qid !== "1xR98r", "allocates a new qid for the chained quest");
+  check(chained.worktreePath === slot7, "chained quest inherits retained worktreePath (slot-7)");
+  check(chained.worktreeBranch === "quest/1xR98r", "chained quest inherits worktreeBranch");
+  const leaseAfterNew = readSlotLease(slot7);
+  check(leaseAfterNew?.leasedToQid === chained.qid, "slot-7 lease rebound to the new quest qid");
 
   replaceState(IDLE_STATE);
 });

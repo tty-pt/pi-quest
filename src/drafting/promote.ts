@@ -24,6 +24,7 @@ import {
   createWorktree,
   commitMilestone,
   acquireWarmSlot,
+  retainSlotLease,
   syncHarnessCwd,
   type PoolProgressNotifier,
 } from "../utils/git";
@@ -82,6 +83,24 @@ async function maybeProvisionWorktree(
   };
 }
 
+async function attachRetainedWorktree(
+  pi: Pi,
+  cwd: string,
+  stateQid: Qid,
+  objective: string,
+  wtPath: string,
+  wtBranch?: string,
+): Promise<string> {
+  const branch = wtBranch || `quest/${stateQid}`;
+  retainSlotLease(wtPath, branch, stateQid);
+  syncHarnessCwd(wtPath, pi);
+  const cfg = await readQuestConfig(cwd);
+  if (cfg.gitWorkflow?.milestoneCommits) {
+    await commitMilestone(wtPath, { qid: stateQid, type: "start", label: objective }, pi, branch);
+  }
+  return ` (worktree: ${wtPath}, branch: ${branch})`;
+}
+
 // Shared by the reviewer-PASS auto-promote path (drafting/reviews.ts) and the
 // live-user "go" path. Returns the promotion message to steer/wake — the
 // caller's medium differs — or null when the quest is no longer drafting.
@@ -104,16 +123,12 @@ export async function promoteAfterPass(
     draftDocText = await readFile(draftFilePath(ctx.cwd, stateQid), "utf8");
     const sections = parseDraftSections(draftDocText);
     const extracted = extractRtmFromRequirements(sections.requirements);
-    if (extracted.length > 0) {
-      rtm = extracted;
-    }
+    if (extracted.length > 0) rtm = extracted;
     const recalibrated = recalibrateQuestDifficulty(state, sections, draftDocText);
     if (difficultyLevel(recalibrated) > difficultyLevel(state.difficulty)) {
       updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
     }
-  } catch {
-    // Best-effort extraction
-  }
+  } catch { /* best-effort extraction */ }
 
   if (state.kind === "analysis") {
     const unfinished = unfinishedChildren(state);
@@ -132,7 +147,6 @@ export async function promoteAfterPass(
     setStatus: (k, txt) => ctx.ui?.setStatus?.(k, txt),
   };
 
-  // Fail-closed worktree provisioning: in auto or pool mode, we MUST acquire a slot BEFORE promoting to implementing!
   let wtNotice = "";
   if (!state.worktreePath) {
     const provRes = await maybeProvisionWorktree(pi, ctx.cwd, stateQid, state.objective, state.baseCommit, notifier);
@@ -142,6 +156,8 @@ export async function promoteAfterPass(
       return errMsg;
     }
     wtNotice = provRes.notice ?? "";
+  } else {
+    wtNotice = await attachRetainedWorktree(pi, ctx.cwd, stateQid, state.objective, state.worktreePath, state.worktreeBranch);
   }
 
   dispatch({ type: "PlanPromoted", approvedBy: by, rtm });

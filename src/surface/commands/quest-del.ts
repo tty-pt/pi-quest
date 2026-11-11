@@ -1,8 +1,12 @@
 // HIGH_LEVEL: #commands — delete/abandon the current quest, a named quest, or batch-prune drafts.
-import { getState } from "../../app/store";
+import { getState, replaceState, setQuestDisabled } from "../../app/store";
+import { readQuestConfig } from "../../config";
 import { DEFAULT_STALE_DAYS } from "../../domain/garden";
 import { isQid } from "../../domain/qid";
+import { IDLE_STATE } from "../../domain/quest";
+import { openDetectedQuest } from "../../drafting/detect";
 import type { Pi, PiCtx } from "../../hooks/events";
+import { findPrimaryRepoRoot, readSlotLease, releaseWarmSlot, retainSlotLease, syncHarnessCwd } from "../../utils/git";
 import { archiveActiveQuest } from "../tools/archive";
 import { gardenRows, pruneDraftQuests } from "./continuity";
 import { listDraftQids, readDraftHeading, summarizeActive } from "./quest";
@@ -10,7 +14,7 @@ import { listDraftQids, readDraftHeading, summarizeActive } from "./quest";
 export interface QuestDelArgs {
   targetQid?: string;
   targets: string[];
-  action?: "integrate" | "keep" | "discard";
+  action?: "integrate" | "keep" | "keep-slot" | "discard";
   prune: boolean;
   stale: boolean;
   empty: boolean;
@@ -22,7 +26,7 @@ export interface QuestDelArgs {
 
 export function parseQuestDelArgs(rawArg: string): QuestDelArgs {
   const parts = rawArg.trim().split(/\s+/).filter(Boolean);
-  let action: "integrate" | "keep" | "discard" | undefined;
+  let action: "integrate" | "keep" | "keep-slot" | "discard" | undefined;
   const targets: string[] = [];
   let prune = false;
   let stale = false;
@@ -40,6 +44,8 @@ export function parseQuestDelArgs(rawArg: string): QuestDelArgs {
     }
     if (part === "--integrate" || part === "-i" || part === "--merge" || part === "-m") {
       action = "integrate";
+    } else if (part === "--keep-slot" || part === "--slot" || part === "-s") {
+      action = "keep-slot";
     } else if (part === "--keep" || part === "-k") {
       action = "keep";
     } else if (part === "--discard" || part === "-d") {
@@ -72,6 +78,22 @@ export function parseQuestDelArgs(rawArg: string): QuestDelArgs {
     all,
     dryRun,
     staleDays,
+  };
+}
+
+function detectSlotFromContext(cwd: string): { worktreePath?: string; worktreeBranch?: string } {
+  const curr = getState();
+  if (curr.worktreePath) {
+    return { worktreePath: curr.worktreePath, worktreeBranch: curr.worktreeBranch };
+  }
+  const cand = process.env.PI_WORKTREE_PATH || cwd;
+  const match = /^(.+\/\.pi\/scratch\/slot-\d+)(?:\/|$)/.exec(cand.replace(/\\/g, "/"));
+  if (!match) return {};
+  const slotDir = match[1];
+  const lease = readSlotLease(slotDir);
+  return {
+    worktreePath: slotDir,
+    worktreeBranch: lease?.branch ?? (curr.qid ? `quest/${curr.qid}` : undefined),
   };
 }
 
@@ -123,15 +145,69 @@ export async function killQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<str
     }
   }
 
-  if (active.qid === null) return "No active quest to delete.";
+  if (active.qid === null) {
+    if (active.worktreePath && parsed.action === "discard") {
+      const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
+      await releaseWarmSlot(primaryRoot, active.worktreePath, "", pi, undefined, { deleteBranch: true });
+      replaceState(IDLE_STATE);
+      syncHarnessCwd(null, pi);
+      return `Released retained slot ${active.worktreePath}. ${summarizeActive()}`;
+    }
+    return "No active quest to delete.";
+  }
   try {
+    if (parsed.action === "keep-slot" && !active.worktreePath) {
+      const det = detectSlotFromContext(ctx.cwd);
+      if (det.worktreePath) {
+        replaceState({ ...active, worktreePath: det.worktreePath, worktreeBranch: det.worktreeBranch || `quest/${active.qid}` });
+      }
+    }
     const done = await archiveActiveQuest(pi, ctx, "ABANDONED", "Killed via /quest del.", {
       confirmDiscard: true,
       action: parsed.action,
     });
-    return `Quest ${done.archivedQid} deleted (abandoned). ${summarizeActive()}`;
+    const after = getState();
+    const slotNote = after.worktreePath
+      ? ` Retained slot: ${after.worktreePath}${after.worktreeBranch ? ` (${after.worktreeBranch})` : ""}.`
+      : "";
+    return `Quest ${done.archivedQid} deleted (abandoned).${slotNote} ${summarizeActive()}`;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return `Delete failed: ${detail}`;
   }
+}
+
+export async function startNewQuestInSlot(pi: Pi, ctx: PiCtx, rawObjective: string): Promise<string> {
+  const prev = getState();
+  const det = detectSlotFromContext(ctx.cwd);
+  let retiredNote = "";
+
+  if (prev.qid !== null) {
+    if (det.worktreePath && !prev.worktreePath) {
+      replaceState({ ...prev, worktreePath: det.worktreePath, worktreeBranch: det.worktreeBranch || `quest/${prev.qid}` });
+    }
+    const done = await archiveActiveQuest(pi, ctx, "ABANDONED", "Retired via /quest new (keeping slot).", {
+      confirmDiscard: true,
+      action: "keep-slot",
+    });
+    retiredNote = `Retired quest ${done.archivedQid}. `;
+  } else if (det.worktreePath) {
+    retainSlotLease(det.worktreePath, det.worktreeBranch ?? null, null);
+    replaceState({ ...IDLE_STATE, worktreePath: det.worktreePath, worktreeBranch: det.worktreeBranch, disabled: false });
+    syncHarnessCwd(det.worktreePath, pi);
+  }
+
+  setQuestDisabled(false);
+  const objective = rawObjective.trim();
+  if (objective !== "") {
+    const cfg = await readQuestConfig(ctx.cwd);
+    await openDetectedQuest(pi, ctx, objective, cfg, "/quest new");
+    const next = getState();
+    const slotInfo = next.worktreePath ? ` in slot ${next.worktreePath}${next.worktreeBranch ? ` (${next.worktreeBranch})` : ""}` : "";
+    return `${retiredNote}Started new quest ${next.qid}${slotInfo}: ${summarizeActive()}`;
+  }
+
+  const curr = getState();
+  const slotInfo = curr.worktreePath ? ` in retained slot ${curr.worktreePath}${curr.worktreeBranch ? ` (${curr.worktreeBranch})` : ""}` : "";
+  return `${retiredNote}Ready for a new quest${slotInfo}. Describe your next task to begin.`;
 }

@@ -106,17 +106,37 @@ All commands are unified under `/quest` with tab-completion:
 | :--- | :--- |
 | `/quest` | Show self-explaining status card (active quest, phase, plan path, next action, and subcommand list), or auto-resume a lone draft when idle. |
 | `/quest <name\|qid>` | Switch to or resume a quest by its readable draft name or QID (`/quest pick` to choose interactively). |
+| `/quest new [goal]` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work (`/quest chain` / `/quest next`). |
 | `/quest edit` (or `/quest plan`) | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR`. |
 | `/quest list` | Display all active and draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
-| `/quest pause` / `/quest on` | Pause or re-enable `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest pause` / `/quest on` | Pause, re-enable, or toggle (`Alt+Q` / `/quest toggle`) `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
 | `/quest cancel` | Cancel any currently running in-flight review or validation and unblock tool execution. |
-| `/quest del [qid\|flags]` | Delete/abandon the active quest, a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) with fail-safe branch integration options. |
+| `/quest del [qid\|flags]` | Delete/abandon the active quest (`--keep-slot` / `-s`, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) with fail-safe branch integration options. |
 | `/quest handoff [qid]` | Write and show an honest handoff (verbatim request, every directive, asked-vs-accomplished with UNVERIFIED rows, plan, diff stat, last test/review, blockers, next action) to `.pi/quest/handoffs/`. Also written automatically before every compaction. Saying "give me a handoff" (or `!handoff`) mid-quest does the same and is never recorded as a requirement. |
 | `/quest slots` | Inspect active scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, worker process health, and working tree modifications. |
 | `/quest doctor` | Test live health of decision judge, latency, models, and word families. |
 | `/quest policy` | Show the effective review policy for the active model, the matching `policyByModel` rule, the draft quality tiers, and config warnings. |
 | `/quest router` | Show the `quest/auto` router cell, models and cooldowns. |
 | `/quest ratings` | Show model accuracy ratings, learned Beta distributions, and autonomy levels. |
+
+---
+
+## Common Operator Workflows
+
+1. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` for the current session and work freely without draft gates.
+   - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest.
+2. **Continue work in the same scratch slot under a new quest (`/quest new`)**:
+   - To start a new quest with a fresh plan directly on top of the current `slot-N` worktree (even if the current quest was paused with `/quest off`), run:
+     ```text
+     /quest new <new objective>
+     ```
+   - Or run bare `/quest new` (or `/quest del --keep-slot`) to retire the old quest while keeping `slot-N` attached, then type your next request.
+3. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
+   - Run `/quest del --keep-slot` (or `/quest del -s`, or choose `"Keep work in slot (do not reset or free slot)"` in `/quest del`) to delete the quest record while keeping `slot-N` and its uncommitted/committed work intact.
+   - Run `/quest del --discard` while idle to release and reset a retained slot.
+4. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
+   - Reply **`decline`** (or give corrective instructions) during `validating`, or select **`"Cancel archive (stay in quest)"`** (or press `Escape`) at the branch integration prompt to demote back to `implementing` with tools unlocked.
 
 
 ---
