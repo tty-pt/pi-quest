@@ -26,7 +26,7 @@ Every quest executes through three phases:
 
 1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) but may only write to its draft plan (`.pi/quest/future/<qid>.md`). Content changes trigger an independent reviewer. You can reply `go` or `proceed` at any moment to bypass review.
 2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
-3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately.
+3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately, or reply `decline` / give corrective feedback (or choose `"Cancel archive (stay in quest)"` in the integration prompt) to demote back to `implementing` and continue working in the quest.
 
 ### Instant Session Toggle (`Ctrl+Q`)
 Press **`Ctrl+Q`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).

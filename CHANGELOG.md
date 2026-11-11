@@ -58,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Worktree Squash-Merge Pre-Sync & Hard Failure Blocker** (`src/utils/git/squash.ts`, `src/surface/tools/archive/core.ts`):
   - In `confirmAndSquashWorktree`, automatically syncs the target branch into the feature branch within the worktree before attempting squash-merge into primary workspace, resolving clean non-conflicting updates without manual intervention.
   - Made worktree squash-merge failures a hard blocker in `archiveActiveQuest`: aborts archive and throws an explicit error when conflicts prevent landing on target branch, preventing quests from silently finishing as COMPLETED with stranded feature commits.
+- **Reviewer Config Resolution, Synchronous Review Slot Claiming & Stay-in-Quest on Archive Cancel/Decline** (`src/implementing/plan-revision.ts`, `src/validation/flow.ts`, `src/review/flow.ts`, `src/drafting/reviews.ts`, `src/durability/compaction-handoff.ts`, `src/surface/tools/draft-writer.ts`, `src/surface/tools/archive/core.ts`, `src/utils/git/squash.ts`, `src/subquests/index.ts`, `src/subquests/scope.ts`, `src/judge/intent-classifier.ts`):
+  - Loaded `readQuestConfig(ctx.cwd)` when `baseConfig` is omitted in `bootPlanRevisionReview` and respected `planRevisionMaxDurationMs` / `planRevisionInactivityMs` instead of clamping inactivity to 60s or falling back to `DEFAULT_CONFIG`.
+  - Synchronously claimed the in-flight review slot (`supersedeReviewThenBootFresh`) before async config/diff preparation in `ensureValidationFlow` and awaited `maybeBootDraftReview` inside `writePlanToDraft` / `writeAnalysisToDraft`, eliminating the race where `onTurnEnd` launched a second subagent that aborted the first.
+  - Preserved `exactNextAction` during `validating` in `markActiveReview` so `implementationFingerprint` does not drift mid-validation, and synced `activeReview` across compaction.
+  - Added `"Cancel archive (stay in quest)"` to the clean squash-merge selector (treating `Escape` as cancel), and demoted the quest from `validating` back to `implementing` (or `drafting` for analysis quests) on archive cancel or operator `DECLINE` / directive / refinement during `validating`.
 
 ### Changed
 - **Purged Documentation Debt** (`docs/EXTENSIONS.md`, `docs/ADVANCED_GIT_RECOVERY.md`):
