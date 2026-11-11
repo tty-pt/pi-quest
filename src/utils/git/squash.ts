@@ -209,7 +209,7 @@ export async function confirmAndSquashWorktree(
     };
   }
 
-  let choice: "squash" | "merge" | "keep" = "squash";
+  let choice: "squash" | "merge" | "keep" | "cancel" = "squash";
   if (ctx.hasUI && typeof ctx.ui?.select === "function") {
     try {
       const summaryList = milestones.length > 0 ? ` (${milestones.length} milestone commits)` : "";
@@ -218,17 +218,24 @@ export async function confirmAndSquashWorktree(
         [
           `Squash and merge into ${displayTarget} (recommended)`,
           `Merge without squash (--no-ff)`,
-          `Keep branch unmerged (${featureBranch})`,
+          `Keep branch unmerged (${featureBranch}) & archive quest`,
+          `Cancel archive (stay in quest)`,
         ],
       );
-      if (selected?.startsWith("Merge without")) {
+      if (selected === undefined || selected.startsWith("Cancel archive")) {
+        choice = "cancel";
+      } else if (selected.startsWith("Merge without")) {
         choice = "merge";
-      } else if (selected?.startsWith("Keep branch")) {
+      } else if (selected.startsWith("Keep branch")) {
         choice = "keep";
       }
     } catch {
       choice = "squash";
     }
+  }
+
+  if (choice === "cancel") {
+    return { ok: false, mode: "cancel", error: "staying in quest" };
   }
 
   if (choice === "keep") {

@@ -23,7 +23,7 @@ export const QUEST_COMMAND_HELP: ReadonlyArray<{ cmd: string; desc: string }> = 
   { cmd: "/quest edit", desc: "Open active quest plan in $EDITOR" },
   { cmd: "/quest list", desc: "List active & draft quests with triage info" },
   { cmd: "/quest <name|qid>", desc: "Switch to or resume a quest (/quest pick to choose)" },
-  { cmd: "/quest pause | on", desc: "Pause or resume pi-quest for this session" },
+  { cmd: "/quest pause | on", desc: "Pause or resume pi-quest for this session (Ctrl+Q to toggle)" },
   { cmd: "/quest cancel", desc: "Cancel in-flight review and unblock tools" },
   { cmd: "/quest del [qid|flags]", desc: "Delete quest or prune drafts (--all|--stale|--empty|--orphans)" },
   { cmd: "/quest handoff [qid]", desc: "Write & display a handoff document" },
@@ -144,6 +144,9 @@ export async function resumeQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<s
   }
   if (lower === "enable" || lower === "on") {
     return await toggleQuestDisabled(pi, ctx, false);
+  }
+  if (lower === "toggle") {
+    return await toggleQuestDisabled(pi, ctx, !getState().disabled);
   }
   const entries = ctx.sessionManager.getEntries();
   if (isQid(arg)) {

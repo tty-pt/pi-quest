@@ -17,7 +17,7 @@ import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
 import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
 import { withEffectivePolicy, resolveActiveModel, calculateReviewNeed, resolveAutonomyLevel } from "../policy/effective";
-import { hasInFlight, cancelReview } from "../review/tracker";
+import { hasInFlight, cancelReview, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { interpretUserTurn } from "../judge/intent-classifier";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
@@ -255,25 +255,39 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   if (hasInFlight(qid)) return;
+  let signal!: AbortSignal;
+  supersedeReviewThenBootFresh(qid, target, (s) => {
+    signal = s;
+  });
   const config = withEffectivePolicy(await readQuestConfig(ctx.cwd), ctx);
+  if (signal.aborted || !isCurrentReview(qid, target)) return;
 
   await executePendingValidationTest(pi, ctx, state, config, qid);
+  if (signal.aborted || !isCurrentReview(qid, target)) return;
 
-  if (await handleBypassIfEligible(pi, ctx, qid, target, config)) return;
+  if (await handleBypassIfEligible(pi, ctx, qid, target, config)) {
+    if (isCurrentReview(qid, target)) cancelReview(qid);
+    return;
+  }
+  if (signal.aborted || !isCurrentReview(qid, target)) return;
 
   const validatorModel = resolveRoleModel(config, "validator");
   const brief = await validationBrief(ctx, state, pi);
+  if (signal.aborted || !isCurrentReview(qid, target)) return;
   const outcome = await runIsolatedReview({
     pi,
     ctx,
     qid,
     target,
+    signal,
     reviewKind: "validation",
     runnerTool: config.bindings.reviewRunner.tool,
     ...(validatorModel ? { model: validatorModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "validator"),
     routerDefault: config.router.default,
     cooldownMs: config.router.cooldownMs,
+    maxDurationMs: config.reviewMaxDurationMs,
+    inactivityLimitMs: config.reviewInactivityMs,
     prompt: buildReviewPrompt("validation", qid, target, brief),
   });
 

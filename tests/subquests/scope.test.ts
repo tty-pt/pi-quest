@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
-import { createDraft, promote } from "../../src/domain/transitions.ts";
+import { createDraft, claimComplete, promote } from "../../src/domain/transitions.ts";
 import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { triageInQuestRequest } from "../../src/subquests/scope.ts";
@@ -300,5 +300,34 @@ Deno.test("negative and style constraints never award themselves a subquest", ()
     const t = triageInQuestRequest("1xTest", "subquest_now", text);
     check(t !== null, `triaged "${text}"`);
     check(t!.action === "amend_requirement", `"${text}" routed to amend_requirement, not preempt_subquest`);
+  }
+});
+
+Deno.test("operator rejection or feedback during validating cancels validation and returns quest to implementing", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-val-decline-"));
+  try {
+    writeQuestSettings(cwd, JUDGE_OFF);
+    const pi = fakePi();
+    installSubQuests(pi);
+    const qid = "1xDecl" as Qid;
+    const base = createDraft(createQuest("Test quest", qid), "test-draft");
+    const authored = { ...base, draft: { ...base.draft!, planAuthored: true, contentHash: "h1" } };
+    const validating = claimComplete(promote(authored, "user"));
+    replaceState(validating);
+    const filePath = join(cwd, draftPath(qid));
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, "# Test\n\n## Requirements\n- R1: test\n\n## Implementation Plan\n1. Do thing\n", "utf8");
+
+    const ctx = fakeCtx(cwd);
+    const handler = pi.eventHandlers["input"]![0];
+
+    await handler({ text: "No. That's not good. DECLINE. Have you looked at what happens when you zoom out?" }, ctx);
+    const after = getState();
+    check(after.phase === "implementing", `expected validating quest to return to implementing on DECLINE/feedback, got ${after.phase}`);
+    check(after.amendments.length === 1, "directive recorded as amendment");
+    check(pi.sent.some((s) => JSON.stringify(s).includes("Validation cancelled and quest returned to implementing")), "steered agent back to implementing");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
   }
 });

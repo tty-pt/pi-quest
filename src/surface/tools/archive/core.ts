@@ -1,7 +1,7 @@
 import { getState, replaceState, updateState } from "../../../app/store";
 import { emitNow, sendSteer, sendWake } from "../../../app/interpreter";
 import { IDLE_STATE, type ArchivedOutcome, type QuestState } from "../../../domain/quest";
-import { archive, demoteToImplementing } from "../../../domain/transitions";
+import { archive, demoteToDrafting, demoteToImplementing } from "../../../domain/transitions";
 import type { Qid } from "../../../domain/qid";
 import type { Pi, PiCtx } from "../../../hooks/events";
 import { cancelReview } from "../../../review/tracker";
@@ -203,6 +203,19 @@ export async function archiveActiveQuest(
         throw new Error(`Archive deferred to rebase ${state.worktreeBranch} in worktree (${res.error ?? "merge conflict"}).`);
       }
       if (res.mode === "cancel") {
+        const isAnalysis = state.kind === "analysis";
+        updateState((s) => s.phase === "validating"
+          ? (isAnalysis
+            ? demoteToDrafting(s, "Operator cancelled archive to remain in quest. Follow operator instructions, then re-validate when ready.")
+            : { ...demoteToImplementing(s), exactNextAction: "Operator cancelled archive to remain in quest. Follow operator instructions, then claim completion again when ready." })
+          : s
+        );
+        await setDocStatus(ctx, qid, isAnalysis ? "drafting" : "implementing", false);
+        emitNow(pi);
+        sendSteer(
+          pi,
+          `Archive cancelled by operator for quest ${qid}: returned to ${isAnalysis ? "drafting" : "implementing"} to stay in the quest. Wait for or follow the operator's instructions before claiming completion or archiving again.`,
+        );
         throw new Error(`Archive cancelled by operator (${res.error ?? "staying in quest"}).`);
       }
       if (!res.ok) {
@@ -219,7 +232,7 @@ export async function archiveActiveQuest(
       }
     } else {
       const branchCommits = await getBranchCommitSummaries(primaryRoot, "HEAD", state.worktreeBranch, pi);
-      let action = opts?.action;
+      let action: "integrate" | "keep" | "discard" | "cancel" | undefined = opts?.action;
 
       if (!action && branchCommits.length > 0 && ctx.hasUI && typeof ctx.ui?.select === "function") {
         try {
@@ -229,14 +242,20 @@ export async function archiveActiveQuest(
               `Integrate (squash-merge) into current branch`,
               `Keep branch unmerged (${state.worktreeBranch})`,
               `Discard changes and reset scratch slot`,
+              `Cancel archive (stay in quest)`,
             ],
           );
-          if (selected?.startsWith("Integrate")) action = "integrate";
-          else if (selected?.startsWith("Keep")) action = "keep";
-          else if (selected?.startsWith("Discard")) action = "discard";
+          if (selected === undefined || selected.startsWith("Cancel archive")) action = "cancel";
+          else if (selected.startsWith("Integrate")) action = "integrate";
+          else if (selected.startsWith("Keep")) action = "keep";
+          else if (selected.startsWith("Discard")) action = "discard";
         } catch {
           action = "keep";
         }
+      }
+
+      if (action === "cancel") {
+        throw new Error("Archive cancelled by operator (staying in quest).");
       }
 
       if (action === "integrate") {

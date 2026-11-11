@@ -182,7 +182,9 @@ function markActiveReview(qid: Qid, target: string, reviewKind: ReviewKind): voi
       ? {
           ...s,
           activeReview: { kind: reviewKind, target },
-          exactNextAction: reviewRunningNotice(qid),
+          // Keep exactNextAction stable during validation so implementationFingerprint
+          // does not drift between target computation and concludeValidationPass.
+          ...(s.phase !== "validating" ? { exactNextAction: reviewRunningNotice(qid) } : {}),
           snapshotPending: true,
         }
       : s

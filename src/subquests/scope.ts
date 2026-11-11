@@ -27,8 +27,8 @@ export interface Triage {
  */
 export function isNegativeOrStyleConstraint(text: string): boolean {
   const norm = text.trim().toLowerCase();
-  return /^(?:avoid\b|don'?t\b|do\s+not\b|never\b|stop\b|no\b|please\s+(?:avoid|don'?t|do\s+not|never)|be\s+aware\b|remember\s+to\s+avoid\b)/i.test(norm) ||
-    /\b(?:magic\s+constants?|magic\s+numbers?|naming\s+conventions?|code\s+style|formatting|indentation)\b/i.test(norm);
+  return /^(?:avoid\b|don'?t\b|do\s+not\b|never\b|stop\b|no\b|decline\b|reject\b|hold\s+on\b|wait\b|please\s+(?:avoid|don'?t|do\s+not|never)|be\s+aware\b|remember\s+to\s+avoid\b)/i.test(norm) ||
+    /\b(?:decline|magic\s+constants?|magic\s+numbers?|naming\s+conventions?|code\s+style|formatting|indentation)\b/i.test(norm);
 }
 
 export function triageInQuestRequest(

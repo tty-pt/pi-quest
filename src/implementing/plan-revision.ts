@@ -110,11 +110,13 @@ export async function bootPlanRevisionReview(
   pi: Pi,
   ctx: PiCtx,
   target: string,
-  baseConfig: QuestConfig = DEFAULT_CONFIG,
+  baseConfig?: QuestConfig,
   signal?: AbortSignal,
 ): Promise<void> {
   if (signal?.aborted) return;
-  const config = withEffectivePolicy(baseConfig, ctx);
+  const resolvedBase = baseConfig ?? await readQuestConfig(ctx.cwd);
+  if (signal?.aborted) return;
+  const config = withEffectivePolicy(resolvedBase, ctx);
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
   if (signal === undefined && isCurrentReview(state.qid, target)) return;
@@ -166,8 +168,8 @@ export async function bootPlanRevisionReview(
     fallbackModels: resolveRoleFallbacks(config, "reviewer"),
     routerDefault: config.router.default,
     cooldownMs: config.router.cooldownMs,
-    maxDurationMs: Math.min(config.reviewMaxDurationMs, 300000),
-    inactivityLimitMs: Math.min(config.reviewInactivityMs, 60000),
+    maxDurationMs: config.planRevisionMaxDurationMs,
+    inactivityLimitMs: config.planRevisionInactivityMs,
   });
   await handleRevisionOutcome(pi, ctx, qid, target, outcome, sections.plan, config);
 }

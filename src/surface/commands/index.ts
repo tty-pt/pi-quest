@@ -54,6 +54,7 @@ const SUBCOMMAND_COMPLETIONS: ReadonlyArray<{ value: string; label: string }> = 
   { value: "pick", label: "pick — Interactively select a quest to resume" },
   { value: "pause", label: "pause — Pause pi-quest for this session" },
   { value: "on", label: "on — Re-enable pi-quest for this session" },
+  { value: "toggle", label: "toggle — Toggle pi-quest on or off for this session (Ctrl+Q)" },
   { value: "cancel", label: "cancel — Cancel in-flight review and unblock tools" },
   { value: "del", label: "del — Delete/abandon quest or prune drafts (--stale|--empty|--orphans|--all)" },
   { value: "handoff", label: "handoff — Write and show handoff document" },
@@ -197,6 +198,12 @@ async function handleUnifiedQuestCommand(pi: Pi, args: string, ctx: PiCtx): Prom
     notify(ctx, out);
     return;
   }
+  if (head === "toggle") {
+    const out = await toggleQuestDisabled(pi, ctx, !getState().disabled);
+    refreshStatus(ctx);
+    notify(ctx, out);
+    return;
+  }
   if (head === "cancel" || head === "cancel-review") {
     const msg = cancelActiveReview(ctx);
     refreshStatus(ctx);
@@ -222,7 +229,7 @@ export function installCommands(pi: Pi): void {
   registerDoctorRenderer(pi);
 
   const spec = {
-    description: "Manage quests: /quest [edit|list|pick|pause|on|cancel|del|handoff|slots|doctor|policy|router|ratings|<name|qid>]",
+    description: "Manage quests: /quest [edit|list|pick|pause|on|toggle|cancel|del|handoff|slots|doctor|policy|router|ratings|<name|qid>]",
     getArgumentCompletions: (prefix: string) => getQuestCompletions(prefix),
     handler: async (args: string, ctx: PiCtx) => {
       await handleUnifiedQuestCommand(pi, args, ctx);
@@ -230,4 +237,15 @@ export function installCommands(pi: Pi): void {
   };
 
   pi.registerCommand("quest", spec);
+
+  if (typeof pi.registerShortcut === "function") {
+    pi.registerShortcut("ctrl+q", {
+      description: "Toggle pi-quest on or off for this session (/quest on | /quest off)",
+      handler: async (ctx: PiCtx) => {
+        const out = await toggleQuestDisabled(pi, ctx, !getState().disabled);
+        refreshStatus(ctx);
+        notify(ctx, out);
+      },
+    });
+  }
 }

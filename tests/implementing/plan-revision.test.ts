@@ -516,5 +516,47 @@ Deno.test("planRevision followed by amendment sync does not abort or double-boot
   }
 });
 
+Deno.test("writePlanRevision loads settings.json config for roles.reviewer and reviewPolicy", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  try {
+    await mkdir(join(d.cwd, ".pi"), { recursive: true });
+    await writeFile(
+      join(d.cwd, ".pi", "settings.json"),
+      JSON.stringify({
+        "pi-quest": {
+          reviewPolicy: "strict",
+          roles: { reviewer: "antigravity-acp/gemini-3.8-flash:medium" },
+          planRevisionInactivityMs: 180000,
+          planRevisionMaxDurationMs: 600000,
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(d.cwd, draftPath(d.qid)),
+      "# t\n\n## Implementation Plan\n\nold plan\n",
+      "utf8",
+    );
+    const ctx = fakeCtx(d.cwd);
+    await applyUpdate(bus.pi, ctx, { planRevision: "1. Revised step one", note: "test settings load" });
+    await waitForRevisionRequests(bus.emitted, 1);
+    const req = revisionRequests(bus.emitted)[0];
+    check(req["model"] === "antigravity-acp/gemini-3.8-flash:medium", `expected reviewer model from settings.json, got ${req["model"]}`);
+    bus.feed({
+      requestId: req["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE" },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    check(getState().draft?.approvedPlanHash !== "hash-v1", "revision adopted cleanly");
+  } finally {
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
 
 

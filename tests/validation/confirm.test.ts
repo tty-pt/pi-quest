@@ -201,4 +201,54 @@ Deno.test("reviewPolicy balanced validation auto-archives trivial task when test
   replaceState(IDLE_STATE);
 });
 
+Deno.test("concurrent ensureValidationFlow calls do not double-boot or self-abort validator subagent", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  pi.toolNames = ["subagent"];
+  const emitted: Array<{ event: string; data: unknown }> = [];
+  const handlers = new Map<string, Array<(data: unknown) => void>>();
+  (pi as { events: unknown }).events = {
+    on: (event: string, handler: (data: unknown) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => {};
+    },
+    emit: (event: string, data: unknown) => {
+      emitted.push({ event, data });
+    },
+  };
+  replaceState(validating());
+  await withDraftFile(cwd);
+  const ctx = fakeCtx(cwd);
+
+  // Fire two concurrent ensureValidationFlow calls (simulating claimForValidation + onTurnEnd)
+  const p1 = ensureValidationFlow(pi, ctx);
+  const p2 = ensureValidationFlow(pi, ctx);
+
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (emitted.some((e) => e.event === "prompt-template:subagent:request")) break;
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  await new Promise((r) => setTimeout(r, 25));
+
+  const subagentReqs = emitted.filter((e) => e.event === "prompt-template:subagent:request");
+  const subagentCancels = emitted.filter((e) => e.event === "prompt-template:subagent:cancel");
+  check(subagentReqs.length === 1, `expected exactly 1 validator subagent request, got ${subagentReqs.length}`);
+  check(subagentCancels.length === 0, `expected 0 self-aborts, got ${subagentCancels.length}`);
+
+  const reqData = subagentReqs[0].data as Record<string, unknown>;
+  for (const h of handlers.get("prompt-template:subagent:response") ?? []) {
+    h({
+      requestId: reqData["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE\nSUPPORTING FINDINGS:\n- all requirements met\n" },
+    });
+  }
+  await Promise.all([p1, p2]);
+  check(getState().phase === "idle", `expected quest concluded cleanly on single validator PASS, got phase ${getState().phase}`);
+  replaceState(IDLE_STATE);
+});
+
 

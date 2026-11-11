@@ -3,7 +3,7 @@
 // update-state.ts so that file stays under the complexity budget.
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { updateState } from "../../app/store";
+import { getState, updateState } from "../../app/store";
 import { emitNow } from "../../app/interpreter";
 import type { QuestState } from "../../domain/quest";
 import { recordPlanRevision } from "../../domain/plan-revision";
@@ -44,8 +44,8 @@ export async function writePlanToDraft(
   emitNow(pi);
   noteDraftUpdated(ctx);
   clearDraftReviewRetry(state.qid);
-  void maybeBootDraftReview(pi, ctx);
-  return next;
+  await maybeBootDraftReview(pi, ctx);
+  return getState();
 }
 
 export async function writeAnalysisToDraft(
@@ -64,7 +64,7 @@ export async function writeAnalysisToDraft(
   if (updated === current) throw new Error("analysis text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
-  const next = updateState((s) => s.draft === null ? s : {
+  updateState((s) => s.draft === null ? s : {
     ...s,
     draft: { ...s.draft, planAuthored: true, contentHash: hash },
     snapshotPending: true,
@@ -72,8 +72,8 @@ export async function writeAnalysisToDraft(
   emitNow(pi);
   noteDraftUpdated(ctx);
   clearDraftReviewRetry(state.qid);
-  void maybeBootDraftReview(pi, ctx);
-  return next;
+  await maybeBootDraftReview(pi, ctx);
+  return getState();
 }
 
 // Mid-implementation plan revision: the objective is immutable here — a new

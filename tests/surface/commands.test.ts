@@ -316,6 +316,20 @@ Deno.test("/quest pause and /quest on pause active quest and bypass auto-detecti
   check(getState().disabled === false, "disabled flag is false after /quest on");
   check(getState().qid === "1xPAUSED", "paused quest restored");
 
+  // 6. Toggle via /quest toggle subcommand
+  await questCmd!.options.handler("toggle", ctx);
+  check(getState().disabled === true, "disabled flag is true after /quest toggle from enabled");
+  await questCmd!.options.handler("toggle", ctx);
+  check(getState().disabled === false, "disabled flag is false after /quest toggle from disabled");
+
+  // 7. Toggle via ctrl+q shortcut
+  const shortcut = pi.shortcuts.find((s) => s.shortcut === "ctrl+q");
+  check(Boolean(shortcut), "must register 'ctrl+q' shortcut");
+  await shortcut!.options.handler(ctx);
+  check(getState().disabled === true, "disabled flag is true after ctrl+q shortcut from enabled");
+  await shortcut!.options.handler(ctx);
+  check(getState().disabled === false, "disabled flag is false after ctrl+q shortcut from disabled");
+
   replaceState(IDLE_STATE);
 });
 

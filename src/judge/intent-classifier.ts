@@ -7,6 +7,7 @@ import {
   nearestExemplar,
 } from "./nearest";
 import { DEFAULT_INTENT_EXEMPLARS } from "../domain/intent-exemplars";
+import { isNegativeOrStyleConstraint } from "../subquests/scope";
 import {
   FALLBACK_ADVANCE_WORD,
   isFallbackAdvance,
@@ -33,7 +34,9 @@ function fallbackIntent(text: string, cfg: QuestConfig): UserIntent {
   const trimmed = text.trim();
   const leading = parseLeadingAdvance(trimmed, cfg.steeringPhrases);
   if (leading.isAdvance) return { kind: "advance", cleanText: leading.remainder, source: "fallback" };
-  if (trimmed.endsWith("?") && trimmed.length < MAX_QUESTION_CHARS) return { kind: "question", cleanText: trimmed, source: "fallback" };
+  if (trimmed.endsWith("?") && trimmed.length < MAX_QUESTION_CHARS && !isNegativeOrStyleConstraint(trimmed)) {
+    return { kind: "question", cleanText: trimmed, source: "fallback" };
+  }
   return { kind: "refinement", cleanText: trimmed, source: "fallback" };
 }
 

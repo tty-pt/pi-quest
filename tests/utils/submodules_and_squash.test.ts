@@ -21,7 +21,7 @@ import {
   guardSubmoduleWorkingTree,
 } from "../../src/utils/git/index.ts";
 import { archiveActiveQuest } from "../../src/surface/tools/archive/core.ts";
-import { replaceState } from "../../src/app/store.ts";
+import { getState, replaceState } from "../../src/app/store.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
 import { createDraft } from "../../src/domain/transitions.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
@@ -752,6 +752,54 @@ Deno.test("commitDirtySubmodules: aborts commit and resets index if staged files
     check(commitIdx === -1, "git commit was NOT executed");
   } finally {
     try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+
+Deno.test("clean confirmAndSquashWorktree and archiveActiveQuest allow operator to cancel archive and stay in quest", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-quest-cancel-clean-"));
+  const wt = mkdtempSync(join(tmpdir(), "pi-quest-cancel-wt-"));
+  try {
+    const pi = fakePi();
+    (pi as unknown as { exec: unknown }).exec = async () => ({ code: 0, stdout: "" });
+
+    const draft = createDraft(createQuest("stay in quest test", "1xSTAY"), "thing");
+    const stateCandidate = {
+      ...draft,
+      draft: { ...draft.draft!, planAuthored: true },
+      qid: "1xSTAY" as Qid,
+      phase: "validating" as const,
+      worktreePath: wt,
+      worktreeBranch: "quest/1xSTAY",
+    };
+    const target = implementationFingerprint(stateCandidate);
+    replaceState({
+      ...stateCandidate,
+      lastReview: { verdict: "PASS" as const, target, findings: "ok" },
+    });
+
+    const ctx = fakeCtx(root);
+    ctx.hasUI = true;
+    let promptOptions: string[] = [];
+    ctx.ui.select = async (_title: string, opts: string[]) => {
+      promptOptions = opts;
+      return "Cancel archive (stay in quest)";
+    };
+
+    let errText = "";
+    try {
+      await archiveActiveQuest(pi, ctx, "COMPLETED", "task finished");
+    } catch (err) {
+      errText = err instanceof Error ? err.message : String(err);
+    }
+
+    check(promptOptions.some((o) => o.startsWith("Cancel archive (stay in quest)")), "clean squash prompt includes Cancel archive (stay in quest)");
+    check(errText.includes("Archive cancelled by operator"), "archiveActiveQuest threw cancellation error");
+    check(getState().qid === "1xSTAY", "quest remains active");
+    check(getState().phase === "implementing", `expected quest demoted to implementing when operator cancels archive, got ${getState().phase}`);
+  } finally {
+    replaceState(IDLE_STATE);
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(wt, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
 

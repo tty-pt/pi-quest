@@ -28,8 +28,8 @@ Every quest executes through three phases:
 2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
 3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately.
 
-### Instant Plan Overlay (`Ctrl+Q`)
-Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable viewer of the active quest document, requirements, and progress.
+### Instant Session Toggle (`Ctrl+Q`)
+Press **`Ctrl+Q`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).
 
 ---
 
@@ -202,7 +202,7 @@ All operator commands live under **`/quest`** (with interactive tab-completion f
 | `/quest edit` | `/quest plan` | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR` (or `planEditor`). |
 | `/quest list` | `/quest ls` | List active & draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
 | `/quest pick` | `/quest switch` | Interactively select a quest to resume. |
-| `/quest pause` / `/quest on` | `/quest off` / `/quest enable` | Pause or re-enable `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest pause` / `/quest on` | `/quest off` / `/quest enable` / `/quest toggle` (`Ctrl+Q`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
 | `/quest cancel` | `/quest cancel-review` | Cancel any currently running in-flight review or validation and unblock tool execution. |
 | `/quest del [qid\|flags]` | `/quest drop` | Delete/abandon the active quest, a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`). |
 | `/quest handoff [qid]` | | Write and show a handoff for the active (or named) quest. |
