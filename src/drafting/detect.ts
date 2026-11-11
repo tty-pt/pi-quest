@@ -6,7 +6,11 @@ import { createQuest } from "../domain/quest";
 import { nextQid } from "../domain/qid";
 import { ensureDraftFile, listKnownQids } from "../files";
 import { fetchActiveInvariants, formatInvariantsComment } from "../surface/invariants";
-import { extractRecentConversationContext } from "../durability/transcript";
+import {
+  extractPriorConversationObjective,
+  extractRecentConversationContext,
+  isReferentialActivationObjective,
+} from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
 import { isFallbackAdvance, normalizeSteeringText, parseExplicitSyntax } from "../domain/intent";
@@ -48,13 +52,17 @@ export function isQuestLikeRequest(text: string): boolean {
 export async function openDetectedQuest(
   pi: Pi,
   ctx: PiCtx,
-  objective: string,
+  rawObjective: string,
   cfg: QuestConfig,
   triggerPrefix?: string,
 ): Promise<void> {
   const prev = getState();
   const retainedWtPath = prev.worktreePath;
   const retainedWtBranch = prev.worktreeBranch;
+  const context = extractRecentConversationContext(ctx, 8, 4000);
+  const objective = isReferentialActivationObjective(rawObjective)
+    ? (extractPriorConversationObjective(ctx, rawObjective) || rawObjective)
+    : rawObjective;
   const [diff, kind, baseCommit] = await Promise.all([
     evaluateQuestDifficulty(objective, cfg),
     evaluateQuestKind(objective, cfg),
@@ -69,7 +77,6 @@ export async function openDetectedQuest(
   } else {
     replaceState(initial);
   }
-  const context = extractRecentConversationContext(ctx);
   const invariants = await fetchActiveInvariants(ctx.cwd);
   await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty, formatInvariantsComment(invariants));
   emitNow(pi);
@@ -78,12 +85,16 @@ export async function openDetectedQuest(
     : "";
   const sourceText = triggerPrefix ? `via trigger '${triggerPrefix}'` : "as provisional";
   const slotHint = retainedWtPath ? ` in retained worktree ${retainedWtPath} (${retainedWtBranch ?? `quest/${qid}`})` : "";
+  const fastTrackHint = context.trim().length > 0
+    ? " Prior conversation context is already captured in the draft scaffold — if the approach was already discussed with the operator, you may immediately author the ## Requirements, ## Evidence, and ## Implementation Plan in .pi/quest/future/" +
+      `${qid}.md (or pass {draftName, plan: ...} to quest_update_state in a single call) to boot the draft reviewer right away.`
+    : "";
   sendSteer(
     pi,
     `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened ${sourceText}${slotHint}: "${objective.slice(0, 200)}". Flow: (1) investigate root cause & architecture deeply (proportional to difficulty), record findings via quest_update_state; ` +
       `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
       `(3) author that file's ## Analysis via quest_update_state {analysis: ...} and/or ## Implementation Plan via quest_update_state {plan: ...}; ` +
-      `(4) the draft reviewer validates the deliverable against requirements and evidence.${complexHint} (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
+      `(4) the draft reviewer validates the deliverable against requirements and evidence.${complexHint}${fastTrackHint} (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
   );
 }
 

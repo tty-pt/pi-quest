@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Completing (`quest_archive`) or deleting (`/quest del`) a quest now cleans up `.pi/quest/future/<qid>.md` and `.pi/quest/.staging/<qid>` directly without spawning `zip` or writing `.pi/quest/archive/*.zip` files, relying on Git history and `pi-mm` episodic memory distillation.
 
 ### Added
+- **Argon-First Session Routing & Conversation-Aware Quest Activation** (`src/router/engine.ts`, `src/durability/transcript.ts`, `src/drafting/detect.ts`, `src/surface/commands/quest.ts`, `src/surface/commands/quest-del.ts`):
+  - Updated `routeQuestState` so when `pi-quest` is paused/disabled (`quest.disabled === true`), the virtual router uses the `"idle"` matrix rule (keeping sessions on `antigravity-acp/gemini-4-argon:high` until a quest enters active execution/review).
+  - Added `extractPriorConversationObjective` and `isReferentialActivationObjective` so activating a quest after brainstorming with Argon (`"quest: Go for it."`, `/quest on`, `/quest on [goal]`, `/quest new [goal]`) automatically extracts the substantive objective and context from prior session messages and steers the agent to author `.pi/quest/future/<qid>.md` immediately.
+- **Earlier Plan Authoring & Structured `[Drafter–Reviewer Dialogue]`** (`src/drafting/edits.ts`, `src/drafting/review-outcomes.ts`, `src/durability/injection.ts`):
+  - Editing `.pi/quest/future/<qid>.md` while in `provisional` automatically transitions the quest to `drafting` with `planAuthored: true`.
+  - Added `renderReviewerDialogue` and recorded resolved review turns in `reviewHistory` so the drafter and adversarial reviewer exchange structured `[Drafter–Reviewer Dialogue]` rounds in the background while the operator continues chatting concurrently.
+- **Manual Testing in Scratch Worktrees on Completion (`keep-slot`, `squash-keep-slot`) & `/quest finish`** (`src/utils/git/squash.ts`, `src/surface/tools/archive/core.ts`, `src/surface/tools/archive.ts`, `src/surface/commands/quest-del.ts`, `src/surface/commands/index.ts`):
+  - Enabled `keep-slot` (leave completed quest unmerged in `.pi/scratch/slot-N` for manual testing before merge) and `squash-keep-slot` (squash-merge into `main` while keeping `slot-N` alive) on `COMPLETED` quests via `quest_archive({ action })` and the interactive archive selector.
+  - Added `/quest finish [--keep-slot]` (aliases: `/quest merge`, `/quest integrate`) to complete/integrate the active quest or squash-merge a retained scratch slot into `main` once manual testing is done.
 - **Slot Retention on Delete (`/quest del --keep-slot`) & Same-Slot Quest Chaining (`/quest new`)** (`src/surface/commands/quest-del.ts`, `src/surface/commands/index.ts`, `src/surface/tools/archive/core.ts`, `src/utils/git/pool-rescue.ts`, `src/drafting/detect.ts`, `src/drafting/promote.ts`, `src/surface/tools/handlers/provision.ts`):
   - Added `--keep-slot` (`--slot`, `-s`) and interactive `"Keep work in slot (do not reset or free slot)"` option to `/quest del` so a quest can be deleted without resetting or freeing its `.pi/scratch/slot-N` worktree.
   - Added `/quest new [objective]` (aliases: `/quest chain`, `/quest next`) to retire the active/paused quest while keeping its scratch slot and branch intact, re-enable `pi-quest`, and start a brand-new quest on top of that slot's work.
@@ -55,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Completion gate blocks validation if tests contain commented-out or deleted assertions without replacements.
 
 ### Fixed
+- **Turn-Coalesced Draft Reviews, Premature Difficulty Elevation Fix & Fast-Fail `cancelReview` Cleanup** (`src/drafting/reviews.ts`, `src/drafting/review-outcomes.ts`):
+  - Coalesced passive file edits (`write`/`edit` on `.pi/quest/future/<qid>.md`) within a turn into a single reviewer launch at `turn_end` instead of launching on the first edit and immediately self-aborting on subsequent edits in the same turn.
+  - Checked draft maturity thresholds against the current difficulty *before* calling `recalibrateQuestDifficulty`, fixing a bug where a 2-requirement `standard` plan was elevated to `complex` mid-flight and immediately fast-failed against the 4-requirement `complex` threshold.
+  - Cleaned up `inFlightReviews` via `cancelReview(qid)` inside `handleDraftFastFail` so subsequent saves can launch a fresh reviewer without being blocked by a stale `hasInFlight(qid)` lock.
 - **Submodule Auto-Alignment, Worktree Pointer Restoration & `@tty-pt` Symlink Isolation** (`src/utils/git/submodule-restore.ts`, `src/utils/git/worktree.ts`, `src/utils/git/squash.ts`, `src/utils/git/pool.ts`):
   - Automatically runs `git submodule update --init --no-fetch --force` immediately after `mergeWorktreeBranch`, `squashMergeBranch`, worktree branch pre-sync, and `sanitizeSlot` so submodule working trees always match the merged parent index.
   - Added `restoreSubmoduleWorktrees` and `guardSubmoduleWorkingTree` to repair stale `core.worktree` pointers in `.git/modules/` and block accidental empty-tree (`4b825...`) submodule commits.

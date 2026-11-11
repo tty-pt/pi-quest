@@ -71,3 +71,30 @@ Deno.test("onWriteResult and onTurnEndCatchAll do not re-boot when target is alr
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+Deno.test("editing the draft file while provisional auto-transitions to drafting and marks planAuthored", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-provisional-edit-"));
+  replaceState(createQuest("req", QID));
+  const rel = draftPath(QID);
+  const abs = join(cwd, rel);
+  await mkdir(dirname(abs), { recursive: true });
+  const doc = "## Requirements\n- R1: First\n- R2: Second\n\n## Implementation Plan\n1. Step one\n";
+  await writeFile(abs, doc, "utf8");
+  let booted = 0;
+  try {
+    await onWriteResult(
+      fakePi(),
+      fakeCtx(cwd),
+      { type: "tool_result", toolCallId: "1", toolName: "edit", input: { path: rel }, content: [], isError: false },
+      async () => { booted += 1; },
+    );
+    check(getState().phase === "drafting", "auto-transitioned from provisional to drafting");
+    check(getState().draft?.planAuthored === true, "marked planAuthored true");
+    check(booted === 1, "bootFn called once");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+

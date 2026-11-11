@@ -65,6 +65,22 @@ function renderWorktreeIsolation(state: QuestState): string {
   return "";
 }
 
+function renderReviewerDialogue(state: QuestState): string {
+  if (state.phase !== "drafting" || (state.lastReview === null && state.reviewDialogue.length === 0)) {
+    return "";
+  }
+  const lastRev = state.lastReview;
+  const revLine = lastRev
+    ? `  • Last Verdict (${lastRev.target.slice(0, 8)}): ${lastRev.verdict} — ${lastRev.findings.slice(0, 300)}`
+    : "";
+  const recentRounds = state.reviewDialogue.slice(-2).map(
+    (d) => `  • Round ${d.round}: Reviewer (${d.verdictBefore}): "${d.reviewerFindings.slice(0, 160)}" → Drafter Rebuttal: "${d.implementerRebuttal.slice(0, 160)}"${d.verdictAfter ? ` → ${d.verdictAfter}` : " (pending)"}`,
+  );
+  const dialogueBody = [revLine, ...recentRounds].filter(Boolean).join("\n");
+  if (!dialogueBody) return "";
+  return `\n[Drafter–Reviewer Dialogue]:\n${dialogueBody}\n  • Action: Address valid findings by editing ${state.qid ? draftPath(state.qid) : "the draft"} or quest_update_state {plan: ...}, or challenge false positives with cited file:line evidence via quest_rebut {rebuttal: "..."}.`;
+}
+
 function contextLine(state: QuestState): string {
   const id = state.qid ?? "none";
   const pending = state.snapshotPending ? " (snapshot pending)" : "";
@@ -115,8 +131,10 @@ function contextLine(state: QuestState): string {
   line += `\n[Pre-Question Checklist]: Before asking the user any questions (via quest_ask_human or otherwise), verify that all user requests, constraints, and directives are completely and faithfully captured in the plan file. In addition: (1) write your quest analysis in your chat message so the operator can review it in the session; (2) keep quest_ask_human {question: ...} concise (e.g. "Do you approve the implementation plan?"); (3) NEVER put the plan or markdown sections inside the question parameter; (4) for plan approval, default must NOT confirm (use default: "hold") — pressing Escape cancels without approving, and the timeout gives 5 minutes for review.`;
 
   if (state.qid !== null && hasInFlight(state.qid)) {
-    line += `\n[IN-FLIGHT REVIEW RUNNING]: An adversarial review is currently running in the background for quest ${state.qid}. Do NOT execute tool calls, edits, or commands. Yield immediately and wait for the review verdict.`;
+    line += `\n[IN-FLIGHT REVIEW RUNNING]: An adversarial review is currently running in the background for quest ${state.qid}. Do NOT execute tool calls, edits, or commands. Yield immediately and wait for the review verdict. (Note: while in drafting, if the user provides new instructions you may still update ${draftPath(state.qid)}, call quest_update_state, or call quest_rebut — saving a new draft revision supersedes the in-flight review cleanly.)`;
   }
+
+  line += renderReviewerDialogue(state);
 
   if (state.phase === "implementing" && state.circuitBreakerActive) {
     line += `\n[CIRCUIT BREAKER ACTIVE - RE-EVALUATE ASSUMPTIONS]: Repeated test/build failures detected. Mutating file tools are paused. Stop tinkering. Run a diagnostic audit: identify which assumption from your plan was violated by reality, formulate a new hypothesis, and update state via quest_update_state {refinement: '...'} or {planRevision: '...'}.`;

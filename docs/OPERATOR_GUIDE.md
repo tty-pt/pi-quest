@@ -106,10 +106,11 @@ All commands are unified under `/quest` with tab-completion:
 | :--- | :--- |
 | `/quest` | Show self-explaining status card (active quest, phase, plan path, next action, and subcommand list), or auto-resume a lone draft when idle. |
 | `/quest <name\|qid>` | Switch to or resume a quest by its readable draft name or QID (`/quest pick` to choose interactively). |
-| `/quest new [goal]` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work (`/quest chain` / `/quest next`). |
+| `/quest new [goal]` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work (`/quest chain` / `/quest next`; infers `[goal]` from prior conversation when referential/omitted). |
+| `/quest finish [--keep-slot]` | Complete and integrate the active quest, or squash-merge a retained scratch slot (`.pi/scratch/slot-N`) into `main` after manual testing (`/quest merge` / `/quest integrate`; `--keep-slot` keeps the slot attached after merging). |
 | `/quest edit` (or `/quest plan`) | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR`. |
 | `/quest list` | Display all active and draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
-| `/quest pause` / `/quest on` | Pause, re-enable, or toggle (`Alt+Q` / `/quest toggle`) `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest pause` / `/quest on [goal]` | Pause, re-enable, or toggle (`Alt+Q` / `/quest toggle`) `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). `/quest on [goal]` starts a quest immediately using prior conversation context. |
 | `/quest cancel` | Cancel any currently running in-flight review or validation and unblock tool execution. |
 | `/quest del [qid\|flags]` | Delete/abandon the active quest (`--keep-slot` / `-s`, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) with fail-safe branch integration options. |
 | `/quest handoff [qid]` | Write and show an honest handoff (verbatim request, every directive, asked-vs-accomplished with UNVERIFIED rows, plan, diff stat, last test/review, blockers, next action) to `.pi/quest/handoffs/`. Also written automatically before every compaction. Saying "give me a handoff" (or `!handoff`) mid-quest does the same and is never recorded as a requirement. |
@@ -123,27 +124,36 @@ All commands are unified under `/quest` with tab-completion:
 
 ## Common Operator Workflows
 
-1. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
-   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` for the current session and work freely without draft gates.
+1. **Brainstorm with Argon first, then activate a quest (`/quest on`, `"quest: Go for it."`, `/quest new`)**:
+   - Sessions start in `idle` (or paused `⏸️`) routed to **`antigravity-acp/gemini-4-argon:high`** so you can discuss the problem, explore files, and refine the plan conversationally before locking anything.
+   - Once you are happy with the understanding/plan, activate a quest with `"quest: Go for it."`, `/quest on`, `/quest on [goal]`, or `/quest new [goal]`.
+   - `pi-quest` pulls the substantive objective and context from the prior conversation (`extractPriorConversationObjective`), writes `.pi/quest/future/<qid>.md` immediately, and runs the `[Drafter–Reviewer Dialogue]` in the background while you continue chatting.
+2. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` for the current session and work freely without draft gates (keeping the router on the `idle` Argon rule).
    - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest.
-2. **Continue work in the same scratch slot under a new quest (`/quest new`)**:
+3. **Test in the scratch worktree before or after merging (`keep-slot`, `squash-keep-slot`, `/quest finish`)**:
+   - When completing a quest (`quest_archive` or interactive prompt), select:
+     - **`Leave in worktree slot for manual testing before merge`** (`keep-slot`): leaves `quest/<qid>` unmerged in `.pi/scratch/slot-N` so you can manually test or inspect the changes before merging into `main`.
+     - **`Squash-merge into main AND keep worktree slot alive`** (`squash-keep-slot`): squash-merges into `main` while keeping `slot-N` checked out at the new `main` HEAD.
+   - After manual testing in a retained slot, run **`/quest finish`** (or `/quest merge` / `/quest integrate`, optionally with `--keep-slot`) to squash-merge into `main` and release the slot.
+4. **Continue work in the same scratch slot under a new quest (`/quest new`)**:
    - To start a new quest with a fresh plan directly on top of the current `slot-N` worktree (even if the current quest was paused with `/quest off`), run:
      ```text
      /quest new <new objective>
      ```
    - Or run bare `/quest new` (or `/quest del --keep-slot`) to retire the old quest while keeping `slot-N` attached, then type your next request.
-3. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
+5. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
    - Run `/quest del --keep-slot` (or `/quest del -s`, or choose `"Keep work in slot (do not reset or free slot)"` in `/quest del`) to delete the quest record while keeping `slot-N` and its uncommitted/committed work intact.
    - Run `/quest del --discard` while idle to release and reset a retained slot.
-4. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
+6. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
    - Reply **`decline`** (or give corrective instructions) during `validating`, or select **`"Cancel archive (stay in quest)"`** (or press `Escape`) at the branch integration prompt to demote back to `implementing` with tools unlocked.
 
 
 ---
 
-## What to Expect: A Quest End to End (balanced policy)
+## What to Expect: A Quest End to End
 
-This section describes the behaviour with `reviewPolicy: "balanced"`, the router matrix above, and `roles.reviewer` set to a stronger model than the implementer.
+This section describes the end-to-end flow across classification, drafting, peer review, implementation, and validation.
 
 ### 1. Classification decides the path
 At detection time the judge classifies the request (trivial / standard / complex) in any language. Without a judge the fallback is purely structural, with no keywords: **complex** if the request names four or more distinct file paths, otherwise **standard**.
@@ -162,22 +172,23 @@ When the classifier service is offline, explicit documented trigger prefixes (`f
 
 A complex task worded plainly is therefore treated as standard when no judge is available and gets neither the strong planner nor a review. Use a trigger prefix, or have the agent call `quest_update_state` with `difficulty: "complex"` / `"trivial"`. Likewise, without a judge a free-form message never opens a quest by itself unless it matches explicit triggers (`quest:`, `fix:`, ...) or `/quest`.
 
-### 2. Drafting
-Research, reads and test runs are never blocked; the only writable file is the draft (`.pi/quest/future/<qid>.md`). Writing the plan before recording findings is refused with `RESEARCH_REQUIRED`. The plan must meet the thresholds for its difficulty (default standard: 2 requirements, 7 evidence items). The router picks the planning model per turn from the phase × difficulty matrix: `drafting.complex` uses the first available model in its chain (e.g. Sonnet 5.5 with `:high` thinking, then Flash); other difficulties use `drafting.*`. Multi-tool continuation turns keep the model they started on, so a difficulty change takes effect on the next turn.
+### 2. Drafting & Earlier Plan Authoring
+Research, reads and test runs are never blocked; the only writable file is the draft (`.pi/quest/future/<qid>.md`). Editing `.pi/quest/future/<qid>.md` while in `provisional` automatically transitions the quest to `drafting` and sets `planAuthored: true`. The plan must meet the thresholds for its current difficulty (default standard: 2 requirements, 7 evidence items) — threshold checks run *before* recalibrating difficulty upward so a 2-requirement standard plan is never prematurely fast-failed against complex thresholds. The router picks the planning model per turn from the phase × difficulty matrix (`idle`, `provisional`, and `drafting.standard` route to `antigravity-acp/gemini-4-argon:high`; `drafting.complex` uses the first available model in its chain). Multi-tool continuation turns keep the model they started on, so a difficulty change takes effect on the next turn.
 
-### 3. Review
-- **standard / trivial**: review is bypassed. Once the plan is authored and meets the bar, the quest promotes to implementing and the agent is told "Draft review bypassed under policy 'balanced'". No subagent runs. If the draft is below the bar (too few requirements/evidence, requirements not mapped into the plan, or an empty plan), nothing promotes, but the agent is woken with the draft profile listing what is missing; saving re-checks. Keep `## ` headings out of the plan body (use `###`).
-- **complex**: a reviewer subagent runs on `roles.reviewer` (with its model chain as above). PASS promotes. FAIL returns findings; saving the revised plan boots a fresh review. A launch failure retries up to 3 times with exponential backoff (4s base); two consecutive FAIL verdicts pause the loop and ask the operator, who may reply `go`.
+### 3. Review & `[Drafter–Reviewer Dialogue]`
+- **Turn-coalesced review launches**: Passive file edits (`write`/`edit`) to `.pi/quest/future/<qid>.md` mark the draft dirty during the turn and coalesce into a single reviewer launch at `turn_end` (unless `quest_update_state({ plan })` already launched it), preventing mid-turn self-aborts. Any fast-fail cleans up `inFlightReviews` via `cancelReview(qid)`.
+- **`strict` vs. `balanced` policy**: Under `reviewPolicy: "strict"`, an independent reviewer subagent runs on every draft (`roles.reviewer`). Under `reviewPolicy: "balanced"`, standard/trivial quests that meet the `draftQuality` bar auto-promote, while complex quests run the reviewer subagent.
+- **`[Drafter–Reviewer Dialogue]`**: PASS promotes to implementing. FAIL returns findings, records the resolved turn in `reviewHistory`, and injects a structured `[Drafter–Reviewer Dialogue]` block into context; saving the revised plan boots the next review round while you can continue chatting concurrently. Two consecutive FAIL verdicts pause the loop and ask the operator, who may reply `go`.
 - **Rate-limit failover & provider cooldowns**: If any reviewer model encounters HTTP `429`, quota exhaustion, or capacity errors (`isRateLimitOrQuotaError`), `pi-quest` places a 15-minute cooldown on the model, its base variant, and its provider namespace (`provider:<prov>`). Subsequent candidates belonging to that provider are immediately skipped, failing over seamlessly across the chain: target model $\rightarrow$ `roles.reviewer` $\rightarrow$ router default (`config.router.default`) $\rightarrow$ session model $\rightarrow$ `{ label: "inherit" }`.
 - `go` (or `go on`, `proceed`, ...) promotes at any time.
 
 ### 4. Implementing
 Implementation work runs isolated in dedicated git worktrees (allocated from the pre-warmed pool in `.pi/scratch/slot-N`). Tools are automatically jailed to the worktree path (`interception.ts`), protecting the primary repository workspace from accidental mutation. The status bar reflects the active quest name, sub-quest depth (`↳ `, `↳₂ `), slot badge (`(1)`, `(2)`, `(wt)`), and passing test checkmark (`✓`), e.g. `🔨 fix-seams (1) ✓`. The router uses the `implementing` cell (Flash in the sample config, for every difficulty). Repository rules (TDD, `make`, boundary scripts) come from `AGENTS.md`. A plan revision mid-way is re-reviewed and holds tools (`AWAITING_REVIEW: PLAN_REVISION_REVIEW`) until the verdict arrives. If that hold is ever stuck, `/quest cancel` or a plain `go` clears it. On completion or abandonment (`/quest del`), worktree edits and submodule commits are committed and safely integrated or preserved.
 
-### 5. Validation
-The validator (`roles.validator`, falling back through its model chain) checks the work against the plan. Under `balanced`, a standard quest whose tests pass auto-completes, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. A FAIL returns to implementing with findings. `go` (or *ship it* / *confirm*, classified by embeddings) completes immediately. Replying `decline` / giving corrective feedback during validation, or choosing `"Cancel archive (stay in quest)"` (or pressing `Escape`) at the branch-integration prompt, cancels validation/archiving and demotes the quest back to `implementing` with tools unlocked.
+### 5. Validation & Worktree Integration (`/quest finish`)
+The validator (`roles.validator`, falling back through its model chain) checks the work against the plan. When validation passes (or when you reply `go` / *ship it* / *confirm*), the quest archives and offers worktree disposition options (`integrate` to squash-merge and release `slot-N`, `keep-slot` to leave the branch unmerged in `.pi/scratch/slot-N` for manual testing before merge, or `squash-keep-slot` to squash-merge into `main` while keeping `slot-N` alive). Once manual testing in a retained slot is complete, `/quest finish` (or `/quest merge` / `/quest integrate`) squash-merges the branch into `main` and releases the slot. Replying `decline` / giving corrective feedback during validation, or choosing `"Cancel archive (stay in quest)"` (or pressing `Escape`) at the branch-integration prompt, cancels validation/archiving and demotes the quest back to `implementing` with tools unlocked.
 
 ### Known limits
-- Only the drafting phase uses the strong model by default; implementation and validation stay on the cheap model unless the matrix says otherwise.
+- Only the drafting/idle phases use Argon (`gemini-4-argon:high`) or the strong planner by default; implementation and validation use their configured matrix cells.
 - If the planner and the reviewer are the same model the review is not independent; prefer a different model for `roles.reviewer`.
 - Provider auth and quota are not checked at config time; a bad key surfaces as a launch failure and walks the fallback chain.

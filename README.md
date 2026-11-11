@@ -24,24 +24,26 @@ pi install npm:@tty-pt/pi-quest
 
 Every quest executes through three phases:
 
-1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) but may only write to its draft plan (`.pi/quest/future/<qid>.md`). Content changes trigger an independent reviewer. You can reply `go` or `proceed` at any moment to bypass review.
-2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
-3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately, or reply `decline` / give corrective feedback (or choose `"Cancel archive (stay in quest)"` in the integration prompt) to demote back to `implementing` and continue working in the quest.
+1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) and authors its draft plan (`.pi/quest/future/<qid>.md`). Editing `.pi/quest/future/<qid>.md` while in `provisional` automatically transitions the quest to `drafting` (`planAuthored: true`). Passive file edits to the draft coalesce within a turn and boot a single independent reviewer at `turn_end`, while drafter and reviewer exchange structured `[Drafter–Reviewer Dialogue]` rounds in the background as you continue chatting. You can reply `go` or `proceed` at any moment to bypass review.
+2. **Implementing**: The agent works from the approved plan in an isolated scratch worktree (`.pi/scratch/slot-N`). Unexpected obstacles and discoveries are recorded as amendments on disk.
+3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree (or leaves it in `slot-N` via `keep-slot` / `squash-keep-slot` for manual testing), and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately, or reply `decline` / give corrective feedback (or choose `"Cancel archive (stay in quest)"` in the integration prompt) to demote back to `implementing` and continue working in the quest.
 
 ### Instant Session Toggle (`Alt+Q`)
 Press **`Alt+Q`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).
 
 ---
 
-## 2. Conversational Brainstorming vs. Quest Workflows
+## 2. Conversational Brainstorming (Argon-First) vs. Quest Workflows
 
 `pi-quest` distinguishes between **open conversation / brainstorming** and **task execution directives**:
 
-- **Chat & Brainstorming** (No quest opened, no files locked):
+- **Argon-First Chat & Brainstorming** (No quest opened, no files locked):
+  - Sessions start in `idle` (or paused `⏸️`) routed to **`antigravity-acp/gemini-4-argon:high`** (configurable in `router.matrix.idle` / `provisional` / `drafting.standard`). When `pi-quest` is paused (`quest.disabled === true`), the router uses the `idle` matrix rule so you stay on Argon until a quest transitions into active execution/review phases.
   - When you ask open-ended questions, explore design ideas, or brainstorm (*"Let's think this through"*, *"Can you explain how this module works?"*, *"What are our options for handling this issue?"*, or prefix with `? ` / `!chat`), the agent answers directly in conversational markdown.
   - The worktree is **never locked**, and no draft plan is forced upon you.
-- **Quest Directives** (Quest workflow begins):
-  - When you issue an imperative task instruction (*"Fix the bug in the parser"*, *"Implement the new API endpoint"*, *"Refactor the auth handler"*), or use an explicit trigger (`quest:`, `!task`, `/quest`), `pi-quest` opens a quest, generates a draft scaffold, and manages the lifecycle.
+- **Conversation-Aware Quest Activation**:
+  - Once you are happy with the understanding and plan discussed with Argon, activate a quest with `"quest: Go for it."`, `/quest on`, `/quest on [goal]`, or `/quest new [goal]` (or issue a direct imperative task instruction).
+  - When activated with a referential prompt (`"Go for it"`, `"do it"`, `"proceed"`, or bare `/quest on`), `pi-quest` automatically extracts the substantive objective and context from the prior conversation transcript (`extractPriorConversationObjective`) instead of recording `"Go for it."` literally, and steers the agent to author `.pi/quest/future/<qid>.md` immediately.
 
 ### Flexible Operator Steering & Compound Approvals
 
@@ -134,10 +136,15 @@ Model reliability is continuously learned without manual surveys:
 
 ---
 
-## 4. Reviewer Failover, Cooldown & Invariant Seeding
+## 4. Turn-Coalesced Reviews, `[Drafter–Reviewer Dialogue]`, Failover & Invariant Seeding
 
-When a quest enters peer review (in drafting, mid-flight plan revision, or validation), `pi-quest` guarantees that external provider rate limits or quota depletion cannot stall the agent:
+When a quest enters peer review (in drafting, mid-flight plan revision, or validation), `pi-quest` guarantees reliable reviewer launches, structured drafter-reviewer convergence, and zero stalls on provider rate limits:
 
+- **Turn-Coalesced Draft Reviews & Fast-Fail Cleanup**:
+  - Passive edits (`write`/`edit`) to `.pi/quest/future/<qid>.md` during a turn mark the draft dirty and coalesce into a single reviewer launch at `turn_end` (unless `quest_update_state({ plan })` already booted it), preventing mid-turn self-cancellation when the drafter edits the plan multiple times.
+  - Draft maturity thresholds are checked against the current difficulty *before* recalibrating difficulty upward, preventing premature elevation fast-fails, and any fast-fail cleans up `inFlightReviews` via `cancelReview(qid)`.
+- **Structured `[Drafter–Reviewer Dialogue]`**:
+  - Resolved review rounds are recorded in `reviewHistory` and injected into the system context via `renderReviewerDialogue` as `[Drafter–Reviewer Dialogue]`, allowing the drafter and adversarial reviewer to exchange structured rounds in the background while you continue chatting concurrently.
 - **Automated Fallback Chain**:
   The review runner dynamically enriches candidate models in prioritized order:
   1. Configured target model (e.g. `anthropic/claude-sonnet-5-5:low`).
@@ -181,7 +188,7 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 | :--- | :--- | :--- |
 | `quest_update_state` | `objective`, `draftName`, `difficulty`, `plan`, `analysis`, `planRevision`, `claimComplete` | Primary write path: atomic single-call quest creation, plan authoring, mid-flight plan revision, and completion claims. |
 | `quest_subquest` | `goal`, `brief`, `allowedPaths`, `requiredTestCommands` | Spawns a sequential child quest on the stack for complex initiatives. |
-| `quest_archive` | `outcome`, `summary` | Concludes and archives the active quest (`outcome: "completed"` requires validation PASS); returns structured execution diagnostics (duration, turn count, tool calls breakdown, diff stats). |
+| `quest_archive` | `outcome`, `summary`, `action` | Concludes and archives the active quest (`outcome: "completed"` requires validation PASS; optional `action: "integrate" \| "keep" \| "keep-slot" \| "discard"` controls worktree disposition); returns structured execution diagnostics (duration, turn count, tool calls breakdown, diff stats). |
 | `quest_rebut` | `rebuttal` | Submits concrete evidence addressing reviewer findings, booting a fresh review. |
 | `quest_ask_human` | `question`, `default`, `timeoutMs` | Asks the human with a recommended default, continuing autonomously on absence. |
 | `quest_recover` | `qid` | Reconstructs quest state from the transcript after crashes or context resets. |
@@ -202,8 +209,9 @@ All operator commands live under **`/quest`** (with interactive tab-completion f
 | `/quest edit` | `/quest plan` | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR` (or `planEditor`). |
 | `/quest list` | `/quest ls` | List active & draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
 | `/quest pick` | `/quest switch` | Interactively select a quest to resume. |
-| `/quest new [goal]` | `/quest chain` / `/quest next` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work. |
-| `/quest pause` / `/quest on` | `/quest off` / `/quest enable` / `/quest toggle` (`Alt+Q`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest new [goal]` | `/quest chain` / `/quest next` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work (inferring `[goal]` from prior conversation when referential/omitted). |
+| `/quest finish [--keep-slot]` | `/quest merge` / `/quest integrate` | Complete and integrate the active quest, or squash-merge a retained scratch slot (`.pi/scratch/slot-N`) into `main` after manual testing (`--keep-slot` to keep the slot attached after squash-merging). |
+| `/quest pause` / `/quest on [goal]` | `/quest off` / `/quest enable` / `/quest toggle` (`Alt+Q`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). `/quest on [goal]` starts a quest immediately using prior conversation context. |
 | `/quest cancel` | `/quest cancel-review` | Cancel any currently running in-flight review or validation and unblock tool execution. |
 | `/quest del [qid\|flags]` | `/quest drop` | Delete/abandon the active quest (`--keep-slot` / `-s` to keep slot work intact, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`). |
 | `/quest handoff [qid]` | | Write and show a handoff for the active (or named) quest. |
@@ -233,6 +241,11 @@ Context gets lost: compaction, a fresh agent, a new session. pi-quest packages t
 Implementation work runs isolated in dedicated git worktrees to keep the primary workspace stable and clean:
 
 - **Warm Scratch Pool (`.pi/scratch/slot-N`)**: A pool of pre-warmed worktree slots avoids expensive submodule cloning delays during execution. Slots dynamically scale up to capacity (`worktreePoolMaxSize`, default 8) and automatically reclaim orphaned or terminated leases.
+- **Manual Testing in Worktree on Completion (`keep-slot`, `squash-keep-slot`, `/quest finish`)**:
+  When a quest completes (`quest_archive` or `/quest finish`), the operator can choose how to handle the worktree slot:
+  - **Squash-merge & release** (`integrate`, default): squash-merges `quest/<qid>` into `main` and releases `slot-N`.
+  - **Leave in worktree slot for manual testing before merge** (`keep-slot`): leaves `quest/<qid>` unmerged in `.pi/scratch/slot-N` so you can test or inspect it manually before integrating into `main` via `/quest finish`.
+  - **Squash-merge into `main` AND keep worktree slot alive** (`squash-keep-slot`): squash-merges into `main` while keeping `.pi/scratch/slot-N` checked out at the new `main` HEAD for post-merge testing.
 - **Fail-Safe Integration & Slot Retention on `/quest del`**: When abandoning an active quest via `/quest del`, the operator can choose to:
   - **Integrate** (`--integrate` / `-i`): squash-merge the feature branch into the primary branch and free the slot.
   - **Keep work in slot** (`--keep-slot` / `-s`): delete the quest record while leaving `slot-N` and all its committed and uncommitted changes untouched as the active workspace.
@@ -245,21 +258,27 @@ Implementation work runs isolated in dedicated git worktrees to keep the primary
 
 ## 7c. Common Operator Workflows
 
-1. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
+1. **Brainstorm with Argon first, then activate a quest (`/quest on`, `"quest: Go for it."`, `/quest new`)**:
+   - Start your session chatting with Argon (`antigravity-acp/gemini-4-argon:high`) while `pi-quest` is idle or paused (`⏸️`).
+   - Once you are satisfied with the understanding and plan, run `/quest on`, `/quest on [goal]`, `/quest new [goal]`, or say `"quest: Go for it."`. `pi-quest` extracts the objective from the prior conversation, writes `.pi/quest/future/<qid>.md`, and conducts the `[Drafter–Reviewer Dialogue]` in the background.
+2. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
    - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation.
    - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest right where you left off.
-2. **Continue work in the same scratch slot with a brand-new quest (`/quest new`)**:
+3. **Test in the scratch worktree before or after merging (`keep-slot`, `squash-keep-slot`, `/quest finish`)**:
+   - Select `"Leave in worktree slot for manual testing before merge"` (`keep-slot`) when archiving a completed quest to test in `.pi/scratch/slot-N` before touching `main`.
+   - When ready to integrate into `main`, run **`/quest finish`** (or `/quest merge` / `/quest integrate`, optionally with `--keep-slot` to keep the slot alive after merging).
+4. **Continue work in the same scratch slot with a brand-new quest (`/quest new`)**:
    - When an active or paused quest has become unwieldy and you want to plan a fresh quest on top of the current `slot-N` worktree without merging or resetting the slot:
      ```text
      /quest new Add atmospheric scattering and horizon fog
      ```
    - Or run `/quest new` with no arguments (or `/quest del --keep-slot`) to retire the old quest while keeping `slot-N` attached, then describe your next task in chat.
-3. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
+5. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
    - Run `/quest del --keep-slot` (or `/quest del -s`, or select `"Keep work in slot (do not reset or free slot)"` in `/quest del`) to delete the quest while keeping all committed and uncommitted work in `.pi/scratch/slot-N`.
    - To later release and reset a retained idle slot, run `/quest del --discard`.
-4. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
+6. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
    - If the validator passes or asks to archive before you are satisfied, reply **`decline`** (or give corrective instructions like `"No, DECLINE. Check what happens when zooming out"`) or choose **`"Cancel archive (stay in quest)"`** (or press `Escape`) at the squash-merge prompt. The quest demotes back to `implementing` with tools unlocked.
-5. **Prune stale or orphan draft quests (`/quest list` & `/quest del`)**:
+7. **Prune stale or orphan draft quests (`/quest list` & `/quest del`)**:
    - Inspect all drafts with `/quest list`, preview cleanup with `/quest del --stale --empty --orphans --dry-run`, and delete with `/quest del --stale --empty --orphans` (or `/quest del <qid|name>`).
 
 ---

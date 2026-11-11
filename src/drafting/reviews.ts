@@ -135,17 +135,17 @@ export async function bootDraftReview(
   }
   if (signal?.aborted || (signal !== undefined && !isCurrentReview(qid, target))) return;
   const sections = parseDraftSections(content);
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
+  if (signal?.aborted || (signal !== undefined && !isCurrentReview(qid, target))) return;
+  const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   const recalibrated = recalibrateQuestDifficulty(state, sections, content);
   let effectiveState = state;
-  if (difficultyLevel(recalibrated) > difficultyLevel(state.difficulty)) {
+  if (!belowBar && !quality.blocks && difficultyLevel(recalibrated) > difficultyLevel(state.difficulty)) {
     effectiveState = updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
     emitNow(pi);
   }
   const material = reviewMaterial(effectiveState, sections);
-  const thresholds = getThresholdsForDifficulty(config, effectiveState.difficulty);
-  const quality = await assessDraftQuality(ctx, config, sections, kind, effectiveState.difficulty);
-  if (signal?.aborted || (signal !== undefined && !isCurrentReview(qid, target))) return;
-  const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
   // Policy-based bypass (reviewPolicy "off", or "balanced" based on model risk and difficulty).
@@ -157,7 +157,7 @@ export async function bootDraftReview(
   // Deterministic local fast-fail: when deterministic quality checks block or draft is below maturity bar,
   // reject immediately in 0ms without launching an expensive doomed subagent review.
   if (belowBar || quality.blocks) {
-    handleDraftFastFail(pi, qid, sections, thresholds, kind, effectiveState.difficulty, quality, belowBar);
+    handleDraftFastFail(pi, qid, sections, thresholds, kind, state.difficulty, quality, belowBar);
     return;
   }
 
@@ -306,7 +306,10 @@ export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<b
 export function watchDraftEdits(pi: Pi): void {
   onToolResult(pi, (event, eventCtx) => {
     if (getState().disabled === true) return;
-    void doOnWriteResult(pi, eventCtx, event, maybeBootDraftReview);
+    // Record the updated draft contentHash and blink status immediately on edit/write,
+    // and let onTurnEndCatchAll (or explicit quest_update_state {plan}) boot the review
+    // once at turn-end so multi-step edits in a single turn never launch and abort duplicate reviewers.
+    void doOnWriteResult(pi, eventCtx, event, async () => {});
   });
 }
 

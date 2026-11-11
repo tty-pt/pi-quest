@@ -163,8 +163,11 @@ active user directive will cause validation to FAIL.
   child never fails its parent — record, adjust, continue.
 - `quest_archive` — finish as completed (needs a current validation PASS;
   claim via `quest_update_state` with `claimComplete` first) or failed.
-  Completing or abandoning a quest merges/cleans up any scratch worktree,
-  emits structured execution metadata for `pi-mm` episodic distillation, and
+  Accepts optional `action: "integrate" | "keep" | "keep-slot" | "discard"`
+  (e.g. `keep-slot` to leave the completed work in `.pi/scratch/slot-N` for
+  manual testing before integrating with `/quest finish`). Completing or
+  abandoning a quest integrates or retains any scratch worktree, emits
+  structured execution metadata for `pi-mm` episodic distillation, and
   removes `future/<qid>.md` directly without creating `.zip` files.
 - `quest_recover` — rebuild state from the transcript, including earlier
   sessions. Runs automatically when state is absent.
@@ -184,7 +187,7 @@ active user directive will cause validation to FAIL.
 
 ## Commands
 
-`/quest` (shows the self-explaining status card and command cheat sheet, or auto-resumes a lone draft when idle), `/quest <name|qid>` (switch/resume), `/quest edit` (open active plan in `$EDITOR`), `/quest list` (list active & draft quests with triage info), `/quest pause` / `/quest on` (pause/resume for session), `/quest cancel` (cancel in-flight review), `/quest del [qid|--all|--stale|--empty|--orphans|--dry-run]` (delete/abandon quest or prune drafts), `/quest handoff`, `/quest slots`, `/quest doctor`, `/quest policy`, `/quest router`, `/quest ratings`.
+`/quest` (shows the self-explaining status card and command cheat sheet, or auto-resumes a lone draft when idle), `/quest <name|qid>` (switch/resume), `/quest new [goal]` (retire current quest while keeping its scratch slot and start a new quest), `/quest finish [--keep-slot]` (complete/integrate active quest or squash-merge a retained scratch slot into `main`), `/quest edit` (open active plan in `$EDITOR`), `/quest list` (list active & draft quests with triage info), `/quest pause` / `/quest on [goal]` (pause/resume for session or start a quest from prior conversation), `/quest cancel` (cancel in-flight review), `/quest del [qid|--keep-slot|--all|--stale|--empty|--orphans|--dry-run]` (delete/abandon quest or prune drafts), `/quest handoff`, `/quest slots`, `/quest doctor`, `/quest policy`, `/quest router`, `/quest ratings`.
 Everything else the system does by itself.
 
 ## Durability

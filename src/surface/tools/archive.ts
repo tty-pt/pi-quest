@@ -56,6 +56,11 @@ export function archiveTool(pi: Pi): PiToolSpec {
           type: "string",
           description: "Findings summary, returned to the parent for sub-quests.",
         },
+        action: {
+          type: "string",
+          enum: ["integrate", "keep", "keep-slot", "discard"],
+          description: "Optional worktree disposition on archive (e.g. 'keep-slot' to retain the scratch slot for manual testing or chaining the next quest).",
+        },
       },
       required: ["outcome"],
       additionalProperties: false,
@@ -73,8 +78,13 @@ export function archiveTool(pi: Pi): PiToolSpec {
       }
       const outcome = toOutcome(outcomeParam);
       const summary = typeof params["summary"] === "string" ? params["summary"] : null;
+      const actionParam = params["action"];
+      const action =
+        actionParam === "integrate" || actionParam === "keep" || actionParam === "keep-slot" || actionParam === "discard"
+          ? actionParam
+          : undefined;
       try {
-        const archived = await archiveActiveQuest(pi, ctx, outcome, summary);
+        const archived = await archiveActiveQuest(pi, ctx, outcome, summary, action ? { action } : undefined);
         return textResult(formatArchiveSummary(archived, outcome, qid), {
           archived: archived.archivedQid,
           outcome,

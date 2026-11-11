@@ -16,6 +16,18 @@ import {
 } from "./draft-retry";
 import { promoteAfterPass } from "./promote";
 import type { QualityResult } from "./quality";
+import { cancelReview } from "../review/tracker";
+
+function hasSubagentRunner(pi: Pi): boolean {
+  try {
+    const tools = (pi as unknown as { getAllTools?: () => Array<{ name: string }>; toolNames?: string[] }).getAllTools?.();
+    if (Array.isArray(tools) && tools.some((t) => t.name === "subagent")) return true;
+    const names = (pi as unknown as { toolNames?: string[] }).toolNames;
+    return Array.isArray(names) && names.includes("subagent");
+  } catch {
+    return false;
+  }
+}
 
 export function handleDraftFastFail(
   pi: Pi,
@@ -28,6 +40,9 @@ export function handleDraftFastFail(
   belowBar: boolean,
 ): void {
   if (getState().phase !== "drafting") return;
+  if (hasSubagentRunner(pi)) {
+    cancelReview(qid);
+  }
   updateState((s) => (s.phase === "drafting" ? noteDraftFindings(s) : s));
   clearDraftReviewRetry(qid);
   emitNow(pi);
@@ -80,6 +95,11 @@ export async function handleDraftPassVerdict(
       findings: review.findings,
       reviewText: review.text.trim(),
     },
+    reviewDialogue: s.reviewDialogue.map((d, idx) =>
+      idx === s.reviewDialogue.length - 1 && d.verdictAfter === undefined
+        ? { ...d, verdictAfter: "PASS" as const }
+        : d
+    ),
   }));
 
   const currentDraft = getState().draft;
@@ -138,5 +158,8 @@ export function handleDraftFailVerdict(
     return;
   }
 
-  sendWake(pi, `Draft review FAIL (target ${target.slice(0, 12)}): ${review.findings} Revise the ${deliverableWord(kind).toLowerCase()} and save; saving boots a fresh review.${reviewExcerpt}${profile}`);
+  sendWake(
+    pi,
+    `Draft review FAIL (target ${target.slice(0, 12)}): ${review.findings} Revise the ${deliverableWord(kind).toLowerCase()} (or reply with evidence via quest_rebut {rebuttal: "..."}) and save; saving boots a fresh review.${reviewExcerpt}${profile}`,
+  );
 }

@@ -5,8 +5,17 @@ import { DEFAULT_STALE_DAYS } from "../../domain/garden";
 import { isQid } from "../../domain/qid";
 import { IDLE_STATE } from "../../domain/quest";
 import { openDetectedQuest } from "../../drafting/detect";
+import { extractPriorConversationObjective } from "../../durability/transcript";
 import type { Pi, PiCtx } from "../../hooks/events";
-import { findPrimaryRepoRoot, readSlotLease, releaseWarmSlot, retainSlotLease, syncHarnessCwd } from "../../utils/git";
+import {
+  confirmAndSquashWorktree,
+  findPrimaryRepoRoot,
+  readSlotLease,
+  releaseWarmSlot,
+  retainSlotLease,
+  syncHarnessCwd,
+  synthesizeSquashCommitMessage,
+} from "../../utils/git";
 import { archiveActiveQuest } from "../tools/archive";
 import { gardenRows, pruneDraftQuests } from "./continuity";
 import { listDraftQids, readDraftHeading, summarizeActive } from "./quest";
@@ -198,7 +207,7 @@ export async function startNewQuestInSlot(pi: Pi, ctx: PiCtx, rawObjective: stri
   }
 
   setQuestDisabled(false);
-  const objective = rawObjective.trim();
+  const objective = extractPriorConversationObjective(ctx, rawObjective.trim()) || rawObjective.trim();
   if (objective !== "") {
     const cfg = await readQuestConfig(ctx.cwd);
     await openDetectedQuest(pi, ctx, objective, cfg, "/quest new");
@@ -211,3 +220,54 @@ export async function startNewQuestInSlot(pi: Pi, ctx: PiCtx, rawObjective: stri
   const slotInfo = curr.worktreePath ? ` in retained slot ${curr.worktreePath}${curr.worktreeBranch ? ` (${curr.worktreeBranch})` : ""}` : "";
   return `${retiredNote}Ready for a new quest${slotInfo}. Describe your next task to begin.`;
 }
+
+export async function finishQuestOrSlot(pi: Pi, ctx: PiCtx, rawArg: string): Promise<string> {
+  const parsed = parseQuestDelArgs(rawArg);
+  const active = getState();
+  const det = detectSlotFromContext(ctx.cwd);
+
+  if (active.qid !== null) {
+    try {
+      const done = await archiveActiveQuest(pi, ctx, "COMPLETED", "Finished via /quest finish.", {
+        action: parsed.action,
+      });
+      const after = getState();
+      const slotNote = after.worktreePath
+        ? ` Retained slot: ${after.worktreePath}${after.worktreeBranch ? ` (${after.worktreeBranch})` : ""}.`
+        : "";
+      return `Quest ${done.archivedQid} completed and archived.${slotNote} ${summarizeActive()}`;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return `Finish failed: ${detail}`;
+    }
+  }
+
+  const wtPath = active.worktreePath ?? det.worktreePath;
+  const wtBranch = active.worktreeBranch ?? det.worktreeBranch;
+  if (!wtPath || !wtBranch) {
+    return "No active quest or retained scratch slot to finish.";
+  }
+
+  const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
+  const squashMsg = synthesizeSquashCommitMessage({
+    qid: wtBranch.replace(/^quest\//, ""),
+    objective: `Integrate retained worktree branch ${wtBranch}`,
+  });
+  const res = await confirmAndSquashWorktree(pi, ctx, primaryRoot, wtBranch, "HEAD", squashMsg, [], wtPath);
+  if (!res.ok) {
+    return `Integration failed (${res.mode}): ${res.error ?? "aborted"}`;
+  }
+  const keepSlot = parsed.action === "keep-slot" || res.mode === "keep-slot" || res.mode === "squash-keep-slot";
+  const keepBranch = keepSlot || res.mode === "keep";
+  if (keepSlot) {
+    retainSlotLease(wtPath, wtBranch, null);
+    replaceState({ ...IDLE_STATE, worktreePath: wtPath, worktreeBranch: wtBranch });
+    syncHarnessCwd(wtPath, pi);
+    return `Retained slot ${wtPath} (${wtBranch}) (${res.mode}). ${summarizeActive()}`;
+  }
+  await releaseWarmSlot(primaryRoot, wtPath, "", pi, undefined, { deleteBranch: !keepBranch });
+  replaceState(IDLE_STATE);
+  syncHarnessCwd(null, pi);
+  return `Integrated ${wtBranch} (${res.mode}) and released slot ${wtPath}. ${summarizeActive()}`;
+}
+

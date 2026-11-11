@@ -383,4 +383,64 @@ Deno.test("/quest del --keep-slot and /quest new preserve worktree slot and chai
   replaceState(IDLE_STATE);
 });
 
+Deno.test("/quest on [goal] starts a quest seeded from prior Argon conversation and /quest finish --keep-slot retains slot on COMPLETED", async () => {
+  const { readSlotLease, writeSlotLease } = await import("../../src/utils/git/pool.ts");
+  const { implementationFingerprint } = await import("../../src/review/flow.ts");
+  const pi = fakePi();
+  installCommands(pi);
+  const cwd = tmp();
+  const entries = [
+    { data: { role: "user", content: "Let's add keep-slot support for completed quests so we can manually test in the scratch slot." } },
+    { data: { role: "assistant", content: "We can update confirmAndSquashWorktree and archiveActiveQuest." } },
+  ];
+  const ctx = fakeCtx(cwd, entries);
+  const questCmd = pi.commands.find((c) => c.name === "quest")!;
+
+  // 1. Start disabled (Argon chat mode), then run `/quest on go for it`
+  replaceState({ ...IDLE_STATE, disabled: true });
+  await questCmd.options.handler("on go for it", ctx);
+  const started = getState();
+  check(started.disabled === false, "pi-quest enabled");
+  check(started.qid !== null, "new quest opened by /quest on <goal>");
+  check(started.objective.includes("add keep-slot support"), "objective extracted from prior Argon conversation");
+
+  // 2. Complete the quest in a scratch slot with `/quest finish --keep-slot`
+  const slot3 = join(cwd, ".pi", "scratch", "slot-3");
+  mkdirSync(join(slot3, ".git"), { recursive: true });
+  writeSlotLease(slot3, {
+    slotId: "slot-3",
+    status: "leased",
+    leasedToQid: started.qid,
+    leasedAt: Date.now(),
+    pid: process.pid,
+    branch: `quest/${started.qid}`,
+    baseCommit: "abc000",
+  });
+
+  const drafted = createDraft(started, "keep-slot-support");
+  const validatingState = {
+    ...drafted,
+    phase: "validating" as const,
+    draft: { ...drafted.draft!, planAuthored: true },
+    worktreePath: slot3,
+    worktreeBranch: `quest/${started.qid}`,
+  };
+  const fp = implementationFingerprint(validatingState);
+  replaceState({
+    ...validatingState,
+    lastReview: { verdict: "PASS", target: fp, findings: "all good" },
+  });
+
+  await questCmd.options.handler("finish --keep-slot", ctx);
+  const afterFinish = getState();
+  check(afterFinish.phase === "idle", "quest archived and returned to idle");
+  check(afterFinish.worktreePath === slot3, "slot-3 retained on idle state for manual testing");
+  check(afterFinish.worktreeBranch === `quest/${started.qid}`, "branch retained on idle state");
+  const leaseAfterFinish = readSlotLease(slot3);
+  check(leaseAfterFinish?.status === "leased" && leaseAfterFinish?.leasedToQid === null, "slot-3 lease retained with leasedToQid=null");
+
+  replaceState(IDLE_STATE);
+});
+
+
 

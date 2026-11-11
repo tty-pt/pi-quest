@@ -138,7 +138,7 @@ export async function routeRequest(
 
   // 4. Resolve active quest cell (phase × difficulty)
   const quest = getState();
-  const phase = quest?.phase ?? "idle";
+  const phase = (quest?.disabled === true ? "idle" : quest?.phase) ?? "idle";
   const difficulty = quest?.difficulty ?? "standard";
 
   const candidateSpecs = resolveMatrixCell(config.matrix, phase, difficulty, config.default);

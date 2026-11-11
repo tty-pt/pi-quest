@@ -182,57 +182,72 @@ export async function archiveActiveQuest(
     });
 
     if (outcome === "COMPLETED") {
-      const res = await confirmAndSquashWorktree(
-        pi,
-        ctx,
-        primaryRoot,
-        state.worktreeBranch,
-        "HEAD",
-        squashMsg,
-        milestones,
-        state.worktreePath,
-        { beforeSquash: () => squashSubmodulesIfNeeded(pi, primaryRoot, state, qid, meta.findings), defaultConflictMode: "rebase" },
-      );
-      if (res.mode === "rebase") {
-        updateState((s) => s.phase === "validating"
-          ? { ...demoteToImplementing(s), exactNextAction: `Rebase ${state.worktreeBranch} onto primary HEAD in ${state.worktreePath}, resolve conflicts, re-run verification tests, and re-archive.` }
-          : s
-        );
-        await setDocStatus(ctx, qid, "implementing", false);
-        emitNow(pi);
-        sendWake(
-          pi,
-          `Archive paused for conflict resolution: rebase ${state.worktreeBranch} onto the primary repository's HEAD inside worktree ${state.worktreePath}, resolve any conflicts, run verification tests, and then re-archive.`,
-        );
-        throw new Error(`Archive deferred to rebase ${state.worktreeBranch} in worktree (${res.error ?? "merge conflict"}).`);
-      }
-      if (res.mode === "cancel") {
-        const isAnalysis = state.kind === "analysis";
-        updateState((s) => s.phase === "validating"
-          ? (isAnalysis
-            ? demoteToDrafting(s, "Operator cancelled archive to remain in quest. Follow operator instructions, then re-validate when ready.")
-            : { ...demoteToImplementing(s), exactNextAction: "Operator cancelled archive to remain in quest. Follow operator instructions, then claim completion again when ready." })
-          : s
-        );
-        await setDocStatus(ctx, qid, isAnalysis ? "drafting" : "implementing", false);
-        emitNow(pi);
-        sendSteer(
-          pi,
-          `Archive cancelled by operator for quest ${qid}: returned to ${isAnalysis ? "drafting" : "implementing"} to stay in the quest. Wait for or follow the operator's instructions before claiming completion or archiving again.`,
-        );
-        throw new Error(`Archive cancelled by operator (${res.error ?? "staying in quest"}).`);
-      }
-      if (!res.ok) {
-        throw new Error(`Cannot complete and archive quest ${qid}: squash-merge of branch ${state.worktreeBranch} into ${primaryRoot} failed: ${res.error}. Resolve git conflicts before archiving.`);
-      }
-      if (res.mode === "keep") {
-        meta.findings.push(`Worktree feature branch ${state.worktreeBranch} preserved unmerged per operator request`);
+      if (opts?.action === "keep-slot") {
+        meta.findings.push(`Worktree slot ${state.worktreePath} (${state.worktreeBranch}) retained with work intact for manual testing / next quest`);
+        keepSlot = true;
         keepBranch = true;
       } else {
-        try {
-          await runGit(["submodule", "update", "--no-fetch"], primaryRoot, pi);
-          await alignPrimarySubmoduleBranches(primaryRoot, pi);
-        } catch { /* best-effort submodule alignment */ }
+        const res = await confirmAndSquashWorktree(
+          pi,
+          ctx,
+          primaryRoot,
+          state.worktreeBranch,
+          "HEAD",
+          squashMsg,
+          milestones,
+          state.worktreePath,
+          { beforeSquash: () => squashSubmodulesIfNeeded(pi, primaryRoot, state, qid, meta.findings), defaultConflictMode: "rebase" },
+        );
+        if (res.mode === "rebase") {
+          updateState((s) => s.phase === "validating"
+            ? { ...demoteToImplementing(s), exactNextAction: `Rebase ${state.worktreeBranch} onto primary HEAD in ${state.worktreePath}, resolve conflicts, re-run verification tests, and re-archive.` }
+            : s
+          );
+          await setDocStatus(ctx, qid, "implementing", false);
+          emitNow(pi);
+          sendWake(
+            pi,
+            `Archive paused for conflict resolution: rebase ${state.worktreeBranch} onto the primary repository's HEAD inside worktree ${state.worktreePath}, resolve any conflicts, run verification tests, and then re-archive.`,
+          );
+          throw new Error(`Archive deferred to rebase ${state.worktreeBranch} in worktree (${res.error ?? "merge conflict"}).`);
+        }
+        if (res.mode === "cancel") {
+          const isAnalysis = state.kind === "analysis";
+          updateState((s) => s.phase === "validating"
+            ? (isAnalysis
+              ? demoteToDrafting(s, "Operator cancelled archive to remain in quest. Follow operator instructions, then re-validate when ready.")
+              : { ...demoteToImplementing(s), exactNextAction: "Operator cancelled archive to remain in quest. Follow operator instructions, then claim completion again when ready." })
+            : s
+          );
+          await setDocStatus(ctx, qid, isAnalysis ? "drafting" : "implementing", false);
+          emitNow(pi);
+          sendSteer(
+            pi,
+            `Archive cancelled by operator for quest ${qid}: returned to ${isAnalysis ? "drafting" : "implementing"} to stay in the quest. Wait for or follow the operator's instructions before claiming completion or archiving again.`,
+          );
+          throw new Error(`Archive cancelled by operator (${res.error ?? "staying in quest"}).`);
+        }
+        if (!res.ok) {
+          throw new Error(`Cannot complete and archive quest ${qid}: squash-merge of branch ${state.worktreeBranch} into ${primaryRoot} failed: ${res.error}. Resolve git conflicts before archiving.`);
+        }
+        if (res.mode === "keep-slot") {
+          meta.findings.push(`Worktree slot ${state.worktreePath} (${state.worktreeBranch}) retained unmerged for manual testing / next quest`);
+          keepSlot = true;
+          keepBranch = true;
+        } else if (res.mode === "keep") {
+          meta.findings.push(`Worktree feature branch ${state.worktreeBranch} preserved unmerged per operator request`);
+          keepBranch = true;
+        } else {
+          if (res.mode === "squash-keep-slot") {
+            meta.findings.push(`Worktree slot ${state.worktreePath} (${state.worktreeBranch}) retained after squash-merge per operator request`);
+            keepSlot = true;
+            keepBranch = true;
+          }
+          try {
+            await runGit(["submodule", "update", "--no-fetch"], primaryRoot, pi);
+            await alignPrimarySubmoduleBranches(primaryRoot, pi);
+          } catch { /* best-effort submodule alignment */ }
+        }
       }
     } else {
       const branchCommits = opts?.action === "keep-slot"

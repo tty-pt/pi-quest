@@ -185,7 +185,7 @@ export async function confirmAndSquashWorktree(
   milestones: string[] = [],
   worktreePath?: string,
   options?: ConfirmAndSquashOptions,
-): Promise<{ ok: boolean; mode: "squash" | "merge" | "keep" | "rebase" | "cancel"; error?: string }> {
+): Promise<{ ok: boolean; mode: "squash" | "squash-keep-slot" | "merge" | "keep" | "keep-slot" | "rebase" | "cancel"; error?: string }> {
   const preflight = await preflightWorktreeIntegration(repoRoot, featureBranch, worktreePath, pi);
   const displayTarget = targetBranch && targetBranch !== "HEAD" ? targetBranch : preflight.primaryBranch;
   const targetRef = preflight.primaryHeadSha || targetBranch || "HEAD";
@@ -209,7 +209,7 @@ export async function confirmAndSquashWorktree(
     };
   }
 
-  let choice: "squash" | "merge" | "keep" | "cancel" = "squash";
+  let choice: "squash" | "squash-keep-slot" | "merge" | "keep" | "keep-slot" | "cancel" = "squash";
   if (ctx.hasUI && typeof ctx.ui?.select === "function") {
     try {
       const summaryList = milestones.length > 0 ? ` (${milestones.length} milestone commits)` : "";
@@ -217,6 +217,8 @@ export async function confirmAndSquashWorktree(
         `Squash-merge ${featureBranch}${summaryList} into ${displayTarget}?`,
         [
           `Squash and merge into ${displayTarget} (recommended)`,
+          `Squash and merge into ${displayTarget} & keep slot`,
+          `Keep work in slot for manual testing / next quest (do not reset slot)`,
           `Merge without squash (--no-ff)`,
           `Keep branch unmerged (${featureBranch}) & archive quest`,
           `Cancel archive (stay in quest)`,
@@ -224,6 +226,10 @@ export async function confirmAndSquashWorktree(
       );
       if (selected === undefined || selected.startsWith("Cancel archive")) {
         choice = "cancel";
+      } else if (selected.startsWith("Squash and merge") && selected.includes("keep slot")) {
+        choice = "squash-keep-slot";
+      } else if (selected.startsWith("Keep work in slot")) {
+        choice = "keep-slot";
       } else if (selected.startsWith("Merge without")) {
         choice = "merge";
       } else if (selected.startsWith("Keep branch")) {
@@ -236,6 +242,10 @@ export async function confirmAndSquashWorktree(
 
   if (choice === "cancel") {
     return { ok: false, mode: "cancel", error: "staying in quest" };
+  }
+
+  if (choice === "keep-slot") {
+    return { ok: true, mode: "keep-slot" };
   }
 
   if (choice === "keep") {
@@ -265,7 +275,7 @@ export async function confirmAndSquashWorktree(
     }
   }
 
-  if (choice === "squash" && options?.beforeSquash) {
+  if ((choice === "squash" || choice === "squash-keep-slot") && options?.beforeSquash) {
     await options.beforeSquash();
   }
 
@@ -275,5 +285,5 @@ export async function confirmAndSquashWorktree(
   }
 
   const squashRes = await squashMergeBranch(repoRoot, featureBranch, squashMessage, pi);
-  return { ok: squashRes.ok, mode: "squash", error: squashRes.error };
+  return { ok: squashRes.ok, mode: choice === "squash-keep-slot" ? "squash-keep-slot" : "squash", error: squashRes.error };
 }

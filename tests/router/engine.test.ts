@@ -178,3 +178,27 @@ Deno.test("routeRequest routes implementing phase to Gemini", async () => {
   const res = await routeRequest(req, { modelRegistry: mockRegistry }, testConfig);
   assertEquals((res.model as ModelCandidate).id, "gemini-3.8-flash");
 });
+
+Deno.test("routeRequest routes idle and disabled quest states to the idle matrix cell (Argon-first flow)", async () => {
+  const argonConfig: RouterConfig = {
+    ...testConfig,
+    matrix: {
+      ...testConfig.matrix,
+      idle: ["anthropic/claude-sonnet-4-5:high", "antigravity/gemini-3.8-flash"],
+    },
+  };
+
+  replaceState({ ...IDLE_STATE, phase: "implementing", difficulty: "standard", disabled: true });
+  const req: ModelRouteRequest<RouterState> = {
+    model: null,
+    thinkingLevel: "low",
+    reason: "user",
+    messages: [],
+  };
+  const res = await routeRequest(req, { modelRegistry: mockRegistry }, argonConfig);
+  assertEquals((res.model as ModelCandidate).id, "claude-sonnet-4-5");
+  assertEquals(res.thinkingLevel, "high");
+  assertEquals(res.state?.lastCell?.phase, "idle");
+  replaceState(IDLE_STATE);
+});
+

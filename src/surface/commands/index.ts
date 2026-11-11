@@ -1,6 +1,6 @@
 // HIGH_LEVEL: #commands — unified /quest command handle.
 import type { Pi, PiCtx } from "../../hooks/events";
-import { killQuest, startNewQuestInSlot } from "./quest-del";
+import { finishQuestOrSlot, killQuest, startNewQuestInSlot } from "./quest-del";
 import { listQuests } from "./quests";
 import { editActivePlan } from "./plan";
 import { pickQuest } from "./pick";
@@ -53,8 +53,9 @@ const SUBCOMMAND_COMPLETIONS: ReadonlyArray<{ value: string; label: string }> = 
   { value: "list", label: "list — List active & draft quests with triage info" },
   { value: "pick", label: "pick — Interactively select a quest to resume" },
   { value: "new", label: "new — Start a new quest on the current scratch slot (/quest new [goal])" },
+  { value: "finish", label: "finish — Finish/integrate active quest or retained scratch slot (/quest finish [--keep-slot])" },
   { value: "pause", label: "pause — Pause pi-quest for this session" },
-  { value: "on", label: "on — Re-enable pi-quest for this session" },
+  { value: "on", label: "on — Re-enable pi-quest for this session (/quest on [goal])" },
   { value: "toggle", label: "toggle — Toggle pi-quest on or off for this session (Alt+Q)" },
   { value: "cancel", label: "cancel — Cancel in-flight review and unblock tools" },
   { value: "del", label: "del — Delete quest (--keep-slot|-s) or prune drafts (--stale|--empty|--orphans|--all)" },
@@ -158,6 +159,41 @@ async function handleInspectSubcommand(pi: Pi, ctx: PiCtx, head: string): Promis
   return false;
 }
 
+const SUBCOMMAND_HANDLERS: Record<
+  string,
+  (pi: Pi, ctx: PiCtx, rest: string) => Promise<string | void>
+> = {
+  edit: async (pi, ctx) => { await editActivePlan(pi, ctx); },
+  plan: async (pi, ctx) => { await editActivePlan(pi, ctx); },
+  list: async (_pi, ctx) => {
+    const rows = await listQuests(ctx);
+    try { ctx.ui.setWidget("quest", undefined); } catch { /* best effort */ }
+    return rows.join("\n");
+  },
+  ls: (pi, ctx, r) => SUBCOMMAND_HANDLERS.list(pi, ctx, r),
+  quests: (pi, ctx, r) => SUBCOMMAND_HANDLERS.list(pi, ctx, r),
+  pick: (pi, ctx) => pickQuest(pi, ctx),
+  switch: (pi, ctx) => pickQuest(pi, ctx),
+  new: (pi, ctx, rest) => startNewQuestInSlot(pi, ctx, rest),
+  chain: (pi, ctx, rest) => startNewQuestInSlot(pi, ctx, rest),
+  next: (pi, ctx, rest) => startNewQuestInSlot(pi, ctx, rest),
+  finish: (pi, ctx, rest) => finishQuestOrSlot(pi, ctx, rest),
+  merge: (pi, ctx, rest) => finishQuestOrSlot(pi, ctx, rest),
+  integrate: (pi, ctx, rest) => finishQuestOrSlot(pi, ctx, rest),
+  pause: (pi, ctx) => toggleQuestDisabled(pi, ctx, true),
+  off: (pi, ctx) => toggleQuestDisabled(pi, ctx, true),
+  disable: (pi, ctx) => toggleQuestDisabled(pi, ctx, true),
+  on: (pi, ctx, rest) => toggleQuestDisabled(pi, ctx, false, rest),
+  enable: (pi, ctx, rest) => toggleQuestDisabled(pi, ctx, false, rest),
+  toggle: (pi, ctx) => toggleQuestDisabled(pi, ctx, !getState().disabled),
+  cancel: (_pi, ctx) => Promise.resolve(cancelActiveReview(ctx)),
+  "cancel-review": (_pi, ctx) => Promise.resolve(cancelActiveReview(ctx)),
+  del: (pi, ctx, rest) => killQuest(pi, ctx, rest),
+  delete: (pi, ctx, rest) => killQuest(pi, ctx, rest),
+  drop: (pi, ctx, rest) => killQuest(pi, ctx, rest),
+  kill: (pi, ctx, rest) => killQuest(pi, ctx, rest),
+};
+
 async function handleUnifiedQuestCommand(pi: Pi, args: string, ctx: PiCtx): Promise<void> {
   const trimmed = args.trim();
   if (trimmed === "") {
@@ -169,60 +205,14 @@ async function handleUnifiedQuestCommand(pi: Pi, args: string, ctx: PiCtx): Prom
   const head = headRaw.toLowerCase();
   const rest = restParts.join(" ").trim();
 
-  if (head === "edit" || head === "plan") {
-    await editActivePlan(pi, ctx);
+  const subHandler = SUBCOMMAND_HANDLERS[head];
+  if (subHandler) {
+    const out = await subHandler(pi, ctx, rest);
     refreshStatus(ctx);
+    if (typeof out === "string") notify(ctx, out);
     return;
   }
-  if (head === "list" || head === "ls" || head === "quests") {
-    const rows = await listQuests(ctx);
-    try { ctx.ui.setWidget("quest", undefined); } catch { /* best effort */ }
-    refreshStatus(ctx);
-    notify(ctx, rows.join("\n"));
-    return;
-  }
-  if (head === "pick" || head === "switch") {
-    const out = await pickQuest(pi, ctx);
-    refreshStatus(ctx);
-    notify(ctx, out);
-    return;
-  }
-  if (head === "new" || head === "chain" || head === "next") {
-    const out = await startNewQuestInSlot(pi, ctx, rest);
-    refreshStatus(ctx);
-    notify(ctx, out);
-    return;
-  }
-  if (head === "pause" || head === "off" || head === "disable") {
-    const out = await toggleQuestDisabled(pi, ctx, true);
-    refreshStatus(ctx);
-    notify(ctx, out);
-    return;
-  }
-  if (head === "on" || head === "enable") {
-    const out = await toggleQuestDisabled(pi, ctx, false);
-    refreshStatus(ctx);
-    notify(ctx, out);
-    return;
-  }
-  if (head === "toggle") {
-    const out = await toggleQuestDisabled(pi, ctx, !getState().disabled);
-    refreshStatus(ctx);
-    notify(ctx, out);
-    return;
-  }
-  if (head === "cancel" || head === "cancel-review") {
-    const msg = cancelActiveReview(ctx);
-    refreshStatus(ctx);
-    notify(ctx, msg);
-    return;
-  }
-  if (head === "del" || head === "delete" || head === "drop" || head === "kill") {
-    const out = await killQuest(pi, ctx, rest);
-    refreshStatus(ctx);
-    notify(ctx, out);
-    return;
-  }
+
   if (await handleInspectSubcommand(pi, ctx, head)) return;
   if (await runContinuitySubcommand(pi, ctx, trimmed)) return;
 

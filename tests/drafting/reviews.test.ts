@@ -802,3 +802,65 @@ Deno.test("a stale verdict leaves a genuinely newer in-flight review alone", asy
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("bootDraftReview does not fast-fail a standard 2-requirement draft when step count elevates difficulty, and fast-fail clears inFlight", async () => {
+  const d = await draftFailureSetup("elev01" as Qid);
+  const bus = retryBus();
+  // 2 requirements + 12 steps would recalibrate to complex (which needs 4 requirements),
+  // but initial standard draft has 2 requirements and meets standard thresholds.
+  const manyStepsDoc = `## Requirements
+- R1: Update src/a.ts:1
+- R2: Update src/b.ts:1
+
+## Evidence
+- src/a.ts:1
+- src/b.ts:1
+- src/c.ts:1
+- src/d.ts:1
+
+## Implementation Plan
+1. Step 1 via src/a.ts:1 for R1
+2. Step 2 via src/b.ts:1 for R2
+3. Step 3 via src/c.ts:1
+4. Step 4 via src/d.ts:1
+5. Step 5 via src/a.ts:1
+6. Step 6 via src/b.ts:1
+7. Step 7 via src/c.ts:1
+8. Step 8 via src/d.ts:1
+9. Step 9 via src/a.ts:1
+10. Step 10 via src/b.ts:1
+11. Step 11 via src/c.ts:1
+12. Step 12: run make test
+`;
+  await writeFile(d.file, manyStepsDoc, "utf8");
+  const target = hashContent(manyStepsDoc);
+  updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: target, planAuthored: true } });
+  try {
+    const booted = bootDraftReview(bus.pi, fakeCtx(d.cwd), target, { ...DEFAULT_CONFIG, approvalGate: false });
+    await waitForRequests(bus.emitted, 1);
+    check(requests(bus.emitted).length === 1, "reviewer subagent launched instead of 0ms fast-failing on complex threshold jump");
+    bus.feed({
+      requestId: requests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE\nSUPPORTING FINDINGS:\n- solid" },
+    });
+    await booted;
+    check(getState().phase === "implementing", "promoted to implementing after reviewer PASS");
+  } finally {
+    cancelReview(d.qid);
+    replaceState(IDLE_STATE);
+  }
+
+  // Also verify that a genuine below-bar fast-fail clears inFlight when subagent tool is present
+  const b = await belowBarSetup("barf02" as Qid);
+  trackReview("barf02" as Qid, b.target, () => {});
+  check(hasInFlight("barf02" as Qid) === true, "tracked before fast-fail");
+  try {
+    await bootDraftReview(bus.pi, fakeCtx(b.cwd), b.target, DEFAULT_CONFIG);
+    check(hasInFlight("barf02" as Qid) === false, "inFlight cleared after fast-fail when subagent runner is configured");
+  } finally {
+    cancelReview("barf02" as Qid);
+    replaceState(IDLE_STATE);
+  }
+});
+

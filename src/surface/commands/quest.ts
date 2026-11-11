@@ -15,6 +15,8 @@ import { ensureQuestWorktreeAttached, findPrimaryRepoRoot } from "../../utils/gi
 import { cancelReview, hasInFlight } from "../../review/tracker.ts";
 import { clearPlanRevisionRetries } from "../../implementing/plan-revision.ts";
 import { clearDraftReviewRetry } from "../../drafting/reviews.ts";
+import { openDetectedQuest } from "../../drafting/detect.ts";
+import { extractPriorConversationObjective } from "../../durability/transcript.ts";
 import { readDraftHeading, readDraftObjective } from "../../durability/quest-doc-io.ts";
 
 export { listDraftQids, readDraftHeading, readDraftObjective };
@@ -24,7 +26,8 @@ export const QUEST_COMMAND_HELP: ReadonlyArray<{ cmd: string; desc: string }> = 
   { cmd: "/quest list", desc: "List active & draft quests with triage info" },
   { cmd: "/quest <name|qid>", desc: "Switch to or resume a quest (/quest pick to choose)" },
   { cmd: "/quest new [goal]", desc: "Start a new quest while keeping the current scratch slot" },
-  { cmd: "/quest pause | on", desc: "Pause or resume pi-quest for this session (Alt+Q to toggle)" },
+  { cmd: "/quest finish [--keep-slot]", desc: "Finish/integrate active quest or retained scratch slot" },
+  { cmd: "/quest pause | on [goal]", desc: "Pause or resume pi-quest for this session (Alt+Q to toggle)" },
   { cmd: "/quest cancel", desc: "Cancel in-flight review and unblock tools" },
   { cmd: "/quest del [qid|flags]", desc: "Delete quest (--keep-slot|-s) or prune drafts (--all|--stale|...)" },
   { cmd: "/quest handoff [qid]", desc: "Write & display a handoff document" },
@@ -107,7 +110,7 @@ export async function reattachWorktreeIfNeeded(pi: Pi, ctx: PiCtx, state: QuestS
   } catch { /* best-effort reattach */ }
 }
 
-export async function toggleQuestDisabled(pi: Pi, ctx: PiCtx, disabled: boolean): Promise<string> {
+export async function toggleQuestDisabled(pi: Pi, ctx: PiCtx, disabled: boolean, rawObjective = ""): Promise<string> {
   const prev = getState();
   if (disabled && prev.qid && hasInFlight(prev.qid)) {
     cancelReview(prev.qid);
@@ -117,6 +120,13 @@ export async function toggleQuestDisabled(pi: Pi, ctx: PiCtx, disabled: boolean)
   const next = setQuestDisabled(disabled);
   if (!disabled && next.qid) {
     await reattachWorktreeIfNeeded(pi, ctx, getState());
+  }
+  if (!disabled && !next.qid && rawObjective.trim() !== "") {
+    const cfg = await readQuestConfig(ctx.cwd);
+    const goal = extractPriorConversationObjective(ctx, rawObjective.trim()) || rawObjective.trim();
+    await openDetectedQuest(pi, ctx, goal, cfg, "/quest on");
+    const started = getState();
+    return `pi-quest enabled. Started quest ${started.qid} (${started.phase}): "${started.objective}".`;
   }
   emitNow(pi);
   if (disabled) {
@@ -146,8 +156,9 @@ export async function resumeQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<s
   if (lower === "disable" || lower === "off" || lower === "pause") {
     return await toggleQuestDisabled(pi, ctx, true);
   }
-  if (lower === "enable" || lower === "on") {
-    return await toggleQuestDisabled(pi, ctx, false);
+  if (lower === "enable" || lower === "on" || lower.startsWith("on ") || lower.startsWith("enable ")) {
+    const goal = arg.replace(/^(?:on|enable)\b\s*/i, "").trim();
+    return await toggleQuestDisabled(pi, ctx, false, goal);
   }
   if (lower === "toggle") {
     return await toggleQuestDisabled(pi, ctx, !getState().disabled);

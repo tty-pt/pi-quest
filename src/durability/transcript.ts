@@ -226,3 +226,62 @@ export function extractRecentConversationContext(
     return "";
   }
 }
+
+const REFERENTIAL_ACTIVATION_RE =
+  /^(?:go(?:\s+for\s+it|\s+ahead)?|do\s+it|let'?s\s+(?:do\s+it|go|build\s+it)|proceed|ship\s+it|implement(?:\s+(?:it|this|that|the\s+plan))?|execute(?:\s+(?:it|this|that|the\s+plan))?|start(?:\s+quest)?|for\s+it|yes|ok|okay)[.!?\s]*$/i;
+
+export function isReferentialActivationObjective(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed === "") return true;
+  return REFERENTIAL_ACTIVATION_RE.test(trimmed);
+}
+
+export function extractPriorConversationObjective(
+  ctx: PiCtx,
+  rawObjective = "",
+): string {
+  const trimmed = rawObjective.trim();
+  const referential = isReferentialActivationObjective(trimmed);
+  if (!referential && trimmed.length >= 25) return trimmed;
+  try {
+    if (!ctx || !ctx.sessionManager || typeof ctx.sessionManager.getEntries !== "function") {
+      return trimmed;
+    }
+    const entries = ctx.sessionManager.getEntries();
+    if (!Array.isArray(entries) || entries.length === 0) return trimmed;
+    const userMessages: string[] = [];
+    let lastAssistant = "";
+    for (let i = entries.length - 1; i >= 0 && userMessages.length < 4; i--) {
+      const entry = entries[i];
+      if (!entry) continue;
+      const text = messageText(entry["data"] ?? entry);
+      if (!text) continue;
+      if (text.startsWith("[assistant] ") && lastAssistant === "") {
+        lastAssistant = text.slice("[assistant] ".length).trim();
+      } else if (text.startsWith("[user] ")) {
+        const body = text.slice("[user] ".length).trim();
+        if (
+          body.length > 0 &&
+          !body.startsWith("/") &&
+          body !== trimmed &&
+          !isReferentialActivationObjective(body) &&
+          !REFERENTIAL_ACTIVATION_RE.test(body.replace(/^(?:quest|fix|feat|refactor|chore|@quest)[:\-\s]+/i, "").trim())
+        ) {
+          userMessages.unshift(body);
+        }
+      }
+    }
+    if (userMessages.length === 0 && lastAssistant === "") return trimmed;
+    const primaryUserGoal = userMessages[userMessages.length - 1] ?? "";
+    if (!referential && trimmed !== "") {
+      return primaryUserGoal ? `${trimmed} — Context: ${primaryUserGoal.slice(0, 300)}` : trimmed;
+    }
+    if (primaryUserGoal !== "") {
+      return primaryUserGoal.slice(0, 500);
+    }
+    const firstLine = lastAssistant.split("\n").find((l) => l.trim().length > 10)?.trim() ?? "";
+    return firstLine.slice(0, 400) || trimmed;
+  } catch {
+    return trimmed;
+  }
+}
