@@ -127,7 +127,13 @@ export async function inspectScratchSlots(
     const isAlive = lease ? isPidAlive(lease.pid) : false;
     const leaseDuration = lease?.leasedAt ? formatDuration(Date.now() - lease.leasedAt) : null;
     const assignedQid = lease?.leasedToQid ?? null;
-    const isSessionActive = Boolean(assignedQid && activeState.qid === assignedQid);
+    const isSessionActive = Boolean(
+      assignedQid && (
+        activeState.qid === assignedQid ||
+        activeState.parentQid === assignedQid ||
+        (activeState.questStack ?? []).some((f) => f.qid === assignedQid)
+      ),
+    );
 
     const phase = isSessionActive ? activeState.phase : null;
     const activeReview = isSessionActive && activeState.activeReview ? activeState.activeReview.kind : null;

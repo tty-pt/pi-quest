@@ -90,14 +90,21 @@ export async function reattachWorktreeIfNeeded(pi: Pi, ctx: PiCtx, state: QuestS
     const cfg = await readQuestConfig(ctx.cwd);
     if ((cfg.gitWorkflow?.worktreeMode ?? "auto") === "off") return;
     const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
+    const ownerQids = [
+      ...(state.questStack ?? []).map((f) => f.qid),
+      ...(state.parentQid ? [state.parentQid] : []),
+      state.qid,
+    ];
     const res = await ensureQuestWorktreeAttached(
       primaryRoot,
       state.qid,
       state.baseCommit ?? null,
-      state.worktreePath,
-      state.worktreeBranch,
+      state.worktreePath ?? state.contract?.worktreePath,
+      state.worktreeBranch ?? state.contract?.worktreeBranch,
       cfg.gitWorkflow,
       pi,
+      undefined,
+      ownerQids,
     );
     if (res.ok && res.slotPath && res.slotBranch) {
       updateState((s) => ({

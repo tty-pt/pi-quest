@@ -57,7 +57,8 @@ export async function createChildQuest(
   const autoWt = config.gitWorkflow?.worktreeMode === "auto" || config.gitWorkflow?.worktreeMode === "pool";
   const parentWorktreePath = parent.worktreePath ?? parent.contract?.worktreePath;
   const parentWorktreeBranch = parent.worktreeBranch ?? parent.contract?.worktreeBranch;
-  const inheritParentWorktree = Boolean(parentWorktreePath && contractParams?.worktree !== true && !worktreePath);
+  const rootOwnerQid = (parent.questStack && parent.questStack.length > 0 ? parent.questStack[0].qid : undefined) ?? parent.parentQid ?? parent.qid;
+  const inheritParentWorktree = Boolean(parentWorktreePath && !worktreePath);
 
   if (inheritParentWorktree) {
     worktreePath = parentWorktreePath;
@@ -67,10 +68,11 @@ export async function createChildQuest(
       notify: (msg, lvl) => ctx.ui?.notify?.(msg, lvl),
       setStatus: (k, txt) => ctx.ui?.setStatus?.(k, txt),
     };
+    const leaseOwnerQid = !parentWorktreePath && contractParams?.worktree !== true ? rootOwnerQid : childQid;
     const poolRes = await acquireWarmSlot(
       primaryRoot,
-      childQid,
-      null,
+      leaseOwnerQid,
+      parent.baseCommit ?? null,
       config.gitWorkflow,
       pi,
       notifier,
@@ -78,12 +80,20 @@ export async function createChildQuest(
     if (poolRes.ok && poolRes.slotPath && poolRes.slotBranch) {
       worktreePath = poolRes.slotPath;
       worktreeBranch = poolRes.slotBranch;
+      if (leaseOwnerQid === rootOwnerQid) {
+        updateState((s) => ({
+          ...s,
+          worktreePath: poolRes.slotPath,
+          worktreeBranch: poolRes.slotBranch,
+          snapshotPending: true,
+        }));
+      }
       if (config.gitWorkflow?.milestoneCommits) {
         await commitMilestone(worktreePath, {
           qid: childQid,
           type: "start",
           label: goal.trim(),
-        }, pi);
+        }, pi, worktreeBranch);
       }
     } else {
       if (contractParams?.worktree === true) {

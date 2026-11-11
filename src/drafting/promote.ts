@@ -41,6 +41,7 @@ async function maybeProvisionWorktree(
   pi: Pi,
   cwd: string,
   stateQid: Qid,
+  leaseOwnerQid: Qid,
   objective: string,
   baseCommit?: string | null,
   notifier?: PoolProgressNotifier,
@@ -55,7 +56,7 @@ async function maybeProvisionWorktree(
   // Pool mode or auto mode: lease an idle warm scratch workspace slot (< 100ms)
   const poolRes = await acquireWarmSlot(
     primaryRoot,
-    stateQid,
+    leaseOwnerQid,
     baseCommit ?? null,
     config.gitWorkflow,
     pi,
@@ -70,10 +71,25 @@ async function maybeProvisionWorktree(
 
   const wtPath = poolRes.slotPath;
   const wtBranch = poolRes.slotBranch;
-  updateState((s) => ({ ...s, worktreePath: wtPath, worktreeBranch: wtBranch, snapshotPending: true }));
+  updateState((s) => ({
+    ...s,
+    worktreePath: wtPath,
+    worktreeBranch: wtBranch,
+    contract: s.contract ? { ...s.contract, worktreePath: s.contract.worktreePath ?? wtPath, worktreeBranch: s.contract.worktreeBranch ?? wtBranch } : s.contract,
+    questStack: s.questStack?.map((f) => ({
+      ...f,
+      contract: f.contract ? { ...f.contract, worktreePath: f.contract.worktreePath ?? wtPath, worktreeBranch: f.contract.worktreeBranch ?? wtBranch } : f.contract,
+      savedState: {
+        ...f.savedState,
+        worktreePath: f.savedState.worktreePath ?? wtPath,
+        worktreeBranch: f.savedState.worktreeBranch ?? wtBranch,
+      },
+    })),
+    snapshotPending: true,
+  }));
   syncHarnessCwd(wtPath, pi);
   if (config.gitWorkflow?.milestoneCommits) {
-    await commitMilestone(wtPath, { qid: stateQid, type: "start", label: objective }, pi);
+    await commitMilestone(wtPath, { qid: stateQid, type: "start", label: objective }, pi, wtBranch);
   }
   return {
     ok: true,
@@ -87,12 +103,13 @@ async function attachRetainedWorktree(
   pi: Pi,
   cwd: string,
   stateQid: Qid,
+  leaseOwnerQid: Qid,
   objective: string,
   wtPath: string,
   wtBranch?: string,
 ): Promise<string> {
-  const branch = wtBranch || `quest/${stateQid}`;
-  retainSlotLease(wtPath, branch, stateQid);
+  const branch = wtBranch || `quest/${leaseOwnerQid}`;
+  retainSlotLease(wtPath, branch, leaseOwnerQid);
   syncHarnessCwd(wtPath, pi);
   const cfg = await readQuestConfig(cwd);
   if (cfg.gitWorkflow?.milestoneCommits) {
@@ -147,9 +164,10 @@ export async function promoteAfterPass(
     setStatus: (k, txt) => ctx.ui?.setStatus?.(k, txt),
   };
 
+  const rootOwnerQid = ((state.questStack && state.questStack.length > 0 ? state.questStack[0].qid : undefined) ?? state.parentQid ?? stateQid) as Qid;
   let wtNotice = "";
   if (!state.worktreePath) {
-    const provRes = await maybeProvisionWorktree(pi, ctx.cwd, stateQid, state.objective, state.baseCommit, notifier);
+    const provRes = await maybeProvisionWorktree(pi, ctx.cwd, stateQid, rootOwnerQid, state.objective, state.baseCommit, notifier);
     if (!provRes.ok) {
       const errMsg = `Cannot promote quest ${stateQid} to implementing: failed to acquire scratch worktree (${provRes.error}). Promotion aborted to protect primary workspace.`;
       notifier.notify?.(`[pi-quest] ${errMsg}`, "error");
@@ -157,7 +175,7 @@ export async function promoteAfterPass(
     }
     wtNotice = provRes.notice ?? "";
   } else {
-    wtNotice = await attachRetainedWorktree(pi, ctx.cwd, stateQid, state.objective, state.worktreePath, state.worktreeBranch);
+    wtNotice = await attachRetainedWorktree(pi, ctx.cwd, stateQid, rootOwnerQid, state.objective, state.worktreePath, state.worktreeBranch);
   }
 
   dispatch({ type: "PlanPromoted", approvedBy: by, rtm });

@@ -388,3 +388,66 @@ Deno.test("pool: auditAndReclaimPool preserves live external PIDs and auto-rescu
     try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
+
+Deno.test("pool: ensureQuestWorktreeAttached reuses parent slot for active sub-quest without allocating a new slot", async () => {
+  const { ensureQuestWorktreeAttached } = await import("../../src/utils/git/pool.ts");
+  const root = mkdtempSync(join(tmpdir(), "pi-quest-subattach-"));
+  const poolDir = join(root, ".pi", "scratch");
+  const slot1 = join(poolDir, "slot-1");
+  const slot2 = join(poolDir, "slot-2");
+  mkdirSync(join(slot1, ".git"), { recursive: true });
+  mkdirSync(join(slot2, ".git"), { recursive: true });
+
+  writeSlotLease(slot1, {
+    slotId: "slot-1",
+    status: "leased",
+    leasedToQid: "1xROOT",
+    leasedAt: Date.now(),
+    pid: process.pid,
+    branch: "quest/1xROOT",
+    baseCommit: "HEAD",
+  });
+  writeSlotLease(slot2, {
+    slotId: "slot-2",
+    status: "idle",
+    leasedToQid: null,
+    leasedAt: null,
+    pid: null,
+    branch: null,
+    baseCommit: null,
+  });
+
+  try {
+    const commands: Array<{ cmd: string; args: string[]; cwd: string }> = [];
+    const pi: Pi = {
+      exec: async (cmd: string, args: string[], opts?: { cwd?: string }) => {
+        commands.push({ cmd, args, cwd: opts?.cwd ?? "" });
+        if (cmd === "git" && args[0] === "symbolic-ref" && opts?.cwd === slot1) {
+          return { code: 0, stdout: "quest/1xROOT\n" };
+        }
+        return { code: 0, stdout: "" };
+      },
+    } as unknown as Pi;
+
+    const res = await ensureQuestWorktreeAttached(
+      root,
+      "1xSUB1",
+      "HEAD",
+      slot1,
+      "quest/1xROOT",
+      DEFAULT_GIT_WORKFLOW_CONFIG,
+      pi,
+      undefined,
+      ["1xROOT", "1xSUB1"],
+    );
+
+    check(res.ok === true, "reattachment succeeded");
+    check(res.slotPath === slot1, "kept parent slot-1 instead of allocating slot-2");
+    check(res.slotBranch === "quest/1xROOT", "kept parent branch quest/1xROOT");
+    check(readSlotLease(slot1)?.leasedToQid === "1xROOT", "slot-1 lease remains bound to root quest 1xROOT");
+    check(readSlotLease(slot2)?.status === "idle", "slot-2 remains untouched and idle");
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+

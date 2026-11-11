@@ -53,6 +53,7 @@ export default function install(pi: Pi): void {
           const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
           const activeQids = new Set<string>();
           if (curr.qid) activeQids.add(curr.qid);
+          if (curr.parentQid) activeQids.add(curr.parentQid);
           for (const f of curr.questStack ?? []) activeQids.add(f.qid);
           await auditAndReclaimPool(primaryRoot, cfg.gitWorkflow?.worktreePoolDir || ".pi/scratch", activeQids, pi);
 
@@ -60,14 +61,21 @@ export default function install(pi: Pi): void {
           if (curr.qid && !curr.disabled && (curr.phase === "implementing" || curr.phase === "validating")) {
             const mode = cfg.gitWorkflow?.worktreeMode ?? "auto";
             if (mode !== "off") {
+              const ownerQids = [
+                ...(curr.questStack ?? []).map((f) => f.qid),
+                ...(curr.parentQid ? [curr.parentQid] : []),
+                curr.qid,
+              ];
               const res = await ensureQuestWorktreeAttached(
                 primaryRoot,
                 curr.qid,
                 curr.baseCommit ?? null,
-                curr.worktreePath,
-                curr.worktreeBranch,
+                curr.worktreePath ?? curr.contract?.worktreePath,
+                curr.worktreeBranch ?? curr.contract?.worktreeBranch,
                 cfg.gitWorkflow,
                 pi,
+                undefined,
+                ownerQids,
               );
               if (res.ok && res.slotPath && res.slotBranch && (res.slotPath !== curr.worktreePath || res.slotBranch !== curr.worktreeBranch)) {
                 updateState((s) => ({

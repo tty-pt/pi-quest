@@ -312,17 +312,23 @@ export async function ensureQuestWorktreeAttached(
   config: GitWorkflowConfig,
   pi?: Pi,
   notifier?: PoolProgressNotifier,
+  ownerQids?: ReadonlyArray<string>,
 ): Promise<PoolAcquireResult> {
+  const validOwners = new Set<string>([qid, ...(ownerQids ?? []).filter(Boolean)]);
+  const rootOwnerQid = (ownerQids && ownerQids.length > 0 ? ownerQids[0] : undefined) || qid;
   if (currentWorktreePath && existsSync(join(currentWorktreePath, ".git"))) {
     const lease = readSlotLease(currentWorktreePath);
-    const expectedBranch = currentWorktreeBranch || `${config.featureBranchPrefix || "quest/"}${qid}`;
-    if (!lease || (lease.status === "leased" && lease.leasedToQid === qid)) {
+    const expectedBranch = currentWorktreeBranch || `${config.featureBranchPrefix || "quest/"}${rootOwnerQid}`;
+    if (!lease || (lease.status === "leased" && lease.leasedToQid !== null && validOwners.has(lease.leasedToQid))) {
       const refRes = await runGit(["symbolic-ref", "--short", "HEAD"], currentWorktreePath, pi);
       if (refRes.exitCode === 0 && refRes.stdout.trim() === expectedBranch) {
-        if (lease && lease.pid !== process.pid) writeSlotLease(currentWorktreePath, { ...lease, pid: process.pid });
+        if (lease && (lease.pid !== process.pid || lease.leasedToQid !== rootOwnerQid)) {
+          writeSlotLease(currentWorktreePath, { ...lease, leasedToQid: rootOwnerQid, pid: process.pid });
+        }
         return { ok: true, slotId: lease?.slotId, slotPath: currentWorktreePath, slotBranch: expectedBranch };
       }
     }
   }
-  return await acquireWarmSlot(primaryRoot, qid, baseCommit ?? null, config, pi, notifier);
+  return await acquireWarmSlot(primaryRoot, rootOwnerQid, baseCommit ?? null, config, pi, notifier);
 }
+

@@ -25,6 +25,7 @@ import {
   synthesizeSquashCommitMessage,
   syncWorktreeSubmodulesToPrimary,
   releaseWarmSlot,
+  retainSlotLease,
   syncHarnessCwd,
   runGit,
   commitMilestone,
@@ -83,7 +84,10 @@ async function cleanupWorktree(
     const parentState = parent && "savedState" in parent ? parent.savedState : parent;
     const parentWtPath = parentState?.worktreePath ?? parentState?.contract?.worktreePath;
     if (parentWtPath && parentWtPath === wtPath) {
-      // Inherited worktree: leave intact for parent and subsequent subquests
+      // Inherited worktree: ensure lease remains bound to root/parent quest and leave intact
+      const rootOwnerQid = (state.questStack && state.questStack.length > 0 ? state.questStack[0].qid : undefined) ?? state.parentQid;
+      const parentWtBranch = parentState?.worktreeBranch ?? parentState?.contract?.worktreeBranch ?? wtBranch;
+      retainSlotLease(wtPath, parentWtBranch ?? null, rootOwnerQid);
       return;
     }
   }

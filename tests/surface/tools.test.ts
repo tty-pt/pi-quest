@@ -214,7 +214,7 @@ Deno.test("subquest inherits parent worktreePath and worktreeBranch without crea
   replaceState(parent);
   const gitCommands: string[][] = [];
   const pi = fakePi();
-  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+  (pi as unknown as { exec: unknown }).exec = async (_cmd: string, args: string[]) => {
     gitCommands.push(args);
     return { code: 0, stdout: "" };
   };
@@ -223,6 +223,12 @@ Deno.test("subquest inherits parent worktreePath and worktreeBranch without crea
   check(done.worktreePath === "/repo/.pi/worktrees/par001", "inherited parent worktreePath");
   check(done.worktreeBranch === "quest/par001", "inherited parent worktreeBranch");
   check(!gitCommands.some((a) => a.includes("worktree") && a.includes("add")), "did NOT execute git worktree add");
+
+  // Even when worktree: true is passed, if parent already has a worktree slot, child shares it
+  const doneWithFlag = await createChildQuest(pi, ctx, "child task 2", "child 2", false, { worktree: true });
+  check(doneWithFlag.worktreePath === "/repo/.pi/worktrees/par001", "inherited parent worktreePath even with worktree: true");
+  check(doneWithFlag.worktreeBranch === "quest/par001", "inherited parent worktreeBranch even with worktree: true");
+  check(!gitCommands.some((a) => a.includes("worktree") && a.includes("add")), "still did NOT execute git worktree add");
   replaceState(IDLE_STATE);
 });
 
