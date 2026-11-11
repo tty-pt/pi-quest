@@ -255,3 +255,50 @@ Deno.test("a message that merely contains a steering word is still a directive",
   }
 });
 
+
+Deno.test("triage serves handoff meta-requests without recording them", () => {
+  const t = triageInQuestRequest("abc123", "handoff", "give me a handoff prompt");
+  check(t !== null && t.action === "handoff" && t.record === false, "handoff is not recorded");
+  check(t!.steer.includes("NOT a requirement"), "steer says why");
+});
+
+Deno.test("a handoff request mid-quest writes a handoff and never becomes R#/amendment/refinement", async () => {
+  const ask = "I'll compact but you will forget your most important thoughts. Help me out by giving me a handoff prompt.";
+  const restore = stubIntentEmbeddings({ [ask]: "handoff" });
+  const h = await implementingHarness("1xHand", JUDGE_ON);
+  try {
+    await h.handler({ text: ask }, h.ctx);
+    await h.handler({ text: ask }, h.ctx);
+    const after = getState();
+    check(after.phase === "implementing", "stays implementing");
+    check(after.amendments.length === 0 && after.refinements.length === 0, "nothing recorded");
+    const doc = await Deno.readTextFile(join(h.cwd, draftPath("1xHand" as Qid)));
+    check(!doc.includes("[User Directive]"), "no requirement appended to the quest doc");
+    const handoffs = [...Deno.readDirSync(join(h.cwd, ".pi", "quest", "handoffs"))];
+    check(handoffs.length >= 1, "baseline handoff written");
+    const steer = JSON.stringify(h.pi.sent);
+    check(steer.includes("quest_handoff") && steer.includes(".pi/quest/handoffs/"), "agent steered to enrich it");
+  } finally {
+    restore();
+    replaceState(IDLE_STATE);
+    rmSync(h.cwd, { recursive: true, force: true });
+  }
+});
+
+Deno.test("negative and style constraints never award themselves a subquest", () => {
+  const directives = [
+    "avoid magic constants, please",
+    "Please avoid magic constants in the rendering loop",
+    "don't use raw pointers here",
+    "never allocate on the stack in audio.c",
+    "stop doing regex string replacements",
+    "remember to avoid global variables",
+    "naming convention: use snake_case for private helpers",
+  ];
+
+  for (const text of directives) {
+    const t = triageInQuestRequest("1xTest", "subquest_now", text);
+    check(t !== null, `triaged "${text}"`);
+    check(t!.action === "amend_requirement", `"${text}" routed to amend_requirement, not preempt_subquest`);
+  }
+});

@@ -1,8 +1,10 @@
 import { check } from "./check.ts";
 import { DEFAULT_CONFIG, loadConfig, readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../src/config.ts";
+import { formatTargetedActionGuidance } from "../src/durability/injection.ts";
 
 Deno.test("config defaults match the spec", () => {
-  check(DEFAULT_CONFIG.askTimeoutMs === 60000, "one minute default");
+  check(DEFAULT_CONFIG.enabled === false, "disabled by default");
+  check(DEFAULT_CONFIG.askTimeoutMs === 300000, "5 minute default");
   check(DEFAULT_CONFIG.depthCap === 3, "depth cap 3");
   check(DEFAULT_CONFIG.draftThresholds.requirements === 2, "2 requirements");
   check(DEFAULT_CONFIG.draftThresholds.evidence === 7, "7 evidence");
@@ -14,7 +16,13 @@ Deno.test("config defaults match the spec", () => {
 });
 
 Deno.test("config loads partial settings over defaults", () => {
-  check(loadConfig(undefined).askTimeoutMs === 60000, "missing settings default");
+  check(loadConfig(undefined).enabled === false, "missing settings default to disabled");
+  check(loadConfig({}).enabled === false, "empty settings default to disabled");
+  check(loadConfig({ enabled: true }).enabled === true, "enabled: true honored");
+  check(loadConfig({ enabled: false }).enabled === false, "enabled: false honored");
+  check(loadConfig({ disabled: false }).enabled === true, "disabled: false enables");
+  check(loadConfig({ disabled: true }).enabled === false, "disabled: true disables");
+  check(loadConfig(undefined).askTimeoutMs === 300000, "missing settings default");
   check(loadConfig(null).depthCap === 3, "null defaults");
   check(loadConfig(42).depthCap === 3, "non-object defaults");
   const partial = loadConfig({ askTimeoutMs: 5000, draftThresholds: { requirements: 1 } });
@@ -33,7 +41,7 @@ Deno.test("config loads partial settings over defaults", () => {
 Deno.test("config reads the settings file with fallback", async () => {
   const dir = await Deno.makeTempDir();
   const missing = await readQuestConfig(dir);
-  check(missing.askTimeoutMs === 60000, "missing file defaults");
+  check(missing.askTimeoutMs === 300000, "missing file defaults");
   await Deno.mkdir(`${dir}/.pi`, { recursive: true });
   await Deno.writeTextFile(
     `${dir}/.pi/settings.json`,
@@ -156,4 +164,43 @@ Deno.test("intent and embedding settings are configurable and validated", () => 
   check(bad.embedMode === "auto" || Deno.env.get("PI_QUEST_EMBED_MODE") === "off", "unknown embedMode never means off by itself");
   check(bad.intentMinMargin === 0.075 && bad.intentMinSimilarity === 0.6, "out-of-range thresholds fall back");
   check(loadConfig({ questMinMargin: 9 }).questMinMargin === 0.05, "out-of-range questMinMargin falls back");
+});
+
+Deno.test("actionMatrix is parsed and formatted into targeted guidance", () => {
+  const cfg = loadConfig({
+    actionMatrix: [
+      {
+        scope: "isomorphic-ux",
+        pattern: "^mods/([^/]+)/ux/",
+        buildCommands: ["make site-wasm", "make -C mods/$1"],
+        testCommands: ["sh scripts/check-module-boundaries.sh", "make test-mod MOD=$1"],
+      },
+      {
+        scope: "server-module",
+        pattern: "^mods/([^/]+)/",
+        buildCommands: ["make -C mods/$1"],
+        testCommands: ["make test-mod MOD=$1"],
+      },
+      {
+        pattern: "invalid(regex[",
+      },
+    ],
+  });
+
+  check(cfg.actionMatrix.length === 2, "2 valid action rules loaded, invalid regex ignored");
+  check(cfg.actionMatrix[0].scope === "isomorphic-ux", "first rule scope matches");
+  check(cfg.actionMatrix[0].buildCommands?.[0] === "make site-wasm", "build command loaded");
+
+  const guidance = formatTargetedActionGuidance(
+    ["mods/song/ux/song.c"],
+    cfg.actionMatrix,
+  );
+  check(guidance !== null, "guidance generated for matched file");
+  check(Boolean(guidance?.includes("Scope: isomorphic-ux")), "scope included");
+  check(Boolean(guidance?.includes("Rebuild: make site-wasm && make -C mods/song")), "captures substituted in build");
+  check(Boolean(guidance?.includes("Verify: sh scripts/check-module-boundaries.sh && make test-mod MOD=song")), "captures substituted in test");
+  check(Boolean(guidance?.includes("Do NOT run full repository test suite")), "protective directive included");
+
+  check(formatTargetedActionGuidance([], cfg.actionMatrix) === null, "no guidance for empty files");
+  check(formatTargetedActionGuidance(["README.md"], cfg.actionMatrix) === null, "no guidance for unmatched file");
 });

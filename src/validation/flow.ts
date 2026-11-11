@@ -1,30 +1,44 @@
-// HIGH_LEVEL: #validation — validator archives on PASS, demotes on FAIL.
-// HIGH_LEVEL: #validator communication — plan, snapshot, amendments, evidence, criteria.
-// SPEC: B1.5 (completion + slim archive).
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { getState, updateState } from "../app/store";
-import { emitNow, sendSteer, sendWake } from "../app/interpreter";
-import type { QuestState } from "../domain/quest";
-import { recordReviewResult, difficultyLevel } from "../domain/quest";
-import { demoteToDrafting, demoteToImplementing } from "../domain/transitions";
-import type { Qid } from "../domain/qid";
-import { draftPath } from "../domain/paths";
+// HIGH_LEVEL: #validation — acceptance review of the completed quest.
+// HIGH_LEVEL: #independent review contexts — fresh context per run.
+// SPEC: B1.5 (validation flow), B1.7 (conclude), B2.2 (confirm fallback).
 import type { Pi, PiCtx } from "../hooks/events";
-import { buildReviewPrompt, type ReviewMaterial } from "../review/prompts";
-import { isReviewerAvailable } from "../review/runner";
+import { dispatch, getState, updateState } from "../app/store";
+import { emitNow, sendSteer, sendWake } from "../app/interpreter";
+import type { Qid } from "../domain/qid";
+import {
+  demoteToDrafting,
+  demoteToImplementing,
+} from "../domain/transitions";
+import type { QuestState, VerificationReceipt } from "../domain/quest";
+import { recordReviewResult } from "../domain/quest";
+import { draftFilePath } from "../files";
+import { buildReviewPrompt } from "../review/prompts";
 import { implementationFingerprint, runIsolatedReview } from "../review/flow";
 import type { ParsedReview } from "../review/verdicts";
-import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel } from "../config";
+import { readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
 import { withEffectivePolicy, resolveActiveModel, calculateReviewNeed, resolveAutonomyLevel } from "../policy/effective";
-import { cancelReview, hasInFlight } from "../review/tracker";
+import { hasInFlight, cancelReview } from "../review/tracker";
+import { interpretUserTurn } from "../judge/intent-classifier";
 import { archiveActiveQuest } from "../surface/tools/archive";
 import { setDocStatus } from "../quest-doc";
-import { citeLocations, deliverableBody, parseDraftSections } from "../drafting/plan-text";
-import { captureUnifiedDiff, MAX_DIFF_CHARS } from "../utils/git";
+import { captureUnifiedDiff, MAX_DIFF_CHARS, findPrimaryRepoRoot, runTestInPrimaryWorkspace, execTestShell } from "../utils/git";
+import { getLatestTestExecution, recordTestExecution } from "./evidence-gate";
+import {
+  approvedPlan,
+  buildConclusionSummary,
+  deliveredAnalysisExcerpt,
+  formatRevisionHistory,
+  validationBrief,
+} from "./brief";
 
-export { MAX_DIFF_CHARS };
+export {
+  MAX_DIFF_CHARS,
+  approvedPlan,
+  buildConclusionSummary,
+  deliveredAnalysisExcerpt,
+  formatRevisionHistory,
+  validationBrief,
+};
 
 export async function captureGitDiff(
   ctx: PiCtx,
@@ -35,22 +49,8 @@ export async function captureGitDiff(
   const res = await captureUnifiedDiff(ctx, { pi, touchedFiles, baseCommit, maxChars: MAX_DIFF_CHARS });
   return res.diff;
 }
-import { extractQuestTranscript } from "../durability/transcript";
-import { getLatestTestExecution } from "./evidence-gate";
-import { interpretUserTurn } from "../domain/intent";
-
-
-async function approvedPlan(ctx: PiCtx, state: QuestState): Promise<string> {
-  if (state.qid === null) return "(none)";
-  try {
-    return await readFile(join(ctx.cwd, draftPath(state.qid)), "utf8");
-  } catch {
-    return "(draft file removed after promotion)";
-  }
-}
 
 const announced = new Set<string>();
-
 export const MAX_CONSECUTIVE_VALIDATION_FAILS = 2;
 const consecutiveValidationFails = new Map<string, number>();
 
@@ -68,22 +68,6 @@ export function getValidationVerdictFails(qid: string): number {
   return consecutiveValidationFails.get(qid) ?? 0;
 }
 
-// HIGH_LEVEL: #plan revision — the validator judges every plan move, so the
-// brief carries the append-only revision record: note, superseded hash, and
-// prior text truncated to a bounded window with the cut marked.
-const REVISION_PLAN_CHARS = 500;
-
-export function formatRevisionHistory(state: QuestState): string[] {
-  return (state.draft?.planRevisions ?? []).map((r) => {
-    const hash = r.hash === null || r.hash === "" ? "initial plan" : `superseded ${r.hash.slice(0, 12)}`;
-    const when = new Date(r.at).toISOString().slice(0, 10);
-    const prior = r.plan.length > REVISION_PLAN_CHARS
-      ? `${r.plan.slice(0, REVISION_PLAN_CHARS)}… (truncated)`
-      : r.plan;
-    return `- ${r.note} (${hash}, ${when}): ${prior}`;
-  });
-}
-
 function announceOnce(pi: Pi, key: string, text: string): void {
   if (announced.has(key)) return;
   announced.add(key);
@@ -96,120 +80,12 @@ function wakeOnce(pi: Pi, key: string, text: string): void {
   sendWake(pi, text);
 }
 
-// HIGH_LEVEL: #independent review contexts — fresh-session announcements, so
-// a stale "no validator" notice can never suppress a retry's messaging.
 export function resetAnnouncements(): void {
   announced.clear();
 }
 
-// A PASS verdict concludes the quest: the archive summary carries the
-// verdict's counts and advisories so nothing the validator said is lost
-// when nobody archives manually.
-const CONCLUSION_ADVISORY_CHARS = 300;
-
-export function buildConclusionSummary(state: QuestState, target: string, review: ParsedReview): string {
-  const advisories = review.advisories.trim();
-  const noted = advisories === ""
-    ? "(no advisories)"
-    : advisories.length > CONCLUSION_ADVISORY_CHARS
-    ? `${advisories.slice(0, CONCLUSION_ADVISORY_CHARS)}… (truncated)`
-    : advisories;
-  return `Validation PASS (${target.slice(0, 12)}). ${state.amendments.length} amendment(s), ${state.setbacks.length} setback(s). Advisories: ${noted}`;
-}
-
-
-// The validator's brief differs by kind: standard quests validate against the
-// deliverable plan body; analysis quests validate the ## Analysis deliverable
-// against the bounded research transcript (D4).
-const DELIVERED_ANALYSIS_CHARS = 900;
-
-export async function validationBrief(ctx: PiCtx, state: QuestState, pi?: Pi): Promise<ReviewMaterial> {
-  const plan = await approvedPlan(ctx, state);
-  const sections = parseDraftSections(plan);
-  const allRequirements = [
-    ...sections.requirements,
-    ...state.refinements.map((r) => r.startsWith("- ") ? r : `- ${r}`),
-  ];
-
-  const deliverable = deliverableBody(sections, state.kind);
-  const citedFiles = citeLocations(deliverable).map((c) => c.file);
-  const candidateFiles = Array.from(new Set([...(state.touchedFiles ?? []), ...citedFiles]));
-
-  const unified = await captureUnifiedDiff(ctx, {
-    pi,
-    touchedFiles: candidateFiles,
-    baseCommit: state.baseCommit,
-    maxChars: MAX_DIFF_CHARS,
-  });
-
-  const codeDiff = unified.hasVcsDiff ? unified.diff : undefined;
-  const touchedFiles = (!unified.hasVcsDiff && candidateFiles.length > 0)
-    ? candidateFiles
-    : undefined;
-
-  if (state.kind === "analysis" && state.qid !== null) {
-    return {
-      objective: state.pendingRootRequest ?? state.objective,
-      plan: sections.analysis,
-      kind: "analysis",
-      evidence: [
-        ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
-        ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
-      ],
-      requirements: allRequirements,
-      amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
-      planRevisionHistory: formatRevisionHistory(state),
-      implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
-      transcriptExtract: await extractQuestTranscript(ctx, state.qid),
-      codeDiff,
-      touchedFiles,
-    };
-  }
-  const testReceipt = getLatestTestExecution();
-  const testReceiptText = testReceipt
-    ? `Command: ${testReceipt.command}\nExit Code: ${testReceipt.exitCode}\nOutput Tail:\n${testReceipt.tailOutput}`
-    : "(no test execution recorded in this session)";
-
-  const rtmText = state.rtm && state.rtm.length > 0
-    ? state.rtm.map((r) => `- [${r.status === "satisfied" ? "x" : " "}] ${r.id}: ${r.description} (status: ${r.status})`).join("\n")
-    : undefined;
-
-  const cleanPlan = deliverable || "(no plan body authored)";
-
-  return {
-    objective: state.pendingRootRequest ?? state.objective,
-    plan: cleanPlan,
-    kind: state.kind,
-    evidence: [
-      ...state.setbacks.map((s) => `${s.reason} — ${s.evidence.join("; ")}`),
-      ...state.children.map((c) => `child ${c.qid} (${c.status}): ${c.findings ?? "no findings yet"}`),
-      ...(state.handbackReceipts ?? []).map((h) => `child ${h.childQid} (${h.status}): ${h.findings} [test: ${h.testCommand}, passed: ${h.testPassed}]`),
-    ],
-    requirements: allRequirements,
-    amendments: state.amendments.map((a) => `${a.change} (${a.reasons})`),
-    planRevisionHistory: formatRevisionHistory(state),
-    implementationSummary: `${state.exactNextAction} Children: ${state.children.map((c) => `${c.qid}=${c.status}`).join(", ") || "none"}.`,
-    testReceipt: testReceiptText,
-    rtmChecklist: rtmText,
-    codeDiff,
-    touchedFiles,
-  };
-}
-
-// The conclusion wake for an analysis quest carries the delivered analysis so
-// the moment is reviewable after archival removed the live draft. Computed
-// against the pre-archive doc at the last possible moment.
-export async function deliveredAnalysisExcerpt(ctx: PiCtx, state: QuestState): Promise<string> {
-  if (state.kind !== "analysis" || state.qid === null) return "";
-  const body = parseDraftSections(await approvedPlan(ctx, state)).analysis.trim();
-  if (body === "") return "";
-  return body.length > DELIVERED_ANALYSIS_CHARS ? `${body.slice(0, DELIVERED_ANALYSIS_CHARS)}… (truncated)` : body;
-}
-
-// A validating FAIL returns analysis quests to drafting (the analysis is a
-// draft-like artifact; implementing, where the quest doc is locked, is the
-// wrong repair state) and standard quests to implementing.
 export function repairAfterFail(state: QuestState): QuestState {
+  if (state.phase !== "validating") return state;
   return state.kind === "analysis" ? demoteToDrafting(state) : demoteToImplementing(state);
 }
 
@@ -227,23 +103,146 @@ export async function concludeValidationPass(
   autoArchive: boolean,
 ): Promise<{ archived: boolean; zipPath: string | null }> {
   if (!autoArchive) return { archived: false, zipPath: null };
-  // The manual path re-checks currency at archive time; conclude must too:
-  // work that moved after the verdict needs a fresh validation, not an archive.
   if (implementationFingerprint(getState()) !== target) {
     sendSteer(pi, `Quest ${qid} changed during validation — conclusion skipped; a fresh validation will boot against the current work.`);
     return { archived: false, zipPath: null };
   }
-  // The excerpt must be captured before archive: archiveActiveQuest removes the
-  // live draft that carries the delivered analysis.
   const excerpt = await deliveredAnalysisExcerpt(ctx, getState());
   const isAnalysis = getState().kind === "analysis";
-  const done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
-  const delivered = excerpt === "" ? "" : `\n\nDELIVERED ANALYSIS:\n${excerpt}`;
-  const handoffHint = isAnalysis
-    ? `\n\nTo begin implementation of the approved analysis, run quest_update_state { objective: "Implement recommendations from analysis ${qid}..." }.`
-    : "";
-  wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed (${done.zipPath}).${delivered}${handoffHint}`);
+  let done;
+  try {
+    done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
+  } catch {
+    return { archived: false, zipPath: null };
+  }
+  if (isAnalysis) {
+    const delivered = excerpt === "" ? "" : `\n\nDELIVERED ANALYSIS:\n${excerpt}`;
+    const handoffHint = `\n\nTo begin implementation of the approved analysis, run quest_update_state { objective: "Implement recommendations from analysis ${qid}..." }.`;
+    const zipSuffix = done.zipPath ? ` (${done.zipPath})` : "";
+    wakeOnce(pi, `concluded:${qid}:${target}`, `Quest ${qid} concluded and archived as completed${zipSuffix}.${delivered}${handoffHint}`);
+  }
   return { archived: true, zipPath: done.zipPath };
+}
+
+async function handleBypassIfEligible(
+  pi: Pi,
+  ctx: PiCtx,
+  qid: string,
+  target: string,
+  config: ReturnType<typeof withEffectivePolicy>,
+): Promise<boolean> {
+  const state = getState();
+  const testExecution = state.lastTestReceipt ?? getLatestTestExecution();
+  const testsPassed = testExecution !== null
+    ? testExecution.exitCode === 0
+    : (state.kind === "analysis" || state.difficulty === "trivial");
+
+  const shouldBypass = !config.strictMode && (
+    config.reviewPolicy === "off" ||
+    (config.reviewPolicy === "balanced" && state.difficulty === "trivial" && testsPassed)
+  );
+  if (!shouldBypass) return false;
+
+  clearValidationVerdictFails(qid);
+  const reason = config.reviewPolicy === "off"
+    ? "Accepted under reviewPolicy 'off'."
+    : `Accepted under reviewPolicy 'balanced' (${state.difficulty} task, tests passed).`;
+  const syntheticReview: ParsedReview = {
+    verdict: "PASS",
+    severity: "none",
+    findings: reason,
+    advisories: "",
+    text: reason,
+  };
+  updateState((s) => recordReviewResult(s, "PASS", target, reason));
+  emitNow(pi);
+  const concluded = await concludeValidationPass(pi, ctx, qid, target, syntheticReview, config.autoArchive);
+  if (!concluded.archived && getState().phase === "validating") {
+    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} (${reason}) — run quest_archive to complete the quest.`);
+  }
+  return true;
+}
+
+async function handleValidationFailVerdict(
+  pi: Pi,
+  ctx: PiCtx,
+  qid: string,
+  target: string,
+  review: ParsedReview,
+): Promise<void> {
+  const state = getState();
+  const consecutive = noteValidationVerdictFailed(qid);
+  if (state.kind === "analysis") {
+    updateState((s) => repairAfterFail(s));
+    await setDocStatus(ctx, qid as Qid, "drafting", false);
+    emitNow(pi);
+    if (consecutive >= MAX_CONSECUTIVE_VALIDATION_FAILS) {
+      sendWake(
+        pi,
+        `Validation rejected ${consecutive} consecutive times for ${qid}. Automated validation loop paused.\n` +
+        `Validator findings: ${review.findings}\n\n` +
+        `Consult the human operator for guidance. The operator may reply "ship it" / "confirm" to accept completion as-is, or provide technical instructions.`,
+      );
+      return;
+    }
+    sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${review.findings} Address the findings in the analysis, then submit the revised analysis for review again.`);
+    return;
+  }
+
+  updateState((s) => repairAfterFail(s));
+  await setDocStatus(ctx, qid as Qid, "implementing", false);
+  emitNow(pi);
+  if (consecutive >= MAX_CONSECUTIVE_VALIDATION_FAILS) {
+    sendWake(
+      pi,
+      `Validation rejected ${consecutive} consecutive times for ${qid}. Automated validation loop paused.\n` +
+      `Validator findings: ${review.findings}\n\n` +
+      `Consult the human operator for guidance. The operator may reply "ship it" / "confirm" to accept completion as-is, or provide technical instructions.`,
+    );
+    return;
+  }
+  sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${review.findings} Resume implementation to fix the issues, then run quest_update_state {claimComplete:true} to validate again.`);
+}
+
+async function executePendingValidationTest(
+  pi: Pi,
+  ctx: PiCtx,
+  state: QuestState,
+  config: QuestConfig,
+  qid: string,
+): Promise<void> {
+  const worktreePath = state.worktreePath ?? state.contract?.worktreePath;
+  const worktreeBranch = state.worktreeBranch ?? state.contract?.worktreeBranch;
+  const testCmd = state.contract?.requiredTestCommands?.[0] ?? config.testCommands?.[0];
+  const latestTest = state.lastTestReceipt ?? getLatestTestExecution();
+  const needsRun = !latestTest || Boolean(state.lastFileModifiedAt && (latestTest.executedAt ?? 0) < state.lastFileModifiedAt);
+  if (!testCmd || !needsRun) return;
+
+  try {
+    let receipt: VerificationReceipt;
+    if (config.gitWorkflow?.testInPrimaryWorkspace === true && worktreePath && worktreeBranch) {
+      const primaryRoot = findPrimaryRepoRoot(ctx.cwd);
+      receipt = await runTestInPrimaryWorkspace({
+        primaryRoot,
+        command: testCmd,
+        qid,
+        worktreePath,
+        worktreeBranch,
+        pi,
+      });
+    } else {
+      const execTarget = worktreePath ?? ctx.cwd;
+      const res = await execTestShell(testCmd, execTarget, pi);
+      receipt = {
+        command: testCmd,
+        exitCode: res.exitCode,
+        tailOutput: (res.stdout + (res.stderr ? `\n${res.stderr}` : "")).slice(-2000),
+        executedAt: Date.now(),
+      };
+    }
+    recordTestExecution(receipt);
+    dispatch({ type: "TestRunRecorded", receipt });
+  } catch { /* proceed to validation */ }
 }
 
 export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
@@ -258,44 +257,9 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   if (hasInFlight(qid)) return;
   const config = withEffectivePolicy(await readQuestConfig(ctx.cwd), ctx);
 
-  // Policy-based bypass in validation:
-  // 1. "off": skip subagent review entirely when tests pass (or analysis / trivial)
-  // 2. "balanced": evaluate dynamic review need based on model risk, accuracy, and difficulty
-  const testExecution = state.lastTestReceipt ?? getLatestTestExecution();
-  const testsPassed = testExecution !== null
-    ? testExecution.exitCode === 0
-    : (state.kind === "analysis" || state.difficulty === "trivial");
-  const activeModel = resolveActiveModel(ctx, config);
-  const need = calculateReviewNeed(state.difficulty, activeModel, state.setbacks.length, config.modelAccuracy);
-  const autonomyLevel = resolveAutonomyLevel(need);
-  const level3FastPath = autonomyLevel === 3 && (testsPassed || testExecution === null);
+  await executePendingValidationTest(pi, ctx, state, config, qid);
 
-  const shouldBypassValidation =
-    !config.strictMode && (
-      config.reviewPolicy === "off" ||
-      (config.reviewPolicy === "balanced" && state.difficulty === "trivial" && testsPassed)
-    );
-
-  if (shouldBypassValidation) {
-    clearValidationVerdictFails(qid);
-    const reason = config.reviewPolicy === "off"
-      ? "Accepted under reviewPolicy 'off'."
-      : `Accepted under reviewPolicy 'balanced' (${state.difficulty} task, tests passed).`;
-    const syntheticReview: ParsedReview = {
-      verdict: "PASS",
-      severity: "none",
-      findings: reason,
-      advisories: "",
-      text: reason,
-    };
-    updateState((s) => recordReviewResult(s, "PASS", target, reason));
-    emitNow(pi);
-    const concluded = await concludeValidationPass(pi, ctx, qid, target, syntheticReview, config.autoArchive);
-    if (!concluded.archived) {
-      wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} (${reason}) — run quest_archive to complete the quest.`);
-    }
-    return;
-  }
+  if (await handleBypassIfEligible(pi, ctx, qid, target, config)) return;
 
   const validatorModel = resolveRoleModel(config, "validator");
   const brief = await validationBrief(ctx, state, pi);
@@ -311,9 +275,8 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     cooldownMs: config.router.cooldownMs,
     prompt: buildReviewPrompt("validation", qid, target, brief),
   });
+
   if (outcome.status === "no-runner") {
-    // continueWork returns analysis quests to drafting, implementation quests to
-    // implementing — name the right phase so the guidance stays accurate.
     const workPhase = state.kind === "analysis" ? "drafting" : "implementing";
     announceOnce(pi, `userpath:${qid}:${target}`, `No validator available. Only the user can accept completion by replying CONFIRM — your own CONFIRM text does nothing. Otherwise keep working (continueWork:true returns to ${workPhase}).`);
     return;
@@ -323,45 +286,18 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
+
   if (outcome.review.verdict === "PASS") {
     clearValidationVerdictFails(qid);
     const concluded = await concludeValidationPass(pi, ctx, qid, target, outcome.review, config.autoArchive);
-    if (!concluded.archived) {
+    if (!concluded.archived && getState().phase === "validating") {
       const advisories = outcome.review.advisories.trim();
       wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     }
     return;
   }
-  const consecutive = noteValidationVerdictFailed(qid);
-  if (state.kind === "analysis") {
-    updateState((s) => repairAfterFail(s));
-    await setDocStatus(ctx, qid, "drafting", false);
-    emitNow(pi);
-    if (consecutive >= MAX_CONSECUTIVE_VALIDATION_FAILS) {
-      sendWake(
-        pi,
-        `Validation rejected ${consecutive} consecutive times for ${qid}. Automated validation loop paused.\n` +
-        `Validator findings: ${outcome.review.findings}\n\n` +
-        `Consult the human operator for guidance. The operator may reply "ship it" / "confirm" to accept completion as-is, or provide technical instructions.`,
-      );
-      return;
-    }
-    sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings in the analysis, then submit the revised analysis for review again.`);
-    return;
-  }
-  updateState((s) => repairAfterFail(s));
-  await setDocStatus(ctx, qid, "implementing", false);
-  emitNow(pi);
-  if (consecutive >= MAX_CONSECUTIVE_VALIDATION_FAILS) {
-    sendWake(
-      pi,
-      `Validation rejected ${consecutive} consecutive times for ${qid}. Automated validation loop paused.\n` +
-      `Validator findings: ${outcome.review.findings}\n\n` +
-      `Consult the human operator for guidance. The operator may reply "ship it" / "confirm" to accept completion as-is, or provide technical instructions.`,
-    );
-    return;
-  }
-  sendWake(pi, `Validation FAIL (target ${target.slice(0, 12)}): ${outcome.review.findings} Address the findings, then claim completion again.`);
+
+  await handleValidationFailVerdict(pi, ctx, qid, target, outcome.review);
 }
 
 export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
@@ -376,8 +312,6 @@ export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Prom
   }
   const target = implementationFingerprint(state);
   if (state.lastReview?.verdict === "PASS" && state.lastReview.target === target) return false;
-  // User acceptance stands in for or overrides the validator verdict: record it
-  // as the current PASS so the COMPLETED archive gate sees honest state.
   updateState((s) => recordReviewResult(s, "PASS", target, "Accepted on user confirmation."));
   clearValidationVerdictFails(state.qid);
   emitNow(pi);

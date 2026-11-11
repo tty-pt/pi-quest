@@ -98,17 +98,25 @@ How to read this honestly:
 
 ---
 
-## Essential Slash Commands & Shortcuts
+## Essential Slash Commands (`/quest`)
 
-| Command / Key | Function |
+All commands are unified under `/quest` with tab-completion:
+
+| Command | Function |
 | :--- | :--- |
-| `Ctrl + Q` | Open the floating plan viewer overlay at any time. |
-| `/quest` | Pick an idle quest, resume a previous quest, or view active status. |
-| `/quest doctor` / `/quest-doctor` | Test live health of decision judge, latency, models, and word families. |
-| `/quest-policy` | Show the effective review policy for the active model, the matching `policyByModel` rule, the draft quality tiers, and config warnings. |
-| `/quest-router` | Show the `quest/auto` router cell, models and cooldowns. |
-| `/quests` | Display all active, draft, and archived quests in a widget. |
-| `/quest-del` | Abandon and archive the active quest or pop a child sub-quest. |
+| `/quest` | Show self-explaining status card (active quest, phase, plan path, next action, and subcommand list), or auto-resume a lone draft when idle. |
+| `/quest <name\|qid>` | Switch to or resume a quest by its readable draft name or QID (`/quest pick` to choose interactively). |
+| `/quest edit` (or `/quest plan`) | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR`. |
+| `/quest list` | Display all active and draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
+| `/quest pause` / `/quest on` | Pause or re-enable `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest cancel` | Cancel any currently running in-flight review or validation and unblock tool execution. |
+| `/quest del [qid\|flags]` | Delete/abandon the active quest, a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) with fail-safe branch integration options. |
+| `/quest handoff [qid]` | Write and show an honest handoff (verbatim request, every directive, asked-vs-accomplished with UNVERIFIED rows, plan, diff stat, last test/review, blockers, next action) to `.pi/quest/handoffs/`. Also written automatically before every compaction. Saying "give me a handoff" (or `!handoff`) mid-quest does the same and is never recorded as a requirement. |
+| `/quest slots` | Inspect active scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, worker process health, and working tree modifications. |
+| `/quest doctor` | Test live health of decision judge, latency, models, and word families. |
+| `/quest policy` | Show the effective review policy for the active model, the matching `policyByModel` rule, the draft quality tiers, and config warnings. |
+| `/quest router` | Show the `quest/auto` router cell, models and cooldowns. |
+| `/quest ratings` | Show model accuracy ratings, learned Beta distributions, and autonomy levels. |
 
 
 ---
@@ -144,10 +152,10 @@ Research, reads and test runs are never blocked; the only writable file is the d
 - `go` (or `go on`, `proceed`, ...) promotes at any time.
 
 ### 4. Implementing
-Tools are unrestricted and the router uses the `implementing` cell (Flash in the sample config, for every difficulty). Repository rules (TDD, `make`, boundary scripts) come from `AGENTS.md`; pi-quest does not enforce them. A plan revision mid-way is re-reviewed and holds tools (`AWAITING_REVIEW: PLAN_REVISION_REVIEW`) until the verdict arrives. If that hold is ever stuck, `/quest-cancel-review` or a plain `go` clears it.
+Implementation work runs isolated in dedicated git worktrees (allocated from the pre-warmed pool in `.pi/scratch/slot-N`). Tools are automatically jailed to the worktree path (`interception.ts`), protecting the primary repository workspace from accidental mutation. The status bar reflects the active quest name, sub-quest depth (`↳ `, `↳₂ `), slot badge (`(1)`, `(2)`, `(wt)`), and passing test checkmark (`✓`), e.g. `🔨 fix-seams (1) ✓`. The router uses the `implementing` cell (Flash in the sample config, for every difficulty). Repository rules (TDD, `make`, boundary scripts) come from `AGENTS.md`. A plan revision mid-way is re-reviewed and holds tools (`AWAITING_REVIEW: PLAN_REVISION_REVIEW`) until the verdict arrives. If that hold is ever stuck, `/quest cancel` or a plain `go` clears it. On completion or abandonment (`/quest del`), worktree edits and submodule commits are committed and safely integrated or preserved.
 
 ### 5. Validation
-The validator (`roles.validator`, falling back through its model chain) checks the work against the plan. Under `balanced`, a standard quest whose tests pass auto-archives to `.pi/quest/archive/<qid>.zip`. A FAIL returns to implementing with findings. `go` (or *ship it* / *confirm*, classified by embeddings) archives immediately.
+The validator (`roles.validator`, falling back through its model chain) checks the work against the plan. Under `balanced`, a standard quest whose tests pass auto-completes, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. A FAIL returns to implementing with findings. `go` (or *ship it* / *confirm*, classified by embeddings) completes immediately.
 
 ### Known limits
 - Only the drafting phase uses the strong model by default; implementation and validation stay on the cheap model unless the matrix says otherwise.

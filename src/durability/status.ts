@@ -1,9 +1,10 @@
-// HIGH_LEVEL: #interfaces — status bar names the active quest, [F2] always shown dim, flashing bright on draft updates.
+// HIGH_LEVEL: #interfaces — status bar names the active quest, flashing bright on draft updates.
 // Status text is derived, never stored; commands re-assert it after acting.
 import { getState } from "../app/store";
 import { DEFAULT_CONFIG, readQuestConfig, type StatusStyle } from "../config";
 import type { Phase, QuestState } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
+import { hasInFlight } from "../review/tracker";
 
 const PHASE_ICONS: Record<Phase, string> = {
   idle: "💤",
@@ -14,13 +15,76 @@ const PHASE_ICONS: Record<Phase, string> = {
   archived: "📦",
 };
 
+const SUBSCRIPTS = ["₀", "₁", "₂", "₃", "₄", "₅", "₆", "₇", "₈", "₉"];
+
+function toSubscript(n: number): string {
+  return String(n)
+    .split("")
+    .map((d) => SUBSCRIPTS[Number(d)] ?? d)
+    .join("");
+}
+
+export function formatDepthPrefix(depth: number, style: StatusStyle = "icon"): string {
+  if (depth <= 0) return "";
+  if (style === "text") return `:${depth}`;
+  if (depth === 1) return "↳ ";
+  return `↳${toSubscript(depth)} `;
+}
+
+export function questDisplayName(state: QuestState): string {
+  const name = state.name?.trim() || state.draft?.name?.trim() || "";
+  return name !== "" ? name : (state.qid ?? "");
+}
+
+export function extractSlotLabel(worktreePath?: string): string | null {
+  if (!worktreePath) return null;
+  const match = /(?:^|\/)slot-(\d+)$/.exec(worktreePath.replace(/\/+$/, ""));
+  if (match) {
+    return match[1];
+  }
+  return "wt";
+}
+
+function isReviewActive(state: QuestState): boolean {
+  if (state.activeReview !== null) return true;
+  if (state.qid !== null && hasInFlight(state.qid)) return true;
+  return false;
+}
+
 export function questStatus(state: QuestState, style: StatusStyle = "icon"): string {
+  const label = questDisplayName(state);
+  const slot = extractSlotLabel(state.worktreePath ?? state.contract?.worktreePath);
+  const hasPassingTest = Boolean(state.lastPassingTestReceipt && state.lastPassingTestReceipt.exitCode === 0);
+
+  if (state.disabled === true) {
+    if (state.qid === null) {
+      return style === "text" ? "off" : "⏸️ off";
+    }
+    const idPart = style === "text"
+      ? `${label}${formatDepthPrefix(state.depth, "text")}`
+      : `${formatDepthPrefix(state.depth, "icon")}${label}`;
+    const slotPart = slot ? ` (${slot})` : "";
+    return style === "text" ? `paused ${idPart}${slotPart}` : `⏸️ ${idPart}${slotPart}`;
+  }
+
   if (state.qid === null) {
     return style === "text" ? "idle" : `${PHASE_ICONS.idle} idle`;
   }
-  const depthSuffix = state.depth > 0 ? `:${state.depth}` : "";
-  if (style === "text") return `${state.phase} ${state.qid}${depthSuffix}`;
-  return `${PHASE_ICONS[state.phase]} ${state.qid}${depthSuffix}`;
+
+  const reviewing = isReviewActive(state);
+  const phaseToken = style === "text"
+    ? (reviewing ? "reviewing" : state.phase)
+    : (reviewing ? "👀" : PHASE_ICONS[state.phase]);
+
+  const namePart = style === "text"
+    ? `${label}${formatDepthPrefix(state.depth, "text")}`
+    : `${formatDepthPrefix(state.depth, "icon")}${label}`;
+
+  const parts: string[] = [`${phaseToken} ${namePart}`];
+  if (slot) parts.push(`(${slot})`);
+  if (hasPassingTest) parts.push("✓");
+
+  return parts.join(" ");
 }
 
 let statusStyle: StatusStyle = DEFAULT_CONFIG.statusStyle;
@@ -41,13 +105,11 @@ export function refreshStatus(ctx: PiCtx): void {
   }
 }
 
-const PLAN_HINT = "[^Q]";
 const BLINK_INTERVAL_MS = 500;
 const BLINK_WINDOW_MS = 6000;
 
 // SGR styling only (\x1b escapes, never raw control bytes): faint for the
 // steady state like native footer text, bright white for blink-on frames.
-// Both footers pass escapes through sanitize and truncate ANSI-aware.
 const DIM = "\x1b[2m";
 const BRIGHT = "\x1b[97m";
 const RESET = "\x1b[0m";
@@ -64,8 +126,7 @@ let blinkStop: ReturnType<typeof setTimeout> | undefined;
 
 function renderStatus(state: QuestState, style: StatusStyle): string {
   const base = questStatus(state, style);
-  const framed = `${base} ${PLAN_HINT}`;
-  return (brightPhase && state.qid !== null) ? `${BRIGHT}${framed}${RESET}` : `${DIM}${framed}${RESET}`;
+  return (brightPhase && state.qid !== null) ? `${BRIGHT}${base}${RESET}` : `${DIM}${base}${RESET}`;
 }
 
 // Exported for test isolation: pending blink timers outlive a single test.
@@ -81,7 +142,7 @@ function assertStatus(ui: PiCtx["ui"]): void {
   ui.setStatus("pi-quest", renderStatus(getState(), statusStyle));
 }
 
-// Bright-white [F2] flash for one window after a content-changing draft
+// Bright-white flash for one window after a content-changing draft
 // save, relaxing back to dim. Rapid saves restart the window; timers
 // always self-clear.
 export function noteDraftUpdated(

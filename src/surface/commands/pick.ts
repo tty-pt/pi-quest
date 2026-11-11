@@ -3,10 +3,10 @@
 import { emitNow } from "../../app/interpreter";
 import { getState, replaceState } from "../../app/store";
 import type { QuestState } from "../../domain/quest";
-import { scanSiblingStates } from "../../durability/siblings";
+import { scanSiblingStates, workspaceSessionFolder } from "../../durability/siblings";
 import { newestSnapshotPerQid } from "../../durability/snapshots";
 import type { Pi, PiCtx } from "../../hooks/events";
-import { listDraftQids, readDraftObjective, resumeQuest, summarizeActive } from "./quest";
+import { listDraftQids, readDraftHeading, readDraftObjective, resumeQuest, summarizeActive } from "./quest";
 
 export interface QuestCandidate {
   qid: string;
@@ -18,11 +18,12 @@ const LABEL_MAX = 80;
 
 function label(qid: string, phase: string, name: string): string {
   const brief = name.trim().split("\n")[0].slice(0, 48);
-  return `${qid} (${phase}) ${brief}`.slice(0, LABEL_MAX);
+  const title = brief && brief !== qid ? `${brief} (${qid})` : qid;
+  return `${title} [${phase}]`.slice(0, LABEL_MAX);
 }
 
 function candidateLabel(qid: string, phase: string, state: QuestState): string {
-  return label(qid, phase, state.objective || state.name || qid);
+  return label(qid, phase, state.name || state.draft?.name || state.objective || qid);
 }
 
 export async function collectCandidates(ctx: PiCtx, sessionsDir?: string): Promise<QuestCandidate[]> {
@@ -30,13 +31,15 @@ export async function collectCandidates(ctx: PiCtx, sessionsDir?: string): Promi
   for (const [qid, state] of newestSnapshotPerQid(ctx.sessionManager.getEntries())) {
     found.set(qid, { qid, label: candidateLabel(qid, state.phase, state), state });
   }
-  for (const [qid, state] of await scanSiblingStates(sessionsDir)) {
+  const workspaceFolder = ctx?.cwd ? workspaceSessionFolder(ctx.cwd) : undefined;
+  for (const [qid, state] of await scanSiblingStates(sessionsDir, workspaceFolder)) {
     if (!found.has(qid)) found.set(qid, { qid, label: candidateLabel(qid, state.phase, state), state });
   }
   for (const qid of await listDraftQids(ctx.cwd)) {
     if (found.has(qid)) continue;
+    const heading = await readDraftHeading(ctx.cwd, qid);
     const objective = await readDraftObjective(ctx.cwd, qid);
-    found.set(qid, { qid, label: label(qid, "draft", objective ?? qid), state: null });
+    found.set(qid, { qid, label: label(qid, "draft", heading ?? objective ?? qid), state: null });
   }
   return [...found.values()].sort((a, b) => (a.qid < b.qid ? -1 : 1));
 }

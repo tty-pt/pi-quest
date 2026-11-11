@@ -155,7 +155,7 @@ Deno.test("balanced: a count-bar-clearing but shallow draft is held with the qua
 Deno.test("balanced + draftQuality warn: shallow draft promotes with an advisory", async () => {
   const d = await setup("qual02" as Qid, SHALLOW);
   try {
-    const cfg = { ...BAL, draftQuality: { ...DEFAULT_CONFIG.draftQuality, mode: "warn" as const } };
+    const cfg = { ...BAL, draftQuality: { ...DEFAULT_CONFIG.draftQuality, mode: "warn" as const }, approvalGate: false };
     await bootDraftReview(d.pi, fakeCtx(d.cwd), d.target, cfg);
     check(getState().phase === "implementing", "warn mode does not block");
     check(wakeTexts(d.pi).some((t) => t.includes("quality advisory")), "advisory attached");
@@ -169,6 +169,7 @@ Deno.test("policyByModel: strict base policy becomes balanced for a matching mod
   try {
     const cfg = {
       ...DEFAULT_CONFIG,
+      approvalGate: false,
       reviewPolicy: "strict" as const,
       draftQuality: { ...DEFAULT_CONFIG.draftQuality, mode: "off" as const },
       policyByModel: parsePolicyRules({ "anthropic/claude-sonnet-5*": "balanced" }),

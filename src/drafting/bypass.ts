@@ -3,7 +3,8 @@
 // maturity bar alone gates promotion. A draft below the bar must never stall
 // silently — nothing else would ever wake the agent, and the tool gate stays
 // locked — so the agent is told exactly what is missing.
-import { sendWake } from "../app/interpreter";
+import { emitNow, sendWake } from "../app/interpreter";
+import { getState, updateState } from "../app/store";
 import type { QuestConfig, DraftThresholds } from "../config";
 import { difficultyLevel, type QuestState } from "../domain/quest";
 import { calculateReviewNeed, resolveActiveModel } from "../policy/effective";
@@ -56,7 +57,31 @@ export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig,
   }
   clearDraftReviewRetry(qid);
   clearReviewVerdictFails(qid);
-  const message = await promoteAfterPass(pi, ctx, qid, "review");
+  updateState((s) => ({
+    ...s,
+    lastReview: {
+      verdict: "PASS",
+      target: s.draft?.contentHash ?? "",
+      findings: "Maturity bar satisfied under " + base,
+    },
+  }));
   const advisory = quality.gaps.length > 0 ? ` Draft quality advisory (mode ${config.draftQuality.mode}): ${quality.gaps.join("; ")}.` : "";
+  const currentDraft = getState().draft;
+  if (config.reviewPolicy !== "off" && state.kind !== "analysis" && config.approvalGate && currentDraft?.approvedBy !== "user") {
+    updateState((s) => ({
+      ...s,
+      exactNextAction: "Draft validated under policy bypass. Write your quest analysis in your chat message to the operator, then call quest_ask_human with a short approval question.",
+    }));
+    emitNow(pi);
+    sendWake(
+      pi,
+      `Draft validated under ${reason}. Next:\n` +
+      `1. In your assistant message text, write a thorough analysis of the problem, root cause, and architectural approach to the operator in the chat session.\n` +
+      `2. Call quest_ask_human with a concise approval question and non-confirming default (e.g. question: "Do you approve the implementation plan?", default: "hold"). Do NOT put the plan in the question parameter.\n` +
+      `3. Verify all user requests and directives are in the plan file.${advisory}`,
+    );
+    return;
+  }
+  const message = await promoteAfterPass(pi, ctx, qid, currentDraft?.approvedBy === "user" ? "user" : "review");
   if (message !== null) sendWake(pi, `${message} Draft review bypassed under ${reason}.${advisory}`);
 }

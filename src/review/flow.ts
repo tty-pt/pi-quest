@@ -119,6 +119,53 @@ export function implementationFingerprint(state: QuestState): string {
   return createHash("sha256").update(JSON.stringify(stable), "utf8").digest("hex");
 }
 
+function resolveCandidateModelForRun(candidateModel: string | undefined, routerDefault: string | string[] | undefined): string | undefined {
+  const model = candidateModel ?? (routerDefault ? (Array.isArray(routerDefault) ? routerDefault[0] : routerDefault) : undefined);
+  if (model && model.toLowerCase().startsWith("quest/")) {
+    const physicalRouted = lastRoutedModel();
+    if (physicalRouted && !physicalRouted.toLowerCase().startsWith("quest/")) return physicalRouted;
+    if (routerDefault) {
+      const def = Array.isArray(routerDefault) ? routerDefault[0] : routerDefault;
+      if (def && !def.toLowerCase().startsWith("quest/")) return def;
+    }
+    return undefined;
+  }
+  if (!model) {
+    const physicalRouted = lastRoutedModel();
+    if (physicalRouted && !physicalRouted.toLowerCase().startsWith("quest/")) return physicalRouted;
+  }
+  return model;
+}
+
+function handleRateLimitError(detail: string, model: string | undefined, cooldownMs: number, now: number): void {
+  if (!isRateLimitOrQuotaError(detail) || !model) return;
+  const modelKey = model.toLowerCase();
+  recordModelCooldown(modelKey, cooldownMs, now);
+  const stripped = stripThinkingSuffix(model).toLowerCase();
+  if (stripped !== modelKey) {
+    recordModelCooldown(stripped, cooldownMs, now);
+  }
+  const prov = extractProvider(model);
+  if (prov !== "" && !/quota\s+reached|model\s+quota/i.test(detail)) {
+    recordModelCooldown(`provider:${prov}`, cooldownMs, now);
+  }
+}
+
+function isCandidateInCooldown(model: string | undefined, now: number): boolean {
+  if (!model) return false;
+  const modelKey = model.toLowerCase();
+  const prov = extractProvider(model);
+  return isModelInCooldown(modelKey, now) || (prov !== "" && isModelInCooldown(`provider:${prov}`, now));
+}
+
+function handleCandidateError(detail: string, model: string | undefined, cooldownMs: number, now: number): void {
+  handleRateLimitError(detail, model, cooldownMs, now);
+  if (/\b(?:401|403)\b|unauthori[sz]ed|forbidden|oauth_not_allowed/i.test(detail) && model) {
+    const prov = extractProvider(model);
+    if (prov !== "") recordModelCooldown(`provider:${prov}`, cooldownMs, now);
+  }
+}
+
 export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
   const { pi, ctx, qid, target } = args;
   const runnerTool = args.runnerTool ?? "subagent";
@@ -147,42 +194,11 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
     // A superseding boot owns the quest now; stop instead of launching stale.
     if (i > 0 && !isCurrentReview(qid, target)) return { status: "aborted" };
 
-    // If candidate or its provider is on active rate-limit/auth cooldown, skip it
-    // unless this is the final safety candidate.
-    if (candidate.model) {
-      const modelKey = candidate.model.toLowerCase();
-      const prov = extractProvider(candidate.model);
-      const isCooling = isModelInCooldown(modelKey, now) || (prov !== "" && isModelInCooldown(`provider:${prov}`, now));
-      if (isCooling && i + 1 < candidates.length) {
-        continue;
-      }
+    if (isCandidateInCooldown(candidate.model, now) && i + 1 < candidates.length) {
+      continue;
     }
 
-    let candidateModel = candidate.model ??
-      (args.routerDefault
-        ? (Array.isArray(args.routerDefault) ? args.routerDefault[0] : args.routerDefault)
-        : undefined);
-
-    if (candidateModel && candidateModel.toLowerCase().startsWith("quest/")) {
-      const physicalRouted = lastRoutedModel();
-      if (physicalRouted && !physicalRouted.toLowerCase().startsWith("quest/")) {
-        candidateModel = physicalRouted;
-      } else if (args.routerDefault) {
-        const def = Array.isArray(args.routerDefault) ? args.routerDefault[0] : args.routerDefault;
-        if (def && !def.toLowerCase().startsWith("quest/")) {
-          candidateModel = def;
-        } else {
-          candidateModel = undefined;
-        }
-      } else {
-        candidateModel = undefined;
-      }
-    } else if (!candidateModel) {
-      const physicalRouted = lastRoutedModel();
-      if (physicalRouted && !physicalRouted.toLowerCase().startsWith("quest/")) {
-        candidateModel = physicalRouted;
-      }
-    }
+    const candidateModel = resolveCandidateModelForRun(candidate.model, args.routerDefault);
 
     const runner = createRunner({
       pi,
@@ -190,6 +206,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       ownerRunId: qid,
       toolName: runnerTool,
       ...(candidateModel ? { model: candidateModel } : {}),
+      ...(args.routerDefault ? { routerDefault: Array.isArray(args.routerDefault) ? args.routerDefault[0] : args.routerDefault } : {}),
       ...(thinking ? { thinking } : {}),
       ...(args.maxDurationMs !== undefined ? { maxDurationMs: args.maxDurationMs } : {}),
       ...(args.inactivityLimitMs !== undefined ? { inactivityLimitMs: args.inactivityLimitMs } : {}),
@@ -203,30 +220,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
     } catch (err) {
       if (controller.signal.aborted) return { status: "aborted" };
       const detail = err instanceof Error ? err.message : String(err);
-
-      // On rate limit or quota exhaustion, record cooldown for this model, its base variant, and its provider
-      if (isRateLimitOrQuotaError(detail)) {
-        if (candidate.model) {
-          const modelKey = candidate.model.toLowerCase();
-          recordModelCooldown(modelKey, cooldownMs, now);
-          const stripped = stripThinkingSuffix(candidate.model).toLowerCase();
-          if (stripped !== modelKey) {
-            recordModelCooldown(stripped, cooldownMs, now);
-          }
-          const prov = extractProvider(candidate.model);
-          if (prov !== "" && !/quota\s+reached|model\s+quota/i.test(detail)) {
-            recordModelCooldown(`provider:${prov}`, cooldownMs, now);
-          }
-        }
-      }
-
-      // On provider-wide auth failure, cooldown provider prefix
-      if (/\b(?:401|403)\b|unauthori[sz]ed|forbidden|oauth_not_allowed/i.test(detail)) {
-        const prov = extractProvider(candidate.model);
-        if (prov !== "") {
-          recordModelCooldown(`provider:${prov}`, cooldownMs, now);
-        }
-      }
+      handleCandidateError(detail, candidate.model, cooldownMs, now);
 
       const retryable = isModelResolutionOrProviderError(detail) && i + 1 < candidates.length;
       if (!retryable) {

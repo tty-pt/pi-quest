@@ -96,7 +96,15 @@ Deno.test("handoff receipts round-trip and checkPostQuestReversions catches drop
     const readDecremented = await readHandoffReceipt(cwd);
     check(readDecremented?.observedTurnsRemaining === 2, "observed turns decremented to 2");
 
-    // Case 2: Commit was reverted / reset (merge-base returns non-zero 1)
+    // Case 1b: Commit is on another branch (merge-base fails, but branch --contains succeeds)
+    const check1b = await checkPostQuestReversions(cwd, async (args) => {
+      if (args[0] === "merge-base") return { code: 1 };
+      if (args[0] === "branch" && args[1] === "--contains") return { code: 0, stdout: "* feature-branch\n" };
+      return { code: 0 };
+    });
+    check(check1b.reverted === false, "not reverted when commit exists on another branch");
+
+    // Case 2: Commit was reverted / reset (merge-base returns non-zero 1 and branch --contains fails)
     const check2 = await checkPostQuestReversions(cwd, async () => ({ code: 1 }));
     check(check2.reverted === true, "reversion caught");
     check(Boolean(check2.reason?.includes("deadbeef")), "reason names commit");

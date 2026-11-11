@@ -29,6 +29,7 @@ import { hashContent } from "../../src/drafting/plan-text.ts";
 import { applyUpdate } from "../../src/surface/tools/update-state.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { stopBlink } from "../../src/durability/index.ts";
+import { decide } from "../../src/domain/gates.ts";
 import type { Pi, ToolCallEvent } from "../../src/hooks/events.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 import type { FakePi, SentMessage } from "../fake-pi.ts";
@@ -441,5 +442,39 @@ Deno.test("handleApproveInput cancels in-flight review even when contentHash equ
   clearPlanRevisionRetries(d.qid);
   replaceState(IDLE_STATE);
 });
+
+Deno.test("pendingDirectiveRevision blocks write tools with PLAN_REVISION_REQUIRED and unblocks on revision or approval", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+
+  // Set pendingDirectiveRevision
+  updateState((s) => ({
+    ...s,
+    pendingDirectiveRevision: true,
+    pendingDirectiveText: "avoid magic constants, please",
+  }));
+
+  const writeCheck = decide(getState(), { toolName: "edit", toolClass: "write", path: "src/foo.c" });
+  check(writeCheck.allowed === false, "write tool is blocked");
+  if (!writeCheck.allowed) {
+    check(writeCheck.code === "PLAN_REVISION_REQUIRED", "blocked with PLAN_REVISION_REQUIRED");
+  }
+
+  const readCheck = decide(getState(), { toolName: "read", toolClass: "read", path: "src/foo.c" });
+  check(readCheck.allowed === true, "read tool remains allowed");
+
+  // User says "go" -> handleApproveInput clears the pending directive revision
+  const bypassed = await handleApproveInput(bus.pi, fakeCtx(d.cwd), "go");
+  check(bypassed === true, "handleApproveInput unblocked directive gate");
+  check(getState().pendingDirectiveRevision === false, "pendingDirectiveRevision cleared");
+
+  const writeCheckAfter = decide(getState(), { toolName: "edit", toolClass: "write", path: "src/foo.c" });
+  check(writeCheckAfter.allowed === true, "write tool is now unblocked");
+
+  cancelReview(d.qid);
+  clearPlanRevisionRetries(d.qid);
+  replaceState(IDLE_STATE);
+});
+
 
 

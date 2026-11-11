@@ -1,8 +1,61 @@
 import assert from "node:assert";
-import { fetchActiveInvariants, formatInvariantsComment } from "../../src/surface/invariants.ts";
+import {
+  cleanInvariantSummary,
+  fetchActiveInvariants,
+  formatInvariantsComment,
+  isEligibleStandingInvariant,
+} from "../../src/surface/invariants.ts";
 import { renderDraftTemplate } from "../../src/views/draft-template.ts";
 import { ensureDraftFile } from "../../src/files.ts";
 import { fakeCtx } from "../fake-pi.ts";
+
+Deno.test("invariant_seeding: cleanInvariantSummary strips episode wrapper cleanly", () => {
+  const raw = "Episode: Standing directive: Minimize and eliminate regex usage across the system. — tested: Recorded permanent invariant.";
+  assert.strictEqual(cleanInvariantSummary(raw), "Minimize and eliminate regex usage across the system.");
+
+  const plain = "Accent-sensitive search (pão ≠ pao)";
+  assert.strictEqual(cleanInvariantSummary(plain), "Accent-sensitive search (pão ≠ pao)");
+});
+
+Deno.test("invariant_seeding: isEligibleStandingInvariant rejects harmful, transient, or interrogative statements", () => {
+  // Harmful / anti-testing
+  assert.strictEqual(isEligibleStandingInvariant("Just commit. We can work on tests later."), false);
+  assert.strictEqual(isEligibleStandingInvariant("Just commit, we can work on tests later"), false);
+  assert.strictEqual(isEligibleStandingInvariant("Skip tests for now and commit"), false);
+  assert.strictEqual(isEligibleStandingInvariant("work on tests later"), false);
+
+  // Transient WIP / commit commands
+  assert.strictEqual(isEligibleStandingInvariant("Make sure everything is committed and pushed as part of this wip commit thing."), false);
+  assert.strictEqual(isEligibleStandingInvariant("Make sure the nd work is committed."), false);
+  assert.strictEqual(isEligibleStandingInvariant("Just commit."), false);
+
+  // Questions / interrogatives
+  assert.strictEqual(isEligibleStandingInvariant("Judging by the introduced clever preprocessor guards, the wasm boundary is not totally unified. Correct? This is an analysis request. Nothing else."), false);
+  assert.strictEqual(isEligibleStandingInvariant("And our site, which is pure C, should work without those clever precompiler guards? Understood?"), false);
+  assert.strictEqual(isEligibleStandingInvariant("How unified is this boundary right now across all the libs?"), false);
+
+  // Genuine invariants
+  assert.strictEqual(isEligibleStandingInvariant("Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/"), true);
+  assert.strictEqual(isEligibleStandingInvariant("Accent-sensitive search (pão ≠ pao)"), true);
+  assert.strictEqual(isEligibleStandingInvariant("Never compliment yourself or use self-flattery when asked for metrics."), true);
+});
+
+Deno.test("invariant_seeding: formatInvariantsComment filters out bad invariants", () => {
+  const invs = [
+    { ref: 12, summary: "Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/" },
+    { ref: 35107, summary: "Just commit. We can work on tests later." },
+    { ref: 25357, summary: "Judging by the introduced clever preprocessor guards... Correct? This is an analysis request." },
+    { ref: 45, summary: "Accent-sensitive search (pão ≠ pao)" },
+  ];
+
+  const formatted = formatInvariantsComment(invs);
+  assert.strictEqual(formatted.includes("• Invariant (Ref 12): Pure-C isomorphic UX"), true);
+  assert.strictEqual(formatted.includes("• Invariant (Ref 45): Accent-sensitive search"), true);
+  assert.strictEqual(formatted.includes("35107"), false);
+  assert.strictEqual(formatted.includes("tests later"), false);
+  assert.strictEqual(formatted.includes("25357"), false);
+  assert.strictEqual(formatted.includes("analysis request"), false);
+});
 
 Deno.test("invariant_seeding: formatInvariantsComment formats active invariants cleanly", () => {
   const invs = [

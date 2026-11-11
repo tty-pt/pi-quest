@@ -6,12 +6,15 @@ import { join } from "node:path";
 import type { PiCtx } from "../../hooks/events";
 import type { QuestKind, QuestState } from "../../domain/quest";
 import { draftPath } from "../../domain/paths";
-import { getState } from "../../app/store";
+import { draftFilePath } from "../../files";
+import { getState, updateState } from "../../app/store";
 import { readQuestConfig, getThresholdsForDifficulty, type QuestConfig } from "../../config";
 import { draftProfileText, parseDraftSections, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { checkPlanCitations } from "./claims";
 import { assessDraftQuality } from "../../drafting/quality";
 import { withEffectivePolicy } from "../../policy/effective";
+import { recalibrateQuestDifficulty } from "../../drafting/difficulty";
+import { difficultyLevel } from "../../domain/quest";
 
 // Which review policy is in force for the active model, so the agent sees why.
 function policyLine(config: QuestConfig, ctx: PiCtx): string {
@@ -30,7 +33,7 @@ async function deliverableProfile(
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
     return { error: `${param} needs a draft in drafting (phase ${state.phase}); author one via draftName first` };
   }
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   let current: string;
   try {
     current = await readFile(path, "utf8");
@@ -41,13 +44,15 @@ async function deliverableProfile(
   // exactly what a save would review.
   const updated = splice(current, body);
   const sections = parseDraftSections(updated);
+  const recalibrated = recalibrateQuestDifficulty(state, sections, updated);
+  const activeDiff = difficultyLevel(recalibrated) > difficultyLevel(state.difficulty) ? recalibrated : state.difficulty;
   const config = await readQuestConfig(ctx.cwd);
-  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  const thresholds = getThresholdsForDifficulty(config, activeDiff);
   const claims = await checkPlanCitations(ctx, body);
-  const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
+  const quality = await assessDraftQuality(ctx, config, sections, kind, activeDiff);
   const policy = policyLine(config, ctx);
   const extra = [claims, quality.summary, policy].filter((l) => l !== "").join("\n");
-  return { text: draftProfileText(sections, thresholds, extra, kind, state.difficulty) };
+  return { text: draftProfileText(sections, thresholds, extra, kind, activeDiff) };
 }
 
 export async function applyPlanCheck(
@@ -68,9 +73,13 @@ export async function applyAnalysisCheck(
 
 export async function profileForSavedDoc(ctx: PiCtx, docText: string, kind: QuestKind = "standard"): Promise<string> {
   const config = await readQuestConfig(ctx.cwd);
-  const state = getState();
-  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
+  let state = getState();
   const sections = parseDraftSections(docText);
+  const recalibrated = recalibrateQuestDifficulty(state, sections, docText);
+  if (difficultyLevel(recalibrated) > difficultyLevel(state.difficulty)) {
+    state = updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
+  }
+  const thresholds = getThresholdsForDifficulty(config, state.difficulty);
   const quality = await assessDraftQuality(ctx, config, sections, kind, state.difficulty);
   const extra = [quality.summary, policyLine(config, ctx)].filter((l) => l !== "").join("\n");
   return draftProfileText(sections, thresholds, extra, kind, state.difficulty);

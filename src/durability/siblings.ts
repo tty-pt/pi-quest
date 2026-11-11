@@ -26,9 +26,22 @@ function snapshotFromLine(line: string, qid: string | null): QuestState | null {
   return state;
 }
 
-async function sessionFiles(sessionsDir: string): Promise<Array<{ path: string; mtime: number }>> {
+export function workspaceSessionFolder(cwd: string): string {
+  const normalized = cwd.replace(/[\\/]+/g, "-").replace(/^-+|-+$/g, "");
+  return `--${normalized}--`;
+}
+
+async function sessionFiles(sessionsDir: string, workspaceFolder?: string): Promise<Array<{ path: string; mtime: number }>> {
   const files: Array<{ path: string; mtime: number }> = [];
-  const projects = await readdir(sessionsDir);
+  let projects: string[];
+  try {
+    projects = await readdir(sessionsDir);
+  } catch {
+    return files;
+  }
+  if (workspaceFolder && projects.includes(workspaceFolder)) {
+    projects = [workspaceFolder];
+  }
   for (const project of projects) {
     let entries: string[];
     try {
@@ -53,11 +66,12 @@ async function sessionFiles(sessionsDir: string): Promise<Array<{ path: string; 
 
 export async function scanSiblingStates(
   sessionsDir: string = join(homedir(), ".pi", "agent", "sessions"),
+  workspaceFolder?: string,
 ): Promise<Map<string, QuestState>> {
   const found = new Map<string, QuestState>();
   let files: Array<{ path: string; mtime: number }>;
   try {
-    files = await sessionFiles(sessionsDir);
+    files = await sessionFiles(sessionsDir, workspaceFolder);
   } catch {
     return found;
   }
@@ -90,10 +104,11 @@ export async function scanSiblingStates(
 export async function scanSiblingSessions(
   qid: string | null,
   sessionsDir: string = join(homedir(), ".pi", "agent", "sessions"),
+  workspaceFolder?: string,
 ): Promise<QuestState | null> {
   let files: Array<{ path: string; mtime: number }>;
   try {
-    files = await sessionFiles(sessionsDir);
+    files = await sessionFiles(sessionsDir, workspaceFolder);
   } catch {
     return null;
   }

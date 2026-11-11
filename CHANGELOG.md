@@ -5,6 +5,77 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] (target: v1.12.0)
+
+### Changed
+- **Unified `/quest` Command Surface & Default Disabled Mode** (`src/surface/commands/index.ts`, `src/surface/commands/quest.ts`, `src/config/defaults.ts`, `src/durability/status.ts`):
+  - Consolidated all operator commands under `/quest` (`list`, `pick`, `edit`, `pause`/`on`, `cancel`, `del`, `handoff`, `slots`, `doctor`, `policy`, `router`, `ratings`) with tab completion and a self-explaining status card on bare `/quest`.
+  - Defaulted `enabled` to `false` unless explicitly configured or toggled via `/quest on` (`⏸️` in status bar), and delegated model readiness status (`⚡ bge-base`) to `pi-mm`.
+- **Consolidated `garden` into `/quest list` and `/quest del`** (`src/surface/commands/quests.ts`, `src/surface/commands/quest-del.ts`, `src/surface/commands/continuity.ts`, `src/surface/commands/index.ts`, `src/domain/garden.ts`):
+  - Removed `/quest garden` subcommand.
+  - Upgraded `/quest list` with the rich triage table from `garden` (`active`, `fresh`, `stale`, `orphan`, `empty-shell`, age in days, requirement progress, plan status, and active worktree slot) and automatic bullet deduplication.
+  - Upgraded `/quest del` to delete draft/backlog quests directly by `<qid>` or heading without resuming them first, and added batch prune flags (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`).
+  - Added automatic `dedupeDocBullets` on quest document writes (`src/durability/quest-doc-io.ts`, `src/surface/tools/draft-writer.ts`, `src/surface/tools/handlers/provision.ts`, `src/subquests/index.ts`).
+- **Removed `.pi/quest/archive/<qid>.zip` Creation** (`src/views/quest-view.ts`, `src/files.ts`, `src/surface/tools/archive.ts`):
+  - Completing (`quest_archive`) or deleting (`/quest del`) a quest now cleans up `.pi/quest/future/<qid>.md` and `.pi/quest/.staging/<qid>` directly without spawning `zip` or writing `.pi/quest/archive/*.zip` files, relying on Git history and `pi-mm` episodic memory distillation.
+
+### Added
+- **Scratch Workspace Telemetry & Inspection** (`src/utils/git/pool-inspect.ts`, `src/surface/tools/scratches.ts`, `src/surface/commands/index.ts`):
+  - Added `quest_scratches` tool and `/quest-scratches` command (with `/quest scratches` and `/quest slots` aliases) to inspect all scratch workspace slots (`.pi/scratch/slot-N`).
+  - Reports slot allocation status (`idle` vs. `leased`), assigned Quest ID, checked-out branch, worker PID and liveness check (`alive` vs. `dead/orphaned`), quest objective loaded from `.pi/quest/future/<qid>.md`, current phase, in-flight review status, working-tree dirty counts (staged, unstaged, untracked), and latest commit hash/subject/date.
+- **Fail-Safe Worktree Integration on `/quest-del`** (`src/surface/commands/quest-del.ts`, `src/surface/tools/archive/core.ts`, `src/surface/tools/archive/hierarchy.ts`):
+  - Checkpoint commit before archive: automatically stages and commits all uncommitted changes in both the worktree and modified submodules to the quest feature branch (`quest/<qid>`) before unmounting or resetting any scratch slot.
+  - Interactive integration selector when abandoning via `/quest-del`: prompts operator to "Integrate (squash-merge) into current branch", "Keep feature branch unmerged (quest/<qid>)", or "Discard changes and reset". Headless/non-interactive mode safely defaults to keeping the branch unmerged.
+  - Automatic submodule commit preservation: always runs `syncWorktreeSubmodulesToPrimary` before worktree teardown so commits inside submodule worktrees are never orphaned or lost from `.git/modules/`.
+- **Scratch Slot HUD & Status Line Telemetry** (`src/durability/status.ts`):
+  - Overhauled status bar indicator to display active scratch slot environment and verified test passing status: `[s1]`, `[s1✓]`, `[s2]`, `[s2✓]`, `[wt]`, `[wt✓]`, replacing the static test-tube icon with actionable workspace awareness.
+- **Pre-Warmed Scratch Workspace Pool & Dynamic Allocation** (`src/utils/git/pool.ts`):
+  - Managed pool of pre-warmed worktrees under `.pi/scratch/slot-N` eliminating dynamic 39-submodule cloning freezes during human plan approval.
+  - Dynamic elastic slot allocation scaling up to `worktreePoolMaxSize` (default 8).
+  - Autonomous stale lease auditing and dead PID reclamation (`auditAndReclaimPool`).
+- **Worktree Submodule Hardening & Pruning** (`src/utils/git/submodules.ts`, `src/utils/git/worktree.ts`, `src/utils/git/pool.ts`):
+  - Added `syncWorktreeSubmodulesToPrimary`: fetches worktree submodule feature branches into primary `.git/modules/` without network access.
+  - Added `pruneSubmoduleWorktrees` to prevent git worktree lock leaks in `.git/modules/`.
+  - Added JIT symbolic-ref branching for submodules when current branch matches target HEAD commit.
+  - Hardened worktree diff resolution and tool interception jailing (`interception.ts`).
+- **Tool-Call Interception & Fail-Closed Jailing** (`src/surface/tools/handlers/interception.ts`):
+  - Jails all tool calls (`bash`, `bg_run`, `read`, `write`, `edit`, `subagent`) to the active `worktreePath` during the implementation phase.
+  - Enforces fail-closed write protection on the primary repository during implementing, preventing unisolated mutations.
+- **Workspace Locking & Primary Workspace Test Runner** (`src/utils/git/workspace-lock.ts`, `src/utils/git/workspace-runner.ts`, `src/surface/tools/run-test.ts`):
+  - Added `quest_run_test` verification tool executing test commands inside the worktree (or primary repo when configured).
+  - Mutual exclusion workspace locking with PID-based deadlock recovery and bit-for-bit SHA-256 dirty stash preservation.
+- **Foreman & Multi-Lane Subquest Sequencing** (`src/subquests/foreman.ts`, `tests/subquests/foreman_worktree.test.ts`):
+  - Autonomous backlog parsing from markdown bullets and sequential child quest mounting for complex initiatives.
+  - Worktree inheritance across parent and child quests (`inheritParentWorktree`), preventing branch divergence.
+- **Anti-Tampering Verification** (`src/validation/test_tampering.ts`, `src/validation/evidence-gate.ts`):
+  - Completion gate blocks validation if tests contain commented-out or deleted assertions without replacements.
+
+### Fixed
+- **Submodule Auto-Alignment, Worktree Pointer Restoration & `@tty-pt` Symlink Isolation** (`src/utils/git/submodule-restore.ts`, `src/utils/git/worktree.ts`, `src/utils/git/squash.ts`, `src/utils/git/pool.ts`):
+  - Automatically runs `git submodule update --init --no-fetch --force` immediately after `mergeWorktreeBranch`, `squashMergeBranch`, worktree branch pre-sync, and `sanitizeSlot` so submodule working trees always match the merged parent index.
+  - Added `restoreSubmoduleWorktrees` and `guardSubmoduleWorkingTree` to repair stale `core.worktree` pointers in `.git/modules/` and block accidental empty-tree (`4b825...`) submodule commits.
+  - Isolated `node_modules/@tty-pt/*` symlinks inside worktree slots so worktree builds resolve local slot headers rather than primary repo symlinks.
+- **Worktree Squash-Merge Pre-Sync & Hard Failure Blocker** (`src/utils/git/squash.ts`, `src/surface/tools/archive/core.ts`):
+  - In `confirmAndSquashWorktree`, automatically syncs the target branch into the feature branch within the worktree before attempting squash-merge into primary workspace, resolving clean non-conflicting updates without manual intervention.
+  - Made worktree squash-merge failures a hard blocker in `archiveActiveQuest`: aborts archive and throws an explicit error when conflicts prevent landing on target branch, preventing quests from silently finishing as COMPLETED with stranded feature commits.
+
+### Changed
+- **Purged Documentation Debt** (`docs/EXTENSIONS.md`, `docs/ADVANCED_GIT_RECOVERY.md`):
+  - Replaced all legacy `.pi/quest/current/<qid>/quest.md` references with canonical `.pi/quest/future/<qid>.md` active quest storage.
+
+## [1.11.0] - 2026-11-06
+
+### Added
+- **Quest Continuity Engine — handoffs** (`src/domain/handoff.ts`, `src/durability/handoff-io.ts`, `src/surface/tools/handoff.ts`):
+  - `quest_handoff { qid?, notes? }` tool and `/quest-handoff [qid]` command (alias `/quest handoff`) write a deterministic handoff to `.pi/quest/handoffs/<qid>-<YYYYMMDD-HHMMSS>.md`: verbatim operator request, every directive deduplicated, Asked-vs-Accomplished table (only recorded RTM status or checked boxes count; everything else **UNVERIFIED**), approved plan (capped at 8000 chars with a doc pointer), touched files + `git diff --stat` since base commit, last test receipt and review, setbacks / running and failed sub-quests, exact next action, resume rules, agent notes.
+  - Works for non-active quests via the newest transcript snapshot or a doc-only reconstruction.
+- **Auto-handoff on compaction** (`src/durability/compaction-handoff.ts`, `src/hooks/events.ts`): `session_before_compact` (awaited, never cancels) writes a handoff; `session_compact` arms a one-shot `[Post-Compaction Handoff]` pointer injected on the next turn.
+- **`handoff` operator intent** (`src/domain/intent.ts`, `src/domain/intent-exemplars.ts`, `src/subquests/scope.ts`, `src/subquests/index.ts`): EN/PT/ES exemplars plus `!handoff` / `handoff:` sigils; margin-gated like every actionable kind. Writes a baseline handoff and steers the agent to enrich it; never recorded as requirement, amendment, or refinement. Live eval (bge-base): handoff 4/4 held-out, 0 false actions.
+- **`/quest-garden`** (`src/domain/garden.ts`, `src/surface/commands/continuity.ts`, alias `/quest garden`): triage of `.pi/quest/future` with verdicts active / fresh / stale / orphan / empty-shell; `prune` archives selections as ABANDONED via the archive writer (active quest and its stack are never pruned; confirms when a UI is present); `dedupe` repairs duplicate bullets preserving file mtime.
+
+### Fixed
+- **Duplicate directives** (`src/domain/dedupe.ts`, `src/domain/quest.ts`, `src/domain/quest-doc.ts`, `src/subquests/index.ts`): `recordAmendment`, `recordRefinement`, `appendRequirementToDoc`, `appendAmendmentToDoc` and follow-up appends are idempotent (exact match after whitespace/case normalization; `R7: x` ≡ `R9: [User Directive] x`). Previously one repeated message produced up to three identical amendments and R7/R8/R9.
+
 ## [1.10.1] - 2026-11-01
 
 ### Fixed

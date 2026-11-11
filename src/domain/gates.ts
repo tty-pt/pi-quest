@@ -92,14 +92,45 @@ function validatingDecision(state: QuestState): Decision {
   );
 }
 
+function checkReviewOrCircuitBreaker(state: QuestState, ref: ToolRef): Decision | null {
+  if (state.activeReview !== null) {
+    if (ref.toolClass === "journal" || ref.toolClass === "ask") return { allowed: true };
+    return blocked(
+      "AWAITING_REVIEW",
+      "PLAN_REVIEW_REQUIRED",
+      "Review running — end your turn; the verdict arrives as a new turn.",
+    );
+  }
+  if (state.phase === "implementing" && state.circuitBreakerActive) {
+    if (ref.toolClass === "journal" || ref.toolClass === "ask" || !isWriteSignal(ref.toolClass)) {
+      return { allowed: true };
+    }
+    return blocked(
+      "CIRCUIT_BREAKER_ACTIVE",
+      "ASSUMPTION_AUDIT_REQUIRED",
+      "Write tools paused due to repeated test/build failures. Stop tinkering. Run a diagnostic audit: explain which assumption was contradicted and what reality proved (call quest_update_state with {refinement: '...'} or revise your plan via {planRevision: '...'}) before modifying more files.",
+    );
+  }
+  if (state.phase === "implementing" && state.pendingDirectiveRevision) {
+    if (ref.toolClass === "journal" || ref.toolClass === "ask" || !isWriteSignal(ref.toolClass)) {
+      return { allowed: true };
+    }
+    const directiveNote = state.pendingDirectiveText ? `: "${state.pendingDirectiveText}"` : "";
+    return blocked(
+      "PLAN_REVISION_REQUIRED",
+      "PLAN_REVISION_REQUIRED",
+      `Source file mutation paused due to pending mid-quest user directive${directiveNote}. Stop coding. Update the plan via quest_update_state {planRevision: '...', note: '...'} so the revision can be peer-reviewed before modifying files.`,
+    );
+  }
+  return null;
+}
+
 export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {}): Decision {
   const draftFile = state.qid === null ? null : draftPath(state.qid);
   const isDraftFile = draftFile !== null &&
     ref.toolClass === "write" &&
     ref.path !== undefined &&
     (ref.path === draftFile || ref.path.endsWith(`/${draftFile}`));
-  // The drafting exemption keeps its historic precedence: it beats even the
-  // reviewer row. The lock below only narrows implementing/validating.
   if (isDraftFile && state.phase !== "implementing" && state.phase !== "validating") {
     return { allowed: true };
   }
@@ -107,11 +138,7 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
     return { allowed: true };
   }
   if (options.isReviewerSession === true) {
-    return blocked(
-      "REVIEWER_READ_ONLY",
-      "IMPLEMENTATION_BLOCKED",
-      "Read/search only; report via verdict.",
-    );
+    return blocked("REVIEWER_READ_ONLY", "IMPLEMENTATION_BLOCKED", "Read/search only; report via verdict.");
   }
   if (isDraftFile) {
     return blocked(
@@ -120,22 +147,11 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
       "Quest doc is locked during implementation. Use quest_update_state {planRevision: ...} to revise the plan (peer-reviewed), or {claimComplete: true} to claim completion.",
     );
   }
-  if (state.activeReview !== null) {
-    if (ref.toolClass === "journal" || ref.toolClass === "ask") {
-      return { allowed: true };
-    }
-    return blocked(
-      "AWAITING_REVIEW",
-      "PLAN_REVIEW_REQUIRED",
-      "Review running — end your turn; the verdict arrives as a new turn.",
-    );
-  }
-  // B2.1: only write signals are phase-gated. Reads, journal ops, questions,
-  // and unknown-class tools (vcc_recall, …) pass — no read whitelist to
-  // maintain, and an unrecognized tool never blocks research.
-  if (!isWriteSignal(ref.toolClass)) {
-    return { allowed: true };
-  }
+  const reviewCheck = checkReviewOrCircuitBreaker(state, ref);
+  if (reviewCheck !== null) return reviewCheck;
+
+  if (!isWriteSignal(ref.toolClass)) return { allowed: true };
+
   if (state.phase === "implementing" && state.contract && ref.path) {
     if (!isPathAllowedByContract(state.contract, ref.path, options.cwd)) {
       const allowedList = state.contract.allowedPaths?.join(", ") ?? "";
@@ -145,15 +161,9 @@ export function decide(state: QuestState, ref: ToolRef, options: GateOptions = {
       };
     }
   }
-  if (state.phase === "drafting") {
-    return draftDecision(state, draftFile ?? "the draft file");
-  }
-  if (state.phase === "validating") {
-    return validatingDecision(state);
-  }
-  if (state.phase === "idle" || state.phase === "archived") {
-    return { allowed: true };
-  }
+  if (state.phase === "drafting") return draftDecision(state, draftFile ?? "the draft file");
+  if (state.phase === "validating") return validatingDecision(state);
+  if (state.phase === "idle" || state.phase === "archived") return { allowed: true };
   if (state.phase === "provisional") {
     return blocked(
       "PROVISIONAL_RESEARCH_PENDING",

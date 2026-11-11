@@ -139,12 +139,15 @@ When you receive a mid-quest directive, evaluate it using this decision protocol
 1. **Separable Task or New Feature** (e.g. *"Also build an export command"*, *"Handle the CSS in a subtask"*):
    - Do NOT try to cram unrelated work into your active single-lane plan.
    - Proactively spawn a sub-quest via `quest_subquest({ goal, brief, switchNow })`.
+   - Sub-quests initialize in `drafting` mode and must author an actionable plan (`## Requirements`, `## Evidence`, `## Implementation Plan`) and pass peer review before source code edits unlock.
    - Set `switchNow: true` if the task is an immediate prerequisite/blocker, or `switchNow: false` if it can queue into the backlog for the autonomous Foreman.
-2. **Constraint, Rule, or Course Correction** (e.g. *"Port must be 8080"*, *"Don't touch db.c"*, *"Ensure tests pass"*):
-   - Incorporate the constraint into your implementation immediately.
-   - Record an amendment via `quest_update_state { amendment: { change: "...", reasons: "Operator mid-quest directive" } }`.
-3. **Conversational Question** (e.g. *"What does this function do?"*, *"Status?"*):
-   - Answer the question directly in your conversational response. Do not modify the plan or open a sub-quest.
+2. **Constraint, Rule, or Course Correction** (e.g. *"avoid magic constants, please"*, *"Port must be 8080"*, *"Don't touch db.c"*):
+   - **Stop and Plan Invariant**: NEVER hack immediately on a mid-quest directive. Coding tools are paused under `PLAN_REVISION_REQUIRED`.
+   - First, respond conversationally and adequately to what the operator is asking or steering in your message.
+   - Do NOT spawn a sub-quest for code-style directives or negative constraints (e.g. "avoid magic constants", "don't use X"). They bind the active plan.
+   - Stage a plan revision via `quest_update_state { planRevision: "...", note: "Incorporating user directive: ..." }` so the peer reviewer audits your updated steps and test commands before modifying files (or the user may reply `go` / `APPROVE` to proceed).
+3. **Conversational Question or Guidance** (e.g. *"What does this function do?"*, *"Status?"*):
+   - Answer the question directly and adequately in your conversational response. Do not blindly ignore user questions with "proceeding with implementation". Do not modify the plan or open a sub-quest for pure conversation.
 
 **Validation Invariant:** Every operator directive is part of the acceptance criteria verified
 by the validator at completion. Claiming completion (`claimComplete: true`) while ignoring an
@@ -159,25 +162,29 @@ active user directive will cause validation to FAIL.
   parent waits; you resume on return with findings. Depth cap 3. A failed
   child never fails its parent — record, adjust, continue.
 - `quest_archive` — finish as completed (needs a current validation PASS;
-  claim via `quest_update_state` with `claimComplete` first), failed, or
-  abandoned. Archiving unvalidated work as failed/abandoned requires
-  `confirmDiscard:true` plus a summary of what was discarded and why.
-  Archive zips the quest doc `future/<qid>.md` plus the rendered view and
-  manifest into `archive/<qid>.zip` (sole artifact) and removes both sources.
+  claim via `quest_update_state` with `claimComplete` first) or failed.
+  Completing or abandoning a quest merges/cleans up any scratch worktree,
+  emits structured execution metadata for `pi-mm` episodic distillation, and
+  removes `future/<qid>.md` directly without creating `.zip` files.
 - `quest_recover` — rebuild state from the transcript, including earlier
   sessions. Runs automatically when state is absent.
 - `quest_rebut` — answer a review with evidence; a successful rebuttal
   reopens the question.
-- `quest_ask_human` — ask with a recommended default and timeout (one
-  minute default). It dispatches through question providers — tools with a
+- `quest_ask_human` — ask with a recommended default and timeout (5
+  minutes default). It dispatches through question providers — tools with a
   working invocation protocol first, the built-in input prompt as the
   guaranteed fallback. Never blocks: absence, cancellation, or timeout
   proceeds with the default, and a late answer still applies when it
-  arrives.
+  arrives. For plan reviews, pressing Escape cancels without approving, and the
+  prompt never defaults to confirming (default is "hold"). Mandatory rule:
+  verify that all user requests and directives are completely captured in the
+  plan file before asking the user any questions. Immediately before firing any
+  question to approve, pi-quest fires an adversarial subagent to strictly
+  validate the plan and ensure full user request coverage.
 
 ## Commands
 
-`/quest` (resume by qid/name, show the active quest, or pick from current quests when idle — fresh sessions start with no active quest), `[^Q]` (floating plan viewer), `/quests` (list), `/quest-del` (archive/kill).
+`/quest` (shows the self-explaining status card and command cheat sheet, or auto-resumes a lone draft when idle), `/quest <name|qid>` (switch/resume), `/quest edit` (open active plan in `$EDITOR`), `/quest list` (list active & draft quests with triage info), `/quest pause` / `/quest on` (pause/resume for session), `/quest cancel` (cancel in-flight review), `/quest del [qid|--all|--stale|--empty|--orphans|--dry-run]` (delete/abandon quest or prune drafts), `/quest handoff`, `/quest slots`, `/quest doctor`, `/quest policy`, `/quest router`, `/quest ratings`.
 Everything else the system does by itself.
 
 ## Durability

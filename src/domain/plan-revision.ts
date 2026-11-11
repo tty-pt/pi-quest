@@ -24,6 +24,8 @@ export function recordPlanRevision(
   if (nextHash.trim() === "") throw new Error("plan revision needs a content hash");
   if (previousHash !== null && previousHash.trim() === "") throw new Error("plan revision needs a content hash");
   return markChanged(state, {
+    pendingDirectiveRevision: false,
+    pendingDirectiveText: undefined,
     draft: {
       ...draft,
       contentHash: nextHash,
@@ -38,6 +40,8 @@ export function approvePlanRevision(state: QuestState, hash: string, planText: s
   const draft = requireImplementingDraft(state);
   if (hash.trim() === "") throw new Error("plan approval needs a content hash");
   return markChanged(state, {
+    pendingDirectiveRevision: false,
+    pendingDirectiveText: undefined,
     draft: { ...draft, approvedPlanHash: hash, lastReviewedPlan: planText },
   });
 }

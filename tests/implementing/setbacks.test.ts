@@ -26,12 +26,17 @@ Deno.test("setbacks key on exit status, not on words in the output", () => {
 
 Deno.test("setbacks never read a passing run as failed (the '0 failed' false positive)", () => {
   check(detectSetback(bash("npm test", "519 passed, 0 failed", false, { exitCode: 0 })) === null, "0 failed is a pass");
+  check(detectSetback(bash("make", "compiler warning on stderr", true, { exitCode: 0 })) === null, "stderr warnings with exit 0 are not a failure");
   check(detectSetback(bash("npm test | grep failed", "test names containing failed ... ok", false)) === null, "words in output ignored");
   check(detectSetback(bash("make -j4", "4 errors generated.", false)) === null, "output text alone is not a failure");
 });
 
 Deno.test("setbacks ignore no-match exit status of search commands", () => {
   check(detectSetback(bash("grep -r foo .", "", true, { exitCode: 1 })) === null, "grep exit 1 ignored");
+  check(detectSetback(bash("which optional_tool", "", true, { exitCode: 1 })) === null, "which exit 1 ignored");
+  check(detectSetback(bash("command -v clang", "", true, { exitCode: 1 })) === null, "command exit 1 ignored");
+  check(detectSetback(bash("type foo", "", true, { exitCode: 1 })) === null, "type exit 1 ignored");
+  check(detectSetback(bash("find . -name missing", "", true, { exitCode: 1 })) === null, "find exit 1 ignored");
   check(detectSetback(bash("cat file", "hello", false)) === null, "clean probe ignored");
   check(detectSetback(bash("cat missing", "cat: missing: No such file", true, { exitCode: 1 })) !== null, "cat exit 1 is a real error");
   check(detectSetback(bash("grep foo x", "grep: x: error", true, { exitCode: 2 })) !== null, "grep exit 2 is a real error");

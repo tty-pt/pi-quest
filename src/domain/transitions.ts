@@ -2,6 +2,7 @@
 // SPEC: B1.1-B1.5 (lifecycle), B1.4 (Exact Next Action).
 import type { ApprovedBy, ArchivedOutcome, QuestKind, QuestState } from "./quest";
 import { markChanged, requirePhase } from "./quest";
+import type { RtmItem } from "./contract";
 
 export function createDraft(state: QuestState, draftName: string, kind?: QuestKind): QuestState {
   requirePhase(state, "provisional");
@@ -27,13 +28,14 @@ export function createDraft(state: QuestState, draftName: string, kind?: QuestKi
   });
 }
 
-export function promote(state: QuestState, approvedBy: ApprovedBy): QuestState {
+export function promote(state: QuestState, approvedBy: ApprovedBy, rtm?: RtmItem[]): QuestState {
   requirePhase(state, "drafting");
   if (state.draft === null || !state.draft.planAuthored) {
     throw new Error("cannot promote a draft with no authored plan");
   }
   return markChanged(state, {
     phase: "implementing",
+    rtm: rtm ?? state.rtm,
     draft: { ...state.draft, approvedBy, outstandingFindings: false, approvedPlanHash: state.draft.contentHash },
     activeReview: null,
     exactNextAction: "Proceed autonomously from the draft plan.",
@@ -42,13 +44,14 @@ export function promote(state: QuestState, approvedBy: ApprovedBy): QuestState {
 
 // Analysis quests skip the implementing gap: the deliverable is the analysis
 // itself, so a reviewer PASS claims straight to validating (D3).
-export function promoteToValidation(state: QuestState, approvedBy: ApprovedBy): QuestState {
+export function promoteToValidation(state: QuestState, approvedBy: ApprovedBy, rtm?: RtmItem[]): QuestState {
   requirePhase(state, "drafting");
   if (state.draft === null || !state.draft.planAuthored) {
     throw new Error("cannot promote a draft with no authored deliverable");
   }
   return markChanged(state, {
     phase: "validating",
+    rtm: rtm ?? state.rtm,
     draft: { ...state.draft, approvedBy, outstandingFindings: false, approvedPlanHash: state.draft.contentHash },
     activeReview: null,
     exactNextAction: "Await validation verdict against the delivered analysis.",
@@ -57,8 +60,13 @@ export function promoteToValidation(state: QuestState, approvedBy: ApprovedBy): 
 
 export function claimComplete(state: QuestState): QuestState {
   requirePhase(state, "implementing");
+  const satisfiedRtm = state.rtm?.map((r) => ({
+    ...r,
+    status: r.status === "pending" ? ("satisfied" as const) : r.status,
+  }));
   return markChanged(state, {
     phase: "validating",
+    rtm: satisfiedRtm ?? state.rtm,
     exactNextAction: "Await validation verdict against the approved plan.",
   });
 }

@@ -3,8 +3,11 @@
 import type { Pi } from "../../hooks/events";
 import { archiveTool } from "./archive";
 import { askHumanTool } from "./ask-human";
+import { handoffTool } from "./handoff";
 import { rebutTool } from "./rebut";
 import { recoverTool } from "./recover";
+import { runTestTool } from "./run-test";
+import { scratchesTool } from "./scratches";
 import { subquestTool } from "./subquest";
 import { updateStateTool } from "./update-state";
 
@@ -15,4 +18,7 @@ export function installTools(pi: Pi): void {
   pi.registerTool(recoverTool(pi));
   pi.registerTool(rebutTool(pi));
   pi.registerTool(askHumanTool(pi));
+  pi.registerTool(handoffTool(pi));
+  pi.registerTool(runTestTool(pi));
+  pi.registerTool(scratchesTool(pi));
 }

@@ -26,7 +26,7 @@ Every quest executes through three phases:
 
 1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) but may only write to its draft plan (`.pi/quest/future/<qid>.md`). Content changes trigger an independent reviewer. You can reply `go` or `proceed` at any moment to bypass review.
 2. **Implementing**: The agent works from the approved plan. Unexpected obstacles and discoveries are recorded as amendments on disk.
-3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS archives the finished quest into `.pi/quest/archive/<qid>.zip`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately.
+3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree, and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately.
 
 ### Instant Plan Overlay (`Ctrl+Q`)
 Press **`Ctrl+Q`** in the terminal at any time to open a full-screen, scrollable viewer of the active quest document, requirements, and progress.
@@ -160,7 +160,7 @@ When a quest enters peer review (in drafting, mid-flight plan revision, or valid
 
 `pi-quest` operates with zero manual configuration:
 - **Automatic Daemon Start**: Automatically detects and launches `axil-auren` on port 4242 for local intent evaluation.
-- **Embedding-Only Model Provisioning & Visual Status**: Automatically downloads only the required fast embedding model (`bge-base`, 117 MB). Unused inference/chat models (`qwen`, `olmoe`) are never downloaded. Non-blocking download progress (`⬇ bge-base (42%)`) and active model status (`⚡ bge-base`) appear in the status bar under `quest-judge`.
+- **Embedding-Only Model Provisioning & Visual Status**: Automatically downloads only the required fast embedding model (`bge-base`, 117 MB). Unused inference/chat models (`qwen`, `olmoe`) are never downloaded. Non-blocking download progress (`⬇️ bge-base (42%)`) and active model status (`⚡ bge-base`) appear in the status bar under `quest-judge`.
 - **Proactive Dependency Checks**: On `session_start`, checks core C engine versions and alerts with remediation steps if anything is outdated.
 - **Deterministic Trigger Words**: Starting a prompt with `quest:`, `task:`, `fix:`, or `feat:` starts the quest instantly with 0ms latency.
 - **In-Memory Embedding Classification**: Steering ("go on", cancel), quest-vs-conversation, difficulty tier, and plan verification are decided by nearest-example embeddings evaluated server-side via `POST /v1/systemone` (~5–15 ms, SIMD dot products in C). If `axil-auren` is offline, `pi-quest` requires explicit trigger prefixes or commands (`quest:`, `fix:`, `/quest`) without guessing or invoking generative LLMs. Each move was measured on held-out English/Portuguese corpora and adopted with zero wrong state-changing verdicts. See [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md#what-decides-what-embeddings-judge-or-neither).
@@ -185,26 +185,63 @@ Inspects live judge status, active model router matrix, core C engine versions, 
 | `quest_rebut` | `rebuttal` | Submits concrete evidence addressing reviewer findings, booting a fresh review. |
 | `quest_ask_human` | `question`, `default`, `timeoutMs` | Asks the human with a recommended default, continuing autonomously on absence. |
 | `quest_recover` | `qid` | Reconstructs quest state from the transcript after crashes or context resets. |
+| `quest_handoff` | `qid`, `notes` | Writes an honest, self-contained handoff for the next agent to `.pi/quest/handoffs/<qid>-<stamp>.md` and returns it (see §7a). |
+| `quest_scratches` | `slotId` | Inspects scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, process health, git status, and current activity. |
+| `quest_run_test` | `command` | Safely executes a verification test inside the active worktree (or primary repo root) and records the test receipt. |
 
 ---
 
 ## 7. Slash Commands Reference
 
-| Command | Shortcut | Description |
+All operator commands live under **`/quest`** (with interactive tab-completion for subcommands and quest names):
+
+| Command | Alias | Description |
 | :--- | :--- | :--- |
-| `/quest` | `Ctrl+Q` | View active plan in scrollable overlay, resume paused drafts, or create new quest. |
-| `/quests` | | List active branch quests, future drafts, and archived completions. |
-| `/quest-policy` | | Inspect active model, effective review policy, and draft quality rules. |
-| `/quest-ratings` | | Inspect model accuracy ratings, learned Beta distributions, and autonomy levels. |
-| `/quest-router` | | Inspect phase $\times$ difficulty matrix cells, active routes, and cooldown timers. |
-| `/quest-del` | | Archive the active quest as abandoned. |
+| `/quest` | | Show self-explaining quest status card (active quest, phase, plan path, next action, and subcommand reference), or auto-resume a lone draft when idle. |
+| `/quest <name\|qid>` | `/quest resume <name\|qid>` | Switch to or resume a quest by its readable draft name or QID. |
+| `/quest edit` | `/quest plan` | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR` (or `planEditor`). |
+| `/quest list` | `/quest ls` | List active & draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
+| `/quest pick` | `/quest switch` | Interactively select a quest to resume. |
+| `/quest pause` / `/quest on` | `/quest off` / `/quest enable` | Pause or re-enable `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest cancel` | `/quest cancel-review` | Cancel any currently running in-flight review or validation and unblock tool execution. |
+| `/quest del [qid\|flags]` | `/quest drop` | Delete/abandon the active quest, a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`). |
+| `/quest handoff [qid]` | | Write and show a handoff for the active (or named) quest. |
+| `/quest slots` | `/quest scratches` | Inspect active scratch workspace slots (`.pi/scratch/slot-N`), assigned quests, process health, and working tree state. |
+| `/quest doctor` | | Check live health of decision judge, latency, models, and word families. |
+| `/quest policy` | | Inspect active model, effective review policy, and draft quality rules. |
+| `/quest router` | | Inspect phase $\times$ difficulty matrix cells, active routes, and cooldown timers. |
+| `/quest ratings` | | Inspect model accuracy ratings, learned Beta distributions, and autonomy levels. |
+
+---
+
+## 7a. Continuity: Handoffs, Compaction & Draft Triage
+
+Context gets lost: compaction, a fresh agent, a new session. pi-quest packages the quest so nothing the operator asked for is forgotten.
+
+- **Handoff documents** (`quest_handoff`, `/quest handoff`). Deterministic, generated from quest state and the quest doc — never from the agent's self-assessment:
+  the operator's request **verbatim**; every later directive (refinements, follow-ups, amendments, answers) deduplicated; an **Asked vs. accomplished** table where only recorded status (RTM verified/satisfied, a checked box) counts and everything else is marked **UNVERIFIED**; the approved plan; files touched and `git diff --stat` since the base commit; last test receipt and review verdict; blockers and running sub-quests; the exact next action; resume rules; and the agent's own `notes` (root causes, dead ends, gotchas).
+- **Auto-handoff on compaction.** `session_before_compact` writes a handoff before the transcript is summarized; after `session_compact` the next turn gets a one-shot `[Post-Compaction Handoff]` pointer (path, unverified requirement ids, next action).
+- **"Give me a handoff" is a meta request, not a requirement.** A `handoff` intent (embedding exemplars in EN/PT/ES, sigils `!handoff` / `handoff:`) writes a baseline handoff and steers the agent to enrich it via `quest_handoff {notes}`; it is never recorded as an R#, amendment, or refinement.
+- **Idempotent directives & auto-dedupe.** Repeating a message never mints a second amendment, refinement, follow-up, or requirement (exact match after whitespace/case normalization), and quest doc writes automatically deduplicate bullets in place.
+- **Draft triage** (`/quest list` & `/quest del`). `/quest list` displays every quest in `.pi/quest/future` with age, phase, requirement progress, plan presence, parent link, and a verdict: `active` (active quest and its stack — never pruned), `fresh`, `stale` (≥ `--days`, default 7), `orphan` (parent quest gone), `empty-shell` (no requirements, no plan). `/quest del` removes the active quest, named drafts, or batch-prunes selected drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--dry-run`) directly without creating legacy `.zip` archives.
+
+---
+
+## 7b. Worktrees, Submodules & Scratch Workspaces
+
+Implementation work runs isolated in dedicated git worktrees to keep the primary workspace stable and clean:
+
+- **Warm Scratch Pool (`.pi/scratch/slot-N`)**: A pool of pre-warmed worktree slots avoids expensive submodule cloning delays during execution. Slots dynamically scale up to capacity (`worktreePoolMaxSize`, default 8) and automatically reclaim orphaned or terminated leases.
+- **Fail-Safe Integration on `/quest del`**: Before any scratch slot is torn down or reset, in-flight work and submodule commits are committed to the quest feature branch (`quest/<qid>`). The operator is given the option to integrate (squash-merge) into the current branch or keep the feature branch intact. Submodule commits are always mirrored to canonical primary `.git/modules/` storage before worktree unmounting.
+- **Tool Interception & Jailing**: During the `implementing` phase, file edits, bash executions, background tasks, and subagent runs are jailed to the active worktree path.
+- **Clean Status HUD**: The status bar displays the phase icon (`🔍`, `📝`, `👀` while reviewing, `🔨`, `🧪`, `⏸️` when paused), sub-quest depth (`↳ `, `↳₂ `), readable quest name, scratch slot badge (`(1)`, `(2)`, `(wt)`), and passing test checkmark (`✓`), e.g. `🔨 ↳ fix-seams (1) ✓`. `/quest slots` provides an instant overview of all slots, assigned quests, and working tree states.
 
 ---
 
 ## 8. Development & Testing
 
 ```bash
-npm --prefix .pi/extensions/pi-quest test    # Run full test suite (500+ unit & integration tests)
+npm --prefix .pi/extensions/pi-quest test    # Run full test suite (770+ unit & integration tests)
 npm --prefix .pi/extensions/pi-quest run zip # Package distribution bundle (pi-quest-bundle.zip)
 ```
 

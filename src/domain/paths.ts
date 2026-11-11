@@ -26,3 +26,16 @@ export function archivePath(qid: Qid): string {
 export function isQuestPath(path: string): boolean {
   return path === QUEST_ROOT || path.startsWith(`${QUEST_ROOT}/`);
 }
+
+// Handoff documents: generated on demand, on compaction, or on operator
+// request. Never read back as state — they are views for the next agent.
+export const HANDOFF_DIR = `${QUEST_ROOT}/handoffs`;
+
+/** `20261106-143005` (UTC) — sortable, filename-safe. */
+export function handoffStamp(now: Date): string {
+  return now.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+export function handoffPath(qid: Qid, now: Date): string {
+  return `${HANDOFF_DIR}/${qid}-${handoffStamp(now)}.md`;
+}

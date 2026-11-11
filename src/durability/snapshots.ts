@@ -89,6 +89,10 @@ export function normalizeState(raw: Record<string, unknown>): QuestState {
       : undefined,
     baseCommit: typeof raw["baseCommit"] === "string" ? raw["baseCommit"] : undefined,
     touchedFiles: Array.isArray(raw["touchedFiles"]) ? (raw["touchedFiles"] as string[]) : [],
+    worktreePath: typeof raw["worktreePath"] === "string" ? raw["worktreePath"] : undefined,
+    worktreeBranch: typeof raw["worktreeBranch"] === "string" ? raw["worktreeBranch"] : undefined,
+    milestoneCommits: Array.isArray(raw["milestoneCommits"]) ? (raw["milestoneCommits"] as QuestState["milestoneCommits"]) : [],
+    disabled: raw["disabled"] === true,
     snapshotPending: get("snapshotPending", false),
   };
 }

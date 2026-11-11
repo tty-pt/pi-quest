@@ -147,6 +147,24 @@ export const DEFAULT_INTENT_EXEMPLARS: Readonly<Record<string, readonly string[]
     "once this is done, add a migration note",
     "a seguir, acrescenta testes de integração",
   ],
+  // Meta requests about continuity: the operator wants the quest packaged for
+  // a fresh agent (or before compaction). Routed to quest_handoff, never
+  // recorded as a requirement.
+  handoff: [
+    "give me a handoff prompt",
+    "write a handoff for the next agent",
+    "I'll compact, help me out with a handoff prompt",
+    "before I compact, summarize everything you know for a new agent",
+    "check what I asked for and what was actually done and give a handoff",
+    "prepare a detailed handoff so another agent can continue",
+    "you will forget after compaction, write down everything for the next session",
+    "give me a prompt I can paste into a fresh agent to continue this",
+    "dá-me um prompt de handoff",
+    "escreve um handoff para o próximo agente",
+    "vou compactar, resume tudo o que sabes para um novo agente",
+    "prepara a passagem de testemunho para outro agente",
+    "dame un prompt de traspaso para el siguiente agente",
+  ],
   ack: [
     "thanks",
     "thank you!",

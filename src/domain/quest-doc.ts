@@ -5,6 +5,7 @@
 // adapters (quest-doc.ts at src root), never here.
 import { isHeading } from "./sections";
 import type { HandbackReceipt } from "./contract";
+import { bulletParts, normalizeDirective, requirementIdentity } from "./dedupe";
 
 export interface DocStatus {
   phase: string | null;
@@ -130,8 +131,22 @@ function insertBeforeSectionEnd(lines: string[], header: number, item: string): 
   return lines;
 }
 
+// Bullets of the `## <key>` section (text after "- "), empty when absent.
+function sectionBullets(lines: string[], key: "requirements" | "amendments"): string[] {
+  const header = lines.findIndex((l) => isHeading(l, key));
+  if (header === -1) return [];
+  return lines.slice(header + 1, sectionEnd(lines, header))
+    .map((l) => l.match(/^\s*[-*+]\s+(.*)$/))
+    .filter((m): m is RegExpMatchArray => m !== null)
+    .map((m) => m[1]);
+}
+
 export function appendRequirementToDoc(text: string, requirementText: string): string {
   const lines = text.split("\n");
+  const identity = requirementIdentity(requirementText);
+  if (identity !== "" && sectionBullets(lines, "requirements").some((b) => requirementIdentity(b) === identity)) {
+    return text;
+  }
   const header = lines.findIndex((l) => isHeading(l, "requirements"));
   const nextR = findMaxSequenceNumber(lines, "R") + 1;
   const newReq = `- R${nextR}: [User Directive] ${requirementText.trim()}`;
@@ -173,6 +188,8 @@ export function appendAmendmentToDoc(text: string, change: string, reason: strin
   const lines = text.split("\n");
   const header = lines.findIndex((l) => isHeading(l, "amendments"));
   const bullet = `- ${change.trim()} (${reason.trim()})`;
+  const key = normalizeDirective(bullet.slice(2));
+  if (sectionBullets(lines, "amendments").some((b) => normalizeDirective(bulletParts(b).body) === key)) return text;
 
   if (header === -1) {
     const reqHeader = lines.findIndex((l) => isHeading(l, "requirements"));

@@ -9,10 +9,7 @@ import { difficultyLevel, type QuestDifficulty } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
 import { lastRoutedModel } from "../router/last-route";
 
-export interface PolicyRule {
-  pattern: string;
-  policy: ReviewPolicy;
-}
+export { parsePolicyRules, type PolicyRule } from "../config";
 
 export interface EffectivePolicy {
   policy: ReviewPolicy;
@@ -37,6 +34,8 @@ export const DEFAULT_MODEL_ACCURACY: Record<string, number> = {
   "*claude-3.5-sonnet*": 1.0,
   "*claude-sonnet-5*": 1.0,
   "*gpt-4o": 1.0,
+  "*gemini-4-argon*": 1.0,
+  "*gemini-3.1-pro*": 0.95,
   "*gemini-2.5-pro*": 1.0,
   "*gemini-pro*": 1.0,
   "*o1*": 1.0,
@@ -122,33 +121,9 @@ export function calculateReviewNeed(
   return Math.round(((d * risk) + (setbackCount * 1.5)) * 10) / 10;
 }
 
-function asPolicy(value: unknown): ReviewPolicy | undefined {
-  if (typeof value !== "string") return undefined;
-  const v = value.trim().toLowerCase();
-  return POLICIES.has(v) ? (v as ReviewPolicy) : undefined;
-}
 
-// Accepts the settings object form ({ "glob": "policy" }) and the env-var
-// string form ("glob=policy,glob=policy"). Order is preserved; invalid entries
-// are dropped here and reported by collectConfigWarnings.
-export function parsePolicyRules(raw: unknown): PolicyRule[] {
-  let entries: Array<[string, unknown]> = [];
-  if (typeof raw === "string") {
-    entries = raw.split(",").map((part): [string, unknown] => {
-      const eq = part.lastIndexOf("=");
-      return eq < 0 ? ["", ""] : [part.slice(0, eq), part.slice(eq + 1)];
-    });
-  } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-    entries = Object.entries(raw as Record<string, unknown>);
-  }
-  const rules: PolicyRule[] = [];
-  for (const [pattern, value] of entries) {
-    const policy = asPolicy(value);
-    if (pattern.trim() === "" || policy === undefined) continue;
-    rules.push({ pattern: pattern.trim(), policy });
-  }
-  return rules;
-}
+
+
 
 // '*' matches any run of characters; everything else is literal; anchored and
 // case-insensitive.

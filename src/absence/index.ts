@@ -3,7 +3,7 @@
 // SPEC: B1.9.
 import { getState } from "../app/store";
 import { readQuestConfig } from "../config";
-import { interpretUserTurn } from "../domain/intent";
+import { interpretUserTurn } from "../judge/intent-classifier";
 import { onUserMessage, type Pi } from "../hooks/events";
 import { noteLateAnswer, pendingQuestion } from "./ask";
 import { installObservedQuestions } from "./observed";
