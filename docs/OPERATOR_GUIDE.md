@@ -110,7 +110,7 @@ All commands are unified under `/quest` with tab-completion:
 | `/quest finish [--keep-slot]` | Complete and integrate the active quest, or squash-merge a retained scratch slot (`.pi/scratch/slot-N`) into `main` after manual testing (`/quest merge` / `/quest integrate`; `--keep-slot` keeps the slot attached after merging). |
 | `/quest edit` (or `/quest plan`) | Open the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR`. |
 | `/quest list` | Display all active and draft quests with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
-| `/quest pause` / `/quest on [goal]` | Pause, re-enable, or toggle (`Alt+Q` / `/quest toggle`) `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). `/quest on [goal]` starts a quest immediately using prior conversation context. |
+| `/quest pause` / `/quest on [goal]` | Pause, re-enable, or toggle (`Alt+J` / `/quest toggle`) `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). `/quest on [goal]` starts a quest immediately using prior conversation context. |
 | `/quest cancel` | Cancel any currently running in-flight review or validation and unblock tool execution. |
 | `/quest del [qid\|flags]` | Delete/abandon the active quest (`--keep-slot` / `-s`, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) with fail-safe branch integration options. |
 | `/quest handoff [qid]` | Write and show an honest handoff (verbatim request, every directive, asked-vs-accomplished with UNVERIFIED rows, plan, diff stat, last test/review, blockers, next action) to `.pi/quest/handoffs/`. Also written automatically before every compaction. Saying "give me a handoff" (or `!handoff`) mid-quest does the same and is never recorded as a requirement. |
@@ -128,9 +128,9 @@ All commands are unified under `/quest` with tab-completion:
    - Sessions start in `idle` (or paused `⏸️`) routed to **`antigravity-acp/gemini-4-argon:high`** so you can discuss the problem, explore files, and refine the plan conversationally before locking anything.
    - Once you are happy with the understanding/plan, activate a quest with `"quest: Go for it."`, `/quest on`, `/quest on [goal]`, or `/quest new [goal]`.
    - `pi-quest` pulls the substantive objective and context from the prior conversation (`extractPriorConversationObjective`), writes `.pi/quest/future/<qid>.md` immediately, and runs the `[Drafter–Reviewer Dialogue]` in the background while you continue chatting.
-2. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
-   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` for the current session and work freely without draft gates (keeping the router on the `idle` Argon rule).
-   - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest.
+2. **Toggle or pause quest enforcement (`Alt+J` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+J`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` for the current session and work freely without draft gates (keeping the router on the `idle` Argon rule).
+   - Press **`Alt+J`** again (or run `/quest on`) to resume the paused quest.
 3. **Test in the scratch worktree before or after merging (`keep-slot`, `squash-keep-slot`, `/quest finish`)**:
    - When completing a quest (`quest_archive` or interactive prompt), select:
      - **`Leave in worktree slot for manual testing before merge`** (`keep-slot`): leaves `quest/<qid>` unmerged in `.pi/scratch/slot-N` so you can manually test or inspect the changes before merging into `main`.

@@ -56,7 +56,7 @@ const SUBCOMMAND_COMPLETIONS: ReadonlyArray<{ value: string; label: string }> = 
   { value: "finish", label: "finish — Finish/integrate active quest or retained scratch slot (/quest finish [--keep-slot])" },
   { value: "pause", label: "pause — Pause pi-quest for this session" },
   { value: "on", label: "on — Re-enable pi-quest for this session (/quest on [goal])" },
-  { value: "toggle", label: "toggle — Toggle pi-quest on or off for this session (Alt+Q)" },
+  { value: "toggle", label: "toggle — Toggle pi-quest on or off for this session (Alt+J)" },
   { value: "cancel", label: "cancel — Cancel in-flight review and unblock tools" },
   { value: "del", label: "del — Delete quest (--keep-slot|-s) or prune drafts (--stale|--empty|--orphans|--all)" },
   { value: "handoff", label: "handoff — Write and show handoff document" },
@@ -236,7 +236,7 @@ export function installCommands(pi: Pi): void {
   pi.registerCommand("quest", spec);
 
   if (typeof pi.registerShortcut === "function") {
-    pi.registerShortcut("alt+q", {
+    pi.registerShortcut("alt+j", {
       description: "Toggle pi-quest on or off for this session (/quest on | /quest off)",
       handler: async (ctx: PiCtx) => {
         const out = await toggleQuestDisabled(pi, ctx, !getState().disabled);

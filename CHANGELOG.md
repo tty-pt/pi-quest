@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] (target: v1.12.0)
 
 ### Changed
-- **Unified `/quest` Command Surface, `Alt+Q` Shortcut & Default Disabled Mode** (`src/surface/commands/index.ts`, `src/surface/commands/quest.ts`, `src/config/defaults.ts`, `src/durability/status.ts`):
+- **Unified `/quest` Command Surface, `Alt+J` Shortcut & Default Disabled Mode** (`src/surface/commands/index.ts`, `src/surface/commands/quest.ts`, `src/config/defaults.ts`, `src/durability/status.ts`):
   - Consolidated all operator commands under `/quest` (`list`, `pick`, `new`, `edit`, `pause`/`on`/`toggle`, `cancel`, `del`, `handoff`, `slots`, `doctor`, `policy`, `router`, `ratings`) with tab completion and a self-explaining status card on bare `/quest`.
-  - Registered `alt+q` (replacing `ctrl+q`, which conflicts with Pi's reserved `app.message.followUp` binding on WSL/Windows) as the keyboard shortcut to toggle `pi-quest` on or off for the current session.
+  - Registered `alt+j` (replacing `ctrl+q` and `alt+q`, which conflict with Pi's `app.message.followUp` and `app.message.dequeue` bindings on WSL/Windows) as the keyboard shortcut to toggle `pi-quest` on or off for the current session.
   - Defaulted `enabled` to `false` unless explicitly configured or toggled via `/quest on` (`⏸️` in status bar), and delegated model readiness status (`⚡ bge-base`) to `pi-mm`.
 - **Consolidated `garden` into `/quest list` and `/quest del`** (`src/surface/commands/quests.ts`, `src/surface/commands/quest-del.ts`, `src/surface/commands/continuity.ts`, `src/surface/commands/index.ts`, `src/domain/garden.ts`):
   - Removed `/quest garden` subcommand.

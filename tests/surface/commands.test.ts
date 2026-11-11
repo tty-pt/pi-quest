@@ -325,13 +325,13 @@ Deno.test("/quest pause and /quest on pause active quest and bypass auto-detecti
   await questCmd!.options.handler("toggle", ctx);
   check(getState().disabled === false, "disabled flag is false after /quest toggle from disabled");
 
-  // 7. Toggle via alt+q shortcut
-  const shortcut = pi.shortcuts.find((s) => s.shortcut === "alt+q");
-  check(Boolean(shortcut), "must register 'alt+q' shortcut");
+  // 7. Toggle via alt+j shortcut
+  const shortcut = pi.shortcuts.find((s) => s.shortcut === "alt+j");
+  check(Boolean(shortcut), "must register 'alt+j' shortcut");
   await shortcut!.options.handler(ctx);
-  check(getState().disabled === true, "disabled flag is true after alt+q shortcut from enabled");
+  check(getState().disabled === true, "disabled flag is true after alt+j shortcut from enabled");
   await shortcut!.options.handler(ctx);
-  check(getState().disabled === false, "disabled flag is false after alt+q shortcut from disabled");
+  check(getState().disabled === false, "disabled flag is false after alt+j shortcut from disabled");
 
   replaceState(IDLE_STATE);
 });

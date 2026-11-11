@@ -28,8 +28,8 @@ Every quest executes through three phases:
 2. **Implementing**: The agent works from the approved plan in an isolated scratch worktree (`.pi/scratch/slot-N`). Unexpected obstacles and discoveries are recorded as amendments on disk.
 3. **Validating**: A validator reviews the implementation against the plan and test results. A PASS completes the quest, integrates the worktree (or leaves it in `slot-N` via `keep-slot` / `squash-keep-slot` for manual testing), and cleans up `.pi/quest/future/<qid>.md`. Reply `go` (or *ship it* / *confirm* in any language, classified by embedding similarity) at any time to accept immediately, or reply `decline` / give corrective feedback (or choose `"Cancel archive (stay in quest)"` in the integration prompt) to demote back to `implementing` and continue working in the quest.
 
-### Instant Session Toggle (`Alt+Q`)
-Press **`Alt+Q`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).
+### Instant Session Toggle (`Alt+J`)
+Press **`Alt+J`** in the terminal at any time to toggle `pi-quest` on or off for the current session (`/quest on` / `/quest off`).
 
 ---
 
@@ -211,7 +211,7 @@ All operator commands live under **`/quest`** (with interactive tab-completion f
 | `/quest pick` | `/quest switch` | Interactively select a quest to resume. |
 | `/quest new [goal]` | `/quest chain` / `/quest next` | Retire the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enable `pi-quest`, and start a new quest on top of that slot's work (inferring `[goal]` from prior conversation when referential/omitted). |
 | `/quest finish [--keep-slot]` | `/quest merge` / `/quest integrate` | Complete and integrate the active quest, or squash-merge a retained scratch slot (`.pi/scratch/slot-N`) into `main` after manual testing (`--keep-slot` to keep the slot attached after squash-merging). |
-| `/quest pause` / `/quest on [goal]` | `/quest off` / `/quest enable` / `/quest toggle` (`Alt+Q`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). `/quest on [goal]` starts a quest immediately using prior conversation context. |
+| `/quest pause` / `/quest on [goal]` | `/quest off` / `/quest enable` / `/quest toggle` (`Alt+J`) | Pause, re-enable, or toggle `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). `/quest on [goal]` starts a quest immediately using prior conversation context. |
 | `/quest cancel` | `/quest cancel-review` | Cancel any currently running in-flight review or validation and unblock tool execution. |
 | `/quest del [qid\|flags]` | `/quest drop` | Delete/abandon the active quest (`--keep-slot` / `-s` to keep slot work intact, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prune drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`). |
 | `/quest handoff [qid]` | | Write and show a handoff for the active (or named) quest. |
@@ -261,9 +261,9 @@ Implementation work runs isolated in dedicated git worktrees to keep the primary
 1. **Brainstorm with Argon first, then activate a quest (`/quest on`, `"quest: Go for it."`, `/quest new`)**:
    - Start your session chatting with Argon (`antigravity-acp/gemini-4-argon:high`) while `pi-quest` is idle or paused (`⏸️`).
    - Once you are satisfied with the understanding and plan, run `/quest on`, `/quest on [goal]`, `/quest new [goal]`, or say `"quest: Go for it."`. `pi-quest` extracts the objective from the prior conversation, writes `.pi/quest/future/<qid>.md`, and conducts the `[Drafter–Reviewer Dialogue]` in the background.
-2. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
-   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation.
-   - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest right where you left off.
+2. **Toggle or pause quest enforcement (`Alt+J` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+J`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation.
+   - Press **`Alt+J`** again (or run `/quest on`) to resume the paused quest right where you left off.
 3. **Test in the scratch worktree before or after merging (`keep-slot`, `squash-keep-slot`, `/quest finish`)**:
    - Select `"Leave in worktree slot for manual testing before merge"` (`keep-slot`) when archiving a completed quest to test in `.pi/scratch/slot-N` before touching `main`.
    - When ready to integrate into `main`, run **`/quest finish`** (or `/quest merge` / `/quest integrate`, optionally with `--keep-slot` to keep the slot alive after merging).

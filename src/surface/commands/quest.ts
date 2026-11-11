@@ -27,7 +27,7 @@ export const QUEST_COMMAND_HELP: ReadonlyArray<{ cmd: string; desc: string }> = 
   { cmd: "/quest <name|qid>", desc: "Switch to or resume a quest (/quest pick to choose)" },
   { cmd: "/quest new [goal]", desc: "Start a new quest while keeping the current scratch slot" },
   { cmd: "/quest finish [--keep-slot]", desc: "Finish/integrate active quest or retained scratch slot" },
-  { cmd: "/quest pause | on [goal]", desc: "Pause or resume pi-quest for this session (Alt+Q to toggle)" },
+  { cmd: "/quest pause | on [goal]", desc: "Pause or resume pi-quest for this session (Alt+J to toggle)" },
   { cmd: "/quest cancel", desc: "Cancel in-flight review and unblock tools" },
   { cmd: "/quest del [qid|flags]", desc: "Delete quest (--keep-slot|-s) or prune drafts (--all|--stale|...)" },
   { cmd: "/quest handoff [qid]", desc: "Write & display a handoff document" },
