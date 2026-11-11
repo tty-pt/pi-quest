@@ -3,10 +3,10 @@ import { join, relative } from "node:path";
 import type { Pi } from "../../hooks/events";
 import { runGit, getModifiedSubmodules } from "./exec";
 import {
-  restoreSubmoduleWorktrees, pruneSubmoduleWorktrees, EMPTY_TREE_SHA, guardSubmoduleWorkingTree, alignPrimarySubmoduleBranches,
+  restoreSubmoduleWorktrees, pruneSubmoduleWorktrees, EMPTY_TREE_SHA, guardSubmoduleWorkingTree, alignPrimarySubmoduleBranches, pushPrimaryAndSubmodules,
 } from "./submodule-restore";
 
-export { pruneSubmoduleWorktrees, restoreSubmoduleWorktrees, EMPTY_TREE_SHA, guardSubmoduleWorkingTree, alignPrimarySubmoduleBranches };
+export { pruneSubmoduleWorktrees, restoreSubmoduleWorktrees, EMPTY_TREE_SHA, guardSubmoduleWorkingTree, alignPrimarySubmoduleBranches, pushPrimaryAndSubmodules };
 
 /**
  * Checks whether a repository or worktree root configures submodules via .gitmodules.

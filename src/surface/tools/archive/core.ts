@@ -27,6 +27,7 @@ import {
   commitMilestone,
   getBranchCommitSummaries,
   alignPrimarySubmoduleBranches,
+  pushPrimaryAndSubmodules,
 } from "../../../utils/git";
 
 async function recordRatingsAndHandoff(
@@ -246,6 +247,7 @@ export async function archiveActiveQuest(
           try {
             await runGit(["submodule", "update", "--no-fetch"], primaryRoot, pi);
             await alignPrimarySubmoduleBranches(primaryRoot, pi);
+            await pushPrimaryAndSubmodules(primaryRoot, pi);
           } catch { /* best-effort submodule alignment */ }
         }
       }
@@ -305,6 +307,7 @@ export async function archiveActiveQuest(
           try {
             await runGit(["submodule", "update", "--no-fetch"], primaryRoot, pi);
             await alignPrimarySubmoduleBranches(primaryRoot, pi);
+            await pushPrimaryAndSubmodules(primaryRoot, pi);
           } catch { /* best-effort submodule alignment */ }
         }
       } else if (action === "discard") {

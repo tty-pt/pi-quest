@@ -19,6 +19,7 @@ import {
   pruneSubmoduleWorktrees,
   EMPTY_TREE_SHA,
   guardSubmoduleWorkingTree,
+  pushPrimaryAndSubmodules,
 } from "../../src/utils/git/index.ts";
 import { archiveActiveQuest } from "../../src/surface/tools/archive/core.ts";
 import { getState, replaceState } from "../../src/app/store.ts";
@@ -800,6 +801,48 @@ Deno.test("clean confirmAndSquashWorktree and archiveActiveQuest allow operator 
     replaceState(IDLE_STATE);
     try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
     try { rmSync(wt, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+
+Deno.test("pushPrimaryAndSubmodules: aligns branches and pushes ahead submodules and primary repo to origin", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-quest-pushsub-"));
+  try {
+    const subPath = "external/libtest";
+    const subDir = join(root, subPath);
+    mkdirSync(join(subDir, ".git"), { recursive: true });
+
+    const commands: Array<{ cmd: string; args: string[]; cwd: string }> = [];
+    const pi = fakePi();
+    (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[], opts?: { cwd?: string }) => {
+      commands.push({ cmd, args, cwd: opts?.cwd ?? "" });
+      if (cmd === "git" && args[0] === "submodule" && args[1] === "status") {
+        return { code: 0, stdout: ` a1b2c3d ${subPath}\n` };
+      }
+      if (cmd === "git" && args[0] === "remote" && args[1] === "get-url") {
+        return { code: 0, stdout: "git@github.com:tty-pt/libtest.git\n" };
+      }
+      if (cmd === "git" && args[0] === "symbolic-ref" && args.includes("--short")) {
+        return { code: 0, stdout: "main\n" };
+      }
+      if (cmd === "git" && args[0] === "rev-list" && args.includes("--count")) {
+        return { code: 0, stdout: "1\n" };
+      }
+      return { code: 0, stdout: "" };
+    };
+
+    const res = await pushPrimaryAndSubmodules(root, pi);
+    check(res.pushedSubmodules.includes(subPath), "pushed ahead submodule");
+    check(res.pushedPrimary === true, "pushed ahead primary repo");
+    check(
+      commands.some((c) => c.cwd === subDir && c.args[0] === "push" && c.args[1] === "origin" && c.args[2] === "HEAD:main"),
+      "executed git push origin HEAD:main inside submodule",
+    );
+    check(
+      commands.some((c) => c.cwd === root && c.args[0] === "push" && c.args[1] === "origin" && c.args[2] === "HEAD:main"),
+      "executed git push origin HEAD:main inside primary root",
+    );
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
 

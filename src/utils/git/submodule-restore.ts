@@ -205,3 +205,59 @@ export async function alignPrimarySubmoduleBranches(
     // Best-effort submodule branch alignment
   }
 }
+
+/**
+ * Pushes any ahead submodules and the primary repository to origin when an
+ * origin remote is configured, so completed quests sync submodules and root
+ * upstream automatically without manual intervention.
+ */
+export async function pushPrimaryAndSubmodules(
+  primaryRoot: string,
+  pi?: Pi,
+): Promise<{ pushedSubmodules: string[]; pushedPrimary: boolean }> {
+  const pushedSubmodules: string[] = [];
+  let pushedPrimary = false;
+  try {
+    await alignPrimarySubmoduleBranches(primaryRoot, pi);
+    const statusRes = await runGit(["submodule", "status"], primaryRoot, pi);
+    if (statusRes.exitCode === 0 && statusRes.stdout) {
+      for (const line of statusRes.stdout.trim().split("\n")) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 2) continue;
+        const subPath = parts[1];
+        const primarySub = join(primaryRoot, subPath);
+        if (!existsSync(join(primarySub, ".git"))) continue;
+
+        const remoteRes = await runGit(["remote", "get-url", "origin"], primarySub, pi);
+        if (remoteRes.exitCode !== 0 || !remoteRes.stdout.trim()) continue;
+
+        const branchRes = await runGit(["symbolic-ref", "--short", "-q", "HEAD"], primarySub, pi);
+        const branch = branchRes.exitCode === 0 && branchRes.stdout.trim() ? branchRes.stdout.trim() : "main";
+
+        const aheadRes = await runGit(["rev-list", "--count", `origin/${branch}..HEAD`], primarySub, pi);
+        const isAhead = aheadRes.exitCode !== 0 || Number.parseInt(aheadRes.stdout.trim(), 10) > 0;
+        if (!isAhead) continue;
+
+        const pushRes = await runGit(["push", "origin", `HEAD:${branch}`], primarySub, pi);
+        if (pushRes.exitCode === 0) {
+          pushedSubmodules.push(subPath);
+        }
+      }
+    }
+
+    const rootRemote = await runGit(["remote", "get-url", "origin"], primaryRoot, pi);
+    if (rootRemote.exitCode === 0 && rootRemote.stdout.trim()) {
+      const branchRes = await runGit(["symbolic-ref", "--short", "-q", "HEAD"], primaryRoot, pi);
+      const branch = branchRes.exitCode === 0 && branchRes.stdout.trim() ? branchRes.stdout.trim() : "main";
+      const aheadRes = await runGit(["rev-list", "--count", `origin/${branch}..HEAD`], primaryRoot, pi);
+      const isAhead = aheadRes.exitCode !== 0 || Number.parseInt(aheadRes.stdout.trim(), 10) > 0;
+      if (isAhead) {
+        const pushRes = await runGit(["push", "origin", `HEAD:${branch}`], primaryRoot, pi);
+        if (pushRes.exitCode === 0) pushedPrimary = true;
+      }
+    }
+  } catch {
+    // Best-effort upstream push
+  }
+  return { pushedSubmodules, pushedPrimary };
+}

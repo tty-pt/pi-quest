@@ -31,6 +31,7 @@ export {
   EMPTY_TREE_SHA,
   guardSubmoduleWorkingTree,
   alignPrimarySubmoduleBranches,
+  pushPrimaryAndSubmodules,
 } from "./submodules";
 
 export { squashSubmoduleCommits, retainSlotLease } from "./pool-rescue";
