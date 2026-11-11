@@ -102,6 +102,7 @@ export function noteDraftFindings(state: QuestState): QuestState {
   if (state.draft === null) throw new Error("no draft to revise");
   return markChanged(state, {
     draft: { ...state.draft, outstandingFindings: true, approvedBy: null },
+    activeReview: null,
     exactNextAction: "Revise the draft plan to address the findings, then save.",
   });
 }

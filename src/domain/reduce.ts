@@ -182,6 +182,7 @@ function reduceWork(state: QuestState, event: QuestEvent): Reduced | null {
         event.note,
         event.previousPlan,
         event.now,
+        event.stagedPlan,
       );
       return { state: next, effects: [{ kind: "EmitSnapshot" }] };
     }

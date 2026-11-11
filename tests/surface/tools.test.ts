@@ -758,3 +758,56 @@ Deno.test("formatProgressCard renders active quest telemetry", () => {
   check(card.includes("Tests: PASS ✓"), "card tests info");
 });
 
+Deno.test("quest_update_state plan and analysis report accurate saved-doc profile instead of 0/0 missing", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  try {
+    await mkdir(join(cwd, "src"), { recursive: true });
+    await writeFile(join(cwd, "src/mod.ts"), "export const x = 1;\nexport const y = 2;\n", "utf8");
+    await applyUpdate(pi, ctx, { objective: "Fix the bug in src/mod.ts", draftName: "fix-bug" });
+    const qid = getState().qid!;
+    const draftFile = join(cwd, draftPath(qid));
+    await writeFile(
+      draftFile,
+      `# ${qid}\n\n## Requirements\n- R1: Fix x in src/mod.ts:1\n- R2: Fix y in src/mod.ts:2\n\n## Evidence\n- src/mod.ts:1 — x definition\n- src/mod.ts:2 — y definition\n\n## Implementation Plan\n`,
+      "utf8",
+    );
+    const res = await applyUpdate(pi, ctx, {
+      plan: "1. Update `src/mod.ts:1` for R1.\n2. Update `src/mod.ts:2` for R2.\n3. Run `deno test`.",
+    });
+    const joined = res.applied.join("\n");
+    check(joined.includes("requirements 2, evidence 2, plan present"), `expected accurate profile in plan update, got: ${joined}`);
+    check(!joined.includes("plan missing"), "must not report plan missing after writing plan");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+
+  replaceState(IDLE_STATE);
+  const analysisCwd = tmp();
+  const analysisCtx = fakeCtx(analysisCwd);
+  try {
+    await mkdir(join(analysisCwd, "src"), { recursive: true });
+    await writeFile(join(analysisCwd, "src/mod.ts"), "export const x = 1;\nexport const y = 2;\n", "utf8");
+    await applyUpdate(pi, analysisCtx, { objective: "Analyze src/mod.ts", kind: "analysis", draftName: "analyze-mod" });
+    const qid = getState().qid!;
+    const draftFile = join(analysisCwd, draftPath(qid));
+    await writeFile(
+      draftFile,
+      `# ${qid}\n\n## Requirements\n- R1: Audit x in src/mod.ts:1\n- R2: Audit y in src/mod.ts:2\n\n## Evidence\n- src/mod.ts:1 — x definition\n- src/mod.ts:2 — y definition\n\n## Analysis\n`,
+      "utf8",
+    );
+    const res = await applyUpdate(pi, analysisCtx, {
+      analysis: "1. `src/mod.ts:1` defines x.\n2. `src/mod.ts:2` defines y.\n3. Both satisfy the invariants.",
+    });
+    const joined = res.applied.join("\n");
+    check(joined.includes("requirements 2, evidence 2, analysis present"), `expected accurate profile in analysis update, got: ${joined}`);
+    check(!joined.includes("analysis missing") && !joined.includes("plan missing"), "must not report missing deliverable after writing analysis");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+

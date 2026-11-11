@@ -8,6 +8,7 @@ import { writeHandoff } from "./handoff-io";
 import { getLastLoadedConfig } from "../config/loader";
 import { DEFAULT_SUBQUEST_COMPACTION_CONFIG } from "../config/defaults";
 import { sendFollowUp } from "../app/interpreter";
+import { getInFlightTarget, hasInFlight } from "../review/tracker";
 
 export interface CompactionPointer {
   qid: string;
@@ -19,6 +20,7 @@ export interface CompactionPointer {
   touchedFiles?: string[];
   activeRequirement?: string;
   lastTestReceipt?: string;
+  inFlightReview?: { kind: string; target: string };
 }
 
 export interface SubquestHandbackInfo {
@@ -111,16 +113,26 @@ export async function handoffBeforeCompaction(pi: Pi, ctx: PiCtx): Promise<void>
       ? `\`${latestReceipt.command}\` (${latestReceipt.exitCode === 0 ? "PASS" : `FAIL exit ${latestReceipt.exitCode}`})`
       : undefined;
     const activeReq = state.rtm?.find((r) => r.status === "pending")?.id ?? done.open[0];
+    const inFlightTarget = getInFlightTarget(state.qid);
+    const inFlightReview = state.activeReview !== null
+      ? { kind: state.activeReview.kind, target: state.activeReview.target }
+      : (inFlightTarget !== null && !state.draft?.findingsOutstanding
+        ? { kind: state.phase === "validating" ? "validation" : "draft", target: inFlightTarget }
+        : undefined);
+    const nextAction = inFlightReview !== undefined
+      ? `Review (${inFlightReview.kind}) is running for quest ${done.qid} — end your turn and await the review verdict.`
+      : state.exactNextAction;
     pending = {
       qid: done.qid,
       relPath: done.relPath,
       open: done.open,
-      nextAction: state.exactNextAction,
+      nextAction,
       objective: state.objective,
       phase: state.phase,
       touchedFiles: state.touchedFiles,
       activeRequirement: activeReq,
       lastTestReceipt: receiptSummary,
+      ...(inFlightReview ? { inFlightReview } : {}),
     };
   } catch {
     // Compaction proceeds; the snapshot still preserves state.
@@ -152,7 +164,10 @@ export function renderCompactionPointer(p: CompactionPointer): string {
     : "";
   const activeReq = p.activeRequirement ? `\n  • Active Requirement: ${p.activeRequirement}` : "";
   const testReceipt = p.lastTestReceipt ? `\n  • Last Test Receipt: ${p.lastTestReceipt}` : "";
-  return `\n[Post-Compaction Handoff]: Context was just compacted. The active quest is intact.${objective}\n  • Quest: ${p.qid} (Phase: ${p.phase ?? "active"})${activeReq}${files}${testReceipt}\n  • State & Verification: If the user's current message is a direct question or conversational remark, answer the user directly first before continuing quest work. Otherwise, read ${p.relPath} in full before continuing — it holds the verbatim operator request, every directive, and the asked-vs-accomplished table.${open} Next action: ${p.nextAction}`;
+  const reviewLine = p.inFlightReview && hasInFlight(p.qid)
+    ? `\n  • Active Review: ${p.inFlightReview.kind} review in flight (target ${p.inFlightReview.target.slice(0, 12)}) — do NOT re-edit or re-submit; yield and await the verdict.`
+    : "";
+  return `\n[Post-Compaction Handoff]: Context was just compacted. The active quest is intact.${objective}\n  • Quest: ${p.qid} (Phase: ${p.phase ?? "active"})${activeReq}${files}${testReceipt}${reviewLine}\n  • State & Verification: If the user's current message is a direct question or conversational remark, answer the user directly first before continuing quest work. Otherwise, read ${p.relPath} in full before continuing — it holds the verbatim operator request, every directive, and the asked-vs-accomplished table.${open} Next action: ${p.nextAction}`;
 }
 
 export function maybeTriggerPostSubquestCompaction(

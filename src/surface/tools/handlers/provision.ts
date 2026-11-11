@@ -21,6 +21,7 @@ import { noteDraftUpdated } from "../../../durability/status.ts";
 import { ensureDraftFile, listKnownQids } from "../../../files.ts";
 import { fetchActiveInvariants, formatInvariantsComment } from "../../invariants.ts";
 import { carryRefinementsToDraft } from "../draft-writer.ts";
+import { hasInFlight } from "../../../review/tracker.ts";
 
 export async function syncAmendmentsToDraft(
   ctx: PiCtx,
@@ -36,9 +37,26 @@ export async function syncAmendmentsToDraft(
     if (updated !== content) {
       await writeFile(filePath, updated, "utf8");
       const hash = hashContent(updated);
-      updateState((s) =>
-        s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true }
-      );
+      updateState((s) => {
+        if (s.draft === null) return s;
+        if (s.phase === "implementing") {
+          const staged = s.draft.contentHash !== null && s.draft.contentHash !== s.draft.approvedPlanHash;
+          if (staged && hasInFlight(qid)) {
+            return { ...s, snapshotPending: true };
+          }
+          if (!staged) {
+            return {
+              ...s,
+              draft: { ...s.draft, contentHash: hash, approvedPlanHash: hash },
+              snapshotPending: true,
+            };
+          }
+        }
+        if (s.phase === "drafting" && s.draft.planAuthored) {
+          return { ...s, snapshotPending: true };
+        }
+        return { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true };
+      });
     }
   } catch { /* best-effort sync */ }
 }

@@ -11,6 +11,7 @@ import { draftPath } from "../../domain/paths";
 import { draftFilePath } from "../../files";
 import { bootPlanRevisionReview, clearPlanRevisionRetries } from "../../implementing/plan-revision";
 import { clearDraftReviewRetry, maybeBootDraftReview } from "../../drafting/reviews";
+import { supersedeReviewThenBootFresh } from "../../review/tracker";
 import { dedupeDocBullets } from "../../domain/dedupe";
 import { assertNoSectionHeadings, hashContent, parseDraftSections, seedReviewCount, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { noteDraftUpdated } from "../../durability/status";
@@ -103,12 +104,28 @@ export async function writePlanRevision(
   if (updated === current) throw new Error("plan revision identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
+  const stagedPlan = parseDraftSections(updated).plan;
   const previousHash = state.draft.contentHash;
-  const next = updateState((s) => recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan));
+  const qid = state.qid;
+  const next = updateState((s) =>
+    recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan, Date.now(), stagedPlan)
+  );
   emitNow(pi);
   noteDraftUpdated(ctx);
-  clearPlanRevisionRetries(state.qid);
-  void bootPlanRevisionReview(pi, ctx, hash);
+  clearPlanRevisionRetries(qid);
+  supersedeReviewThenBootFresh(qid, hash, (signal) => {
+    updateState((s) =>
+      s.qid === qid
+        ? {
+            ...s,
+            activeReview: { kind: "draft", target: hash },
+            exactNextAction: `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`,
+            snapshotPending: true,
+          }
+        : s
+    );
+    void bootPlanRevisionReview(pi, ctx, hash, undefined, signal);
+  });
   return next;
 }
 

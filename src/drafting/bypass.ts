@@ -39,6 +39,7 @@ export interface BypassArgs {
 export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig, args: BypassArgs): Promise<void> {
   const { qid, state, sections, thresholds, belowBar, quality } = args;
   cancelReview(qid);
+  updateState((s) => (s.qid === qid && s.activeReview !== null ? { ...s, activeReview: null, snapshotPending: true } : s));
   const base = config.reviewPolicy === "off" ? "policy 'off'" : `policy 'balanced' (${state.difficulty} task)`;
   const reason = config.policyNote !== undefined ? `${base} — ${config.policyNote}` : base;
   if (belowBar || state.draft === null || !state.draft.planAuthored) {
@@ -59,6 +60,7 @@ export async function bypassDraftReview(pi: Pi, ctx: PiCtx, config: QuestConfig,
   clearReviewVerdictFails(qid);
   updateState((s) => ({
     ...s,
+    activeReview: null,
     lastReview: {
       verdict: "PASS",
       target: s.draft?.contentHash ?? "",

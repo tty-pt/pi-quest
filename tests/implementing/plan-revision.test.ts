@@ -476,5 +476,45 @@ Deno.test("pendingDirectiveRevision blocks write tools with PLAN_REVISION_REQUIR
   replaceState(IDLE_STATE);
 });
 
+Deno.test("planRevision followed by amendment sync does not abort or double-boot the in-flight revision review", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  try {
+    await writeFile(
+      join(d.cwd, draftPath(d.qid)),
+      "# t\n\n## Amendments\n\n## Implementation Plan\n\nold plan\n",
+      "utf8",
+    );
+    updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: "old plan" } });
+    const ctx = fakeCtx(d.cwd);
+    await applyUpdate(bus.pi, ctx, { planRevision: "1. New step one\n2. New step two", note: "updated steps" });
+    await waitForRevisionRequests(bus.emitted, 1);
+    check(hasInFlight(d.qid) === true, "revision review is in flight");
+    check(getState().activeReview !== null, "activeReview is populated in QuestState");
+
+    // Now record an amendment while the revision review is in flight, and trigger turn-end catch-all
+    const { maybeBootPlanRevisionReview } = await import("../../src/implementing/plan-revision.ts");
+    await applyUpdate(bus.pi, ctx, { amendment: { change: "Keep backward compat", reasons: "user constraint" } });
+    const status = await maybeBootPlanRevisionReview(bus.pi, ctx, "turn-end check");
+    check(status === "in-flight", `expected in-flight when only amendments changed, got ${status}`);
+    check(revisionRequests(bus.emitted).length === 1, "still only one reviewer subagent launched");
+
+    // Feed PASS to the running review and verify it settles and adopts cleanly
+    bus.feed({
+      requestId: revisionRequests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE" },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    check(getState().draft?.approvedPlanHash !== "hash-v1", "revision adopted cleanly without stale target rejection");
+    check(getState().activeReview === null, "activeReview cleared on verdict");
+  } finally {
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+
 
 

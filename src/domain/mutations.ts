@@ -88,6 +88,7 @@ export function recordReviewResult(
     ? { verdict, target, findings }
     : { verdict, target, findings, reviewText };
   return markChanged(state, {
+    activeReview: null,
     lastReview,
     exactNextAction: verdict === "PASS"
       ? state.exactNextAction

@@ -53,6 +53,7 @@ export type QuestEvent =
       nextHash: string;
       note: string;
       previousPlan: string;
+      stagedPlan?: string;
       now?: number;
     }
   | { type: "SetbackRecorded"; reason: string; evidence: string[]; isTest?: boolean }

@@ -40,7 +40,7 @@ export async function applyPlanParam(
         next = updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
         applied.push(`complexity discovered mid-quest: task elevated to ${recalibrated}`);
       }
-      applied.push(await profileForSavedDoc(ctx, qid));
+      applied.push(await profileForSavedDoc(ctx, fileContent, "standard"));
       return { state: next };
     } catch (err) {
       return { state, error: err instanceof Error ? err.message : String(err) };
@@ -81,7 +81,7 @@ export async function applyAnalysisParam(
         next = updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
         applied.push(`complexity discovered mid-quest: task elevated to ${recalibrated}`);
       }
-      applied.push(await profileForSavedDoc(ctx, qid));
+      applied.push(await profileForSavedDoc(ctx, fileContent, "analysis"));
       return { state: next };
     } catch (err) {
       return { state, error: err instanceof Error ? err.message : String(err) };

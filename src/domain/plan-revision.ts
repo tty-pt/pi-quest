@@ -19,6 +19,7 @@ export function recordPlanRevision(
   note: string,
   previousPlan: string,
   now: number = Date.now(),
+  stagedPlan?: string,
 ): QuestState {
   const draft = requireImplementingDraft(state);
   if (nextHash.trim() === "") throw new Error("plan revision needs a content hash");
@@ -29,6 +30,7 @@ export function recordPlanRevision(
     draft: {
       ...draft,
       contentHash: nextHash,
+      ...(stagedPlan !== undefined ? { stagedPlan } : {}),
       planRevisions: [...(draft.planRevisions ?? []), { hash: previousHash, at: now, note, plan: previousPlan }],
     },
   });
@@ -42,7 +44,8 @@ export function approvePlanRevision(state: QuestState, hash: string, planText: s
   return markChanged(state, {
     pendingDirectiveRevision: false,
     pendingDirectiveText: undefined,
-    draft: { ...draft, approvedPlanHash: hash, lastReviewedPlan: planText },
+    activeReview: null,
+    draft: { ...draft, approvedPlanHash: hash, lastReviewedPlan: planText, stagedPlan: null },
   });
 }
 
@@ -51,6 +54,7 @@ export function approvePlanRevision(state: QuestState, hash: string, planText: s
 export function revertPlanRevision(state: QuestState): QuestState {
   const draft = requireImplementingDraft(state);
   return markChanged(state, {
-    draft: { ...draft, contentHash: draft.approvedPlanHash },
+    activeReview: null,
+    draft: { ...draft, contentHash: draft.approvedPlanHash, stagedPlan: null },
   });
 }

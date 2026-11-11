@@ -124,12 +124,12 @@ async function handleBareQuest(pi: Pi, ctx: PiCtx): Promise<void> {
     if (candidates.length === 1) {
       const adopted = await pickQuest(pi, ctx);
       refreshStatus(ctx);
-      notify(ctx, `${adopted}\n\n${formatQuestCard()}`);
+      notify(ctx, `${adopted}\n\n${formatQuestCard(ctx.cwd)}`);
       return;
     }
   }
   refreshStatus(ctx);
-  notify(ctx, formatQuestCard());
+  notify(ctx, formatQuestCard(ctx.cwd));
 }
 
 async function handleInspectSubcommand(pi: Pi, ctx: PiCtx, head: string): Promise<boolean> {

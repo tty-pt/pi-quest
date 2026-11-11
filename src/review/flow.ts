@@ -9,7 +9,7 @@ import { updateState } from "../app/store";
 import { sendSteer } from "../app/interpreter";
 import type { Pi, PiCtx } from "../hooks/events";
 import type { Qid } from "../domain/qid";
-import type { QuestState } from "../domain/quest";
+import type { QuestState, ReviewKind } from "../domain/quest";
 import { recordReviewResult } from "../domain/quest";
 import { createRunner, isReviewerAvailable } from "./runner";
 import {
@@ -42,6 +42,8 @@ export interface FlowArgs {
   qid: Qid;
   target: string;
   prompt: string;
+  reviewKind?: ReviewKind;
+  signal?: AbortSignal;
   runnerTool?: string;
   model?: string;
   fallbackModels?: readonly string[];
@@ -166,40 +168,72 @@ function handleCandidateError(detail: string, model: string | undefined, cooldow
   }
 }
 
+function clearActiveReviewIfMatching(qid: Qid, target: string): void {
+  updateState((s) =>
+    s.qid === qid && s.activeReview?.target === target
+      ? { ...s, activeReview: null, snapshotPending: true }
+      : s
+  );
+}
+
+function markActiveReview(qid: Qid, target: string, reviewKind: ReviewKind): void {
+  updateState((s) =>
+    s.qid === qid
+      ? {
+          ...s,
+          activeReview: { kind: reviewKind, target },
+          exactNextAction: reviewRunningNotice(qid),
+          snapshotPending: true,
+        }
+      : s
+  );
+}
+
+function bindReviewAbortController(qid: Qid, target: string, signal?: AbortSignal): AbortController | null {
+  const controller = new AbortController();
+  if (signal !== undefined) {
+    if (signal.aborted || !isCurrentReview(qid, target)) {
+      clearActiveReviewIfMatching(qid, target);
+      return null;
+    }
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+    return controller;
+  }
+  trackReview(qid, target, () => controller.abort());
+  return controller;
+}
+
 export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
   const { pi, ctx, qid, target } = args;
+  const reviewKind = args.reviewKind ?? "draft";
   const runnerTool = args.runnerTool ?? "subagent";
-  if (!isReviewerAvailable(pi, runnerTool)) return { status: "no-runner" };
-  // Ordered candidates: the resolved target first (it may carry a thinking
-  // suffix the child registry never registered), then the suffix-stripped
-  // variant, then configured role fallbacks, then router default, session model, and inherit.
+  if (!isReviewerAvailable(pi, runnerTool)) {
+    if (isCurrentReview(qid, target)) cancelReview(qid);
+    clearActiveReviewIfMatching(qid, target);
+    return { status: "no-runner" };
+  }
+  const controller = bindReviewAbortController(qid, target, args.signal);
+  if (controller === null) return { status: "aborted" };
+  markActiveReview(qid, target, reviewKind);
+  if (shouldNoticeReview(qid, target)) sendSteer(pi, reviewRunningNotice(qid));
+
   const targetModel = args.model ?? resolveDefaultReviewModel(ctx);
-  const sessionModel = args.sessionModel;
   const thinking = args.thinking ?? resolveReviewThinking();
   const appendInherit = args.appendInherit ?? (args.routerDefault !== undefined || args.sessionModel !== undefined);
   const candidates = reviewModelCandidates(targetModel, args.fallbackModels ?? [], {
     routerDefault: args.routerDefault,
-    sessionModel,
+    sessionModel: args.sessionModel,
     appendInherit,
   });
-  const controller = new AbortController();
-  trackReview(qid, target, () => controller.abort());
-  if (shouldNoticeReview(qid, target)) sendSteer(pi, reviewRunningNotice(qid));
-
   const cooldownMs = args.cooldownMs ?? 900000;
   const now = Date.now();
 
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
-    // A superseding boot owns the quest now; stop instead of launching stale.
     if (i > 0 && !isCurrentReview(qid, target)) return { status: "aborted" };
-
-    if (isCandidateInCooldown(candidate.model, now) && i + 1 < candidates.length) {
-      continue;
-    }
+    if (isCandidateInCooldown(candidate.model, now) && i + 1 < candidates.length) continue;
 
     const candidateModel = resolveCandidateModelForRun(candidate.model, args.routerDefault);
-
     const runner = createRunner({
       pi,
       ctx,
@@ -211,24 +245,36 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       ...(args.maxDurationMs !== undefined ? { maxDurationMs: args.maxDurationMs } : {}),
       ...(args.inactivityLimitMs !== undefined ? { inactivityLimitMs: args.inactivityLimitMs } : {}),
     });
-    if (runner === null) return { status: "no-runner" };
+    if (runner === null) {
+      if (isCurrentReview(qid, target)) cancelReview(qid);
+      clearActiveReviewIfMatching(qid, target);
+      return { status: "no-runner" };
+    }
     try {
       const launched = await runner.launch(args.prompt, controller.signal);
       const review = parseReviewText(launched.text);
-      updateState((s) => recordReviewResult(s, review.verdict, target, review.findings, review.text));
-      return { status: "verdict", review, settled: settleReview(qid, target) };
+      const settled = settleReview(qid, target);
+      if (settled) {
+        updateState((s) => recordReviewResult(s, review.verdict, target, review.findings, review.text));
+      } else {
+        clearActiveReviewIfMatching(qid, target);
+      }
+      return { status: "verdict", review, settled };
     } catch (err) {
-      if (controller.signal.aborted) return { status: "aborted" };
+      if (controller.signal.aborted) {
+        clearActiveReviewIfMatching(qid, target);
+        return { status: "aborted" };
+      }
       const detail = err instanceof Error ? err.message : String(err);
       handleCandidateError(detail, candidate.model, cooldownMs, now);
-
-      const retryable = isModelResolutionOrProviderError(detail) && i + 1 < candidates.length;
-      if (!retryable) {
+      if (!(isModelResolutionOrProviderError(detail) && i + 1 < candidates.length)) {
         if (isCurrentReview(qid, target)) cancelReview(qid);
+        clearActiveReviewIfMatching(qid, target);
         return { status: "failed", detail };
       }
     }
   }
   if (isCurrentReview(qid, target)) cancelReview(qid);
+  clearActiveReviewIfMatching(qid, target);
   return { status: "failed", detail: "all reviewer model candidates exhausted" };
 }

@@ -8,6 +8,7 @@ import { createDraft } from "../../src/domain/transitions.ts";
 import { encodeSnapshot, SNAPSHOT_TYPE } from "../../src/durability/snapshots.ts";
 import { killQuest, parseQuestDelArgs } from "../../src/surface/commands/quest-del.ts";
 import { listQuests } from "../../src/surface/commands/quests.ts";
+import { pathToFileURL } from "node:url";
 import { resumeQuest, summarizeActive } from "../../src/surface/commands/quest.ts";
 import { askHumanTool } from "../../src/surface/tools/ask-human.ts";
 import { rebutTool } from "../../src/surface/tools/rebut.ts";
@@ -32,6 +33,12 @@ Deno.test("quest command shows card, resumes by qid or name, and adopts", async 
   const resumed = await resumeQuest(pi, fakeCtx(cwd, [{ customType: SNAPSHOT_TYPE, data: hit }]), "abc123");
   check(resumed.includes("abc123") && getState().qid === "abc123", "snapshot resumed");
   check(summarizeActive().includes("provisional"), "summary reflects phase");
+  const activeCard = await resumeQuest(pi, fakeCtx(cwd), "");
+  const expectedFileUrl = pathToFileURL(join(cwd, ".pi/quest/future/abc123.md")).href;
+  check(
+    activeCard.includes(`\x1b]8;;${expectedFileUrl}\x1b\\.pi/quest/future/abc123.md\x1b]8;;\x1b\\`),
+    "active quest card renders clickable OSC 8 file:// hyperlink for plan path",
+  );
   mkdirSync(join(cwd, ".pi", "quest", "future"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "quest", "future", "dff456.md"), "# fix-seams\n\n## Original request\n\nDrafted work.\n");
   const adopted = await resumeQuest(pi, fakeCtx(cwd), "fix-seams");

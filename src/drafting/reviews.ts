@@ -1,14 +1,12 @@
 // HIGH_LEVEL: #drafting — every content-changing save boots a fresh review.
 // HIGH_LEVEL: #modes — PASS auto-promotes, FAIL returns findings, user "go" promotes.
 // SPEC: B1.3 (supersede, thresholds, approval), B2 (go-override).
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { getState, updateState } from "../app/store";
 import { emitNow, sendSteer, sendWake } from "../app/interpreter";
 import { DEFAULT_CONFIG, getThresholdsForDifficulty, readQuestConfig, resolveRoleFallbacks, resolveRoleModel, type QuestConfig } from "../config";
-import { childDeviated, difficultyLevel, researchRecorded, type ApprovedBy, type QuestKind, type QuestState } from "../domain/quest";
+import { childDeviated, difficultyLevel, type ApprovedBy, type QuestState } from "../domain/quest";
 import { recalibrateQuestDifficulty } from "./difficulty";
-import { noteDraftFindings } from "../domain/transitions";
 import { promoteAfterPass } from "./promote";
 import { bypassDraftReview, bypassesDraftReview } from "./bypass";
 import { assessDraftQuality } from "./quality";
@@ -16,22 +14,18 @@ import { withEffectivePolicy } from "../policy/effective";
 import { draftPath } from "../domain/paths";
 import { draftFilePath } from "../files";
 import type { Qid } from "../domain/qid";
-import type { Pi, PiCtx, ToolResultEvent } from "../hooks/events";
-import { onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
+import type { Pi, PiCtx } from "../hooks/events";
+import { onAfterCompact, onSessionStart, onToolResult, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview } from "../review/flow";
 import { cancelReview, hasInFlight, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
-import { noteDraftUpdated } from "../durability/status";
 import {
-  handleDraftEdit,
   onWriteResult as doOnWriteResult,
   onTurnEndCatchAll as doOnTurnEndCatchAll,
 } from "./edits";
 import {
-  bumpReviewCount,
   deliverableBody,
   deliverableWord,
-  draftProfileText,
   hasAuthoredText,
   hashContent,
   meetsReviewThresholds,
@@ -39,12 +33,7 @@ import {
   reviewMaterial,
 } from "./plan-text";
 import { interpretUserTurn } from "../judge/intent-classifier";
-import {
-  handleDraftFailVerdict,
-  handleDraftFastFail,
-  handleDraftPassVerdict,
-} from "./review-outcomes";
-
+import { handleDraftFailVerdict, handleDraftFastFail, handleDraftPassVerdict } from "./review-outcomes";
 import {
   bumpReviewCountAndReboot as doBumpReviewCountAndReboot,
   clearDraftReviewRetry,
@@ -55,20 +44,12 @@ import {
   MAX_CONSECUTIVE_REVIEW_FAILS,
   REVIEW_RETRY_BASE_MS,
   clearReviewVerdictFails,
-  noteReviewVerdictFailed,
   getReviewVerdictFails,
   type RetryDispatcher,
 } from "./draft-retry";
 export {
-  clearDraftReviewRetry,
-  clearReviewVerdictFails,
-  draftReviewRetryCount,
-  getReviewVerdictFails,
-  setReviewRetryDispatcher,
-  MAX_REVIEW_RETRIES,
-  MAX_CONSECUTIVE_REVIEW_FAILS,
-  REVIEW_RETRY_BASE_MS,
-  type RetryDispatcher,
+  clearDraftReviewRetry, clearReviewVerdictFails, draftReviewRetryCount, getReviewVerdictFails,
+  setReviewRetryDispatcher, MAX_REVIEW_RETRIES, MAX_CONSECUTIVE_REVIEW_FAILS, REVIEW_RETRY_BASE_MS, type RetryDispatcher,
 };
 
 async function readDraftFile(ctx: PiCtx, state: QuestState): Promise<string | null> {
@@ -110,6 +91,7 @@ async function executeDraftReview(
   belowBar: boolean,
   quality: { summary: string },
   config: QuestConfig,
+  signal?: AbortSignal,
 ) {
   const reviewerModel = resolveRoleModel(config, "reviewer");
   return runIsolatedReview({
@@ -117,6 +99,8 @@ async function executeDraftReview(
     ctx,
     qid,
     target,
+    reviewKind: "draft",
+    ...(signal ? { signal } : {}),
     prompt: buildReviewPrompt("draft", qid, target, material, thresholds, belowBar) +
       (quality.summary !== "" ? `\n\nDeterministic quality findings (advisory): ${quality.summary}` : ""),
     runnerTool: config.bindings.reviewRunner.tool,
@@ -134,14 +118,22 @@ export async function bootDraftReview(
   ctx: PiCtx,
   target: string,
   baseConfig: QuestConfig = DEFAULT_CONFIG,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) return;
   const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
   if (state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
+  if (signal !== undefined && !isCurrentReview(qid, target)) return;
   const kind = state.kind;
   const content = await readDraftFile(ctx, state);
-  if (content === null) return;
+  if (content === null) {
+    if (isCurrentReview(qid, target)) cancelReview(qid);
+    updateState((s) => (s.qid === qid && s.activeReview?.target === target ? { ...s, activeReview: null, snapshotPending: true } : s));
+    return;
+  }
+  if (signal?.aborted || (signal !== undefined && !isCurrentReview(qid, target))) return;
   const sections = parseDraftSections(content);
   const recalibrated = recalibrateQuestDifficulty(state, sections, content);
   let effectiveState = state;
@@ -152,6 +144,7 @@ export async function bootDraftReview(
   const material = reviewMaterial(effectiveState, sections);
   const thresholds = getThresholdsForDifficulty(config, effectiveState.difficulty);
   const quality = await assessDraftQuality(ctx, config, sections, kind, effectiveState.difficulty);
+  if (signal?.aborted || (signal !== undefined && !isCurrentReview(qid, target))) return;
   const belowBar = !meetsReviewThresholds(sections, thresholds, kind);
   updateState((s) => s.draft === null ? s : { ...s, draft: { ...s.draft, lastReviewedPlan: deliverableBody(sections, kind) } });
 
@@ -168,7 +161,7 @@ export async function bootDraftReview(
     return;
   }
 
-  const outcome = await executeDraftReview(pi, ctx, qid, target, material, thresholds, belowBar, quality, config);
+  const outcome = await executeDraftReview(pi, ctx, qid, target, material, thresholds, belowBar, quality, config, signal);
   if (outcome.status === "no-runner") {
     if (!userPathSteered.has(`${qid}:${target}`)) {
       userPathSteered.add(`${qid}:${target}`);
@@ -236,8 +229,19 @@ export async function maybeBootDraftReview(pi: Pi, ctx: PiCtx): Promise<void> {
   // Nothing to review until a plan is authored; booting here would fail and
   // leave an unretryable empty-plan review (bumpReviewCount is a no-op).
   if (!hasAuthoredText(deliverableBody(sections, state.kind))) return;
-  supersedeReviewThenBootFresh(state.qid, target, () => {
-    void bootDraftReview(pi, ctx, target, config);
+  const qid = state.qid;
+  supersedeReviewThenBootFresh(qid, target, (signal) => {
+    updateState((s) =>
+      s.qid === qid
+        ? {
+            ...s,
+            activeReview: { kind: "draft", target },
+            exactNextAction: `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`,
+            snapshotPending: true,
+          }
+        : s
+    );
+    void bootDraftReview(pi, ctx, target, config, signal);
   });
 }
 
@@ -322,6 +326,9 @@ export function watchDraftFileCatchAll(pi: Pi): void {
 
 export function watchResume(pi: Pi): void {
   onSessionStart(pi, (_event, eventCtx) => {
+    void ensureDraftReview(pi, eventCtx).catch(() => {});
+  });
+  onAfterCompact(pi, (_event, eventCtx) => {
     void ensureDraftReview(pi, eventCtx).catch(() => {});
   });
 }

@@ -268,6 +268,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     ctx,
     qid,
     target,
+    reviewKind: "validation",
     runnerTool: config.bindings.reviewRunner.tool,
     ...(validatorModel ? { model: validatorModel } : {}),
     fallbackModels: resolveRoleFallbacks(config, "validator"),

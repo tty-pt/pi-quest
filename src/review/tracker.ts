@@ -29,14 +29,22 @@ export function cancelReview(qid: string): void {
   }
 }
 
-export function supersedeReviewThenBootFresh(qid: string, target: string, boot: () => void): void {
-  cancelReview(qid);
-  trackReview(qid, target, () => {});
-  boot();
+export function supersedeReviewThenBootFresh(
+  qid: string,
+  target: string,
+  boot: (signal: AbortSignal) => void,
+): void {
+  const controller = new AbortController();
+  trackReview(qid, target, () => controller.abort());
+  boot(controller.signal);
 }
 
 export function isCurrentReview(qid: string, target: string): boolean {
   return inFlight.get(qid)?.target === target;
+}
+
+export function getInFlightTarget(qid: string): string | null {
+  return inFlight.get(qid)?.target ?? null;
 }
 
 export function hasInFlight(qid: string): boolean {

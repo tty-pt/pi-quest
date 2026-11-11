@@ -34,6 +34,7 @@ export interface DraftInfo {
   outstandingFindings: boolean;
   contentHash: string | null;
   lastReviewedPlan?: string | null;
+  stagedPlan?: string | null;
   approvedPlanHash: string | null;
   planRevisions: PlanRevision[];
   timeoutAwaitingValidation?: boolean;

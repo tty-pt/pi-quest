@@ -13,6 +13,7 @@ import {
   stagePostSubquestCompaction,
   type SubquestHandbackInfo,
 } from "../../src/durability/compaction-handoff.ts";
+import { cancelReview, trackReview } from "../../src/review/tracker.ts";
 import { fakeCtx, fakePi } from "../fake-pi.ts";
 
 function injectedText(pi: ReturnType<typeof fakePi>, cwd: string): string {
@@ -203,4 +204,42 @@ Deno.test("post-subquest compaction completion triggers followUp message to wake
   assertEquals(opts.deliverAs, "followUp");
   assertEquals(opts.triggerTurn, true);
   check(JSON.stringify(first.message).includes("1xCHLD concluded and transcript compacted"), "contains resumption message");
+});
+
+Deno.test("compaction preserves in-flight review context in post-compaction pointer", async () => {
+  resetCompactionHandoff();
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-compact-rev-"));
+  mkdirSync(join(cwd, ".pi", "quest", "future"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "quest", "future", "1xREVW.md"), "# 1xREVW\n\n## Requirements\n- R1: draft item\n");
+  replaceState({
+    ...createQuest("reviewing draft", "1xREVW"),
+    phase: "drafting",
+    activeReview: { kind: "draft", target: "abcd1234" },
+    exactNextAction: "Draft review in flight (abcd1234). Do not edit the draft; await the reviewer verdict.",
+  });
+  trackReview("1xREVW", "abcd1234", () => {});
+  const pi = fakePi();
+  installDurability(pi);
+
+  try {
+    for (const h of pi.eventHandlers["session_before_compact"]!) {
+      await h({ type: "session_before_compact" }, fakeCtx(cwd));
+    }
+    for (const h of pi.eventHandlers["session_compact"]!) {
+      h({ type: "session_compact" }, fakeCtx(cwd));
+    }
+    const first = injectedText(pi, cwd);
+    check(first.includes("[Post-Compaction Handoff]"), "injects handoff pointer");
+    check(
+      first.includes("Active Review: draft review in flight (target abcd1234)"),
+      `renders active review status: ${first}`,
+    );
+    check(
+      first.includes("Next action: Review (draft) is running for quest 1xREVW"),
+      `renders review-aware next action: ${first}`,
+    );
+  } finally {
+    cancelReview("1xREVW");
+    replaceState(IDLE_STATE);
+  }
 });

@@ -14,10 +14,10 @@ import { draftPath } from "../domain/paths";
 import { draftFilePath } from "../files";
 import type { Qid } from "../domain/qid";
 import type { Pi, PiCtx } from "../hooks/events";
-import { onSessionStart, onTurnEnd, onUserMessage } from "../hooks/events";
+import { onAfterCompact, onSessionStart, onTurnEnd, onUserMessage } from "../hooks/events";
 import { buildReviewPrompt } from "../review/prompts";
 import { runIsolatedReview, shouldNoticeReview } from "../review/flow";
-import { cancelReview, hasInFlight, isCurrentReview } from "../review/tracker";
+import { cancelReview, hasInFlight, isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { hashContent, parseDraftSections, reviewMaterial, splicePlanSection } from "../drafting/plan-text";
 import { diffPlans } from "../drafting/plan-diff";
 import { interpretUserTurn } from "../judge/intent-classifier";
@@ -111,16 +111,28 @@ export async function bootPlanRevisionReview(
   ctx: PiCtx,
   target: string,
   baseConfig: QuestConfig = DEFAULT_CONFIG,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) return;
   const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
   if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
-  if (isCurrentReview(state.qid, target)) return;
+  if (signal === undefined && isCurrentReview(state.qid, target)) return;
+  if (signal !== undefined && !isCurrentReview(state.qid, target)) return;
   const qid = state.qid;
   const content = await readPlanFile(ctx, state);
-  if (content === null) return;
+  if (content === null) {
+    if (isCurrentReview(qid, target)) cancelReview(qid);
+    updateState((s) => (s.qid === qid && s.activeReview?.target === target ? { ...s, activeReview: null, snapshotPending: true } : s));
+    return;
+  }
+  if (signal?.aborted || (signal !== undefined && !isCurrentReview(qid, target))) return;
   const sections = parseDraftSections(content);
-  if (sections.plan.length === 0) return;
+  if (sections.plan.length === 0) {
+    if (isCurrentReview(qid, target)) cancelReview(qid);
+    updateState((s) => (s.qid === qid && s.activeReview?.target === target ? { ...s, activeReview: null, snapshotPending: true } : s));
+    return;
+  }
   const material = {
     ...reviewMaterial(getState(), sections),
     revisionNote: REVISION_NOTE,
@@ -129,6 +141,7 @@ export async function bootPlanRevisionReview(
   const activeModel = resolveActiveModel(ctx, config);
   const need = calculateReviewNeed(state.difficulty, activeModel, 0, config.modelAccuracy);
   if (config.reviewPolicy === "off" || (config.reviewPolicy === "balanced" && need <= 4.5 && difficultyLevel(state.difficulty) < 5)) {
+    if (isCurrentReview(qid, target)) cancelReview(qid);
     clearPlanRevisionRetries(qid);
     updateState((s) => approvePlanRevision(s, target, sections.plan));
     emitNow(pi);
@@ -145,6 +158,8 @@ export async function bootPlanRevisionReview(
     ctx,
     qid,
     target,
+    reviewKind: "draft",
+    ...(signal ? { signal } : {}),
     prompt: buildReviewPrompt("draft", qid, target, material, getThresholdsForDifficulty(config, state.difficulty)),
     runnerTool: config.bindings.reviewRunner.tool,
     ...(reviewerModel ? { model: reviewerModel } : {}),
@@ -177,7 +192,10 @@ async function retryPlanRevisionReview(
     clearPlanRevisionRetries(state.qid);
     return;
   }
-  void bootPlanRevisionReview(pi, ctx, target, config);
+  const qid = state.qid;
+  supersedeReviewThenBootFresh(qid, target, (signal) => {
+    void bootPlanRevisionReview(pi, ctx, target, config, signal);
+  });
 }
 
 // FAIL restores the last approved plan text over the rejected revision and
@@ -217,33 +235,53 @@ export async function maybeBootPlanRevisionReview(pi: Pi, ctx: PiCtx, note: stri
   const baseline = state.draft.lastReviewedPlan
     ?? [...(state.draft.planRevisions ?? [])].reverse().find((r) => r.plan !== "")?.plan
     ?? "";
-  const planChanged = baseline !== "" && diffPlans(baseline, sections.plan, 1e6) !== null;
+  const planChanged = baseline !== ""
+    ? diffPlans(baseline, sections.plan, 1e6) !== null
+    : (state.draft.approvedPlanHash !== null && state.draft.approvedPlanHash !== hash);
   if (!planChanged) {
     if (state.draft.contentHash !== hash) {
       updateState((s) =>
-        s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash }, snapshotPending: true }
+        s.draft === null ? s : { ...s, draft: { ...s.draft, contentHash: hash, approvedPlanHash: hash }, snapshotPending: true }
       );
     }
     return "in-sync";
   }
   if (isCurrentReview(state.qid, hash)) return "in-flight";
+  if (
+    hasInFlight(state.qid) &&
+    state.draft.stagedPlan &&
+    diffPlans(state.draft.stagedPlan, sections.plan, 1e6) === null
+  ) {
+    return "in-flight";
+  }
   const qid = state.qid;
-  const previousHash = state.draft.contentHash;
-  dispatch({
-    type: "PlanRevisionStaged",
-    previousHash,
-    nextHash: hash,
-    note,
-    previousPlan: baseline,
-  });
-  noteDraftUpdated(ctx);
+  const alreadyStaged = state.draft.contentHash === hash && state.draft.approvedPlanHash !== hash;
+  if (!alreadyStaged) {
+    const previousHash = state.draft.contentHash;
+    dispatch({
+      type: "PlanRevisionStaged",
+      previousHash,
+      nextHash: hash,
+      note,
+      previousPlan: baseline,
+      stagedPlan: sections.plan,
+    });
+    noteDraftUpdated(ctx);
+  }
   const config = await readQuestConfig(ctx.cwd);
-  // Boot the reviewer for the new target — cancelling any in-flight review
-  // first. The tracker must NOT be pre-seeded (as supersedeReviewThenBootFresh
-  // does): bootPlanRevisionReview treats an in-flight current target as a
-  // duplicate and the boot would be a no-op.
-  if (hasInFlight(qid)) cancelReview(qid);
-  void bootPlanRevisionReview(pi, ctx, hash, config);
+  supersedeReviewThenBootFresh(qid, hash, (signal) => {
+    updateState((s) =>
+      s.qid === qid
+        ? {
+            ...s,
+            activeReview: { kind: "draft", target: hash },
+            exactNextAction: `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`,
+            snapshotPending: true,
+          }
+        : s
+    );
+    void bootPlanRevisionReview(pi, ctx, hash, config, signal);
+  });
   return "booted";
 }
 
@@ -260,6 +298,7 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
   if (hasInFlight(state.qid)) {
     cancelReview(state.qid);
   }
+  updateState((s) => (s.activeReview !== null ? { ...s, activeReview: null, snapshotPending: true } : s));
   if (state.pendingDirectiveRevision) {
     updateState((s) => ({ ...s, pendingDirectiveRevision: false, pendingDirectiveText: undefined, snapshotPending: true }));
     emitNow(pi);
@@ -294,5 +333,8 @@ export function watchPlanRevisionCatchAll(pi: Pi): void {
 export function watchPlanRevisionResume(pi: Pi): void {
   onSessionStart(pi, (_event, eventCtx) => {
     void maybeBootPlanRevisionReview(pi, eventCtx, "staged revision resumed");
+  });
+  onAfterCompact(pi, (_event, eventCtx) => {
+    void maybeBootPlanRevisionReview(pi, eventCtx, "staged revision resumed after compaction");
   });
 }
