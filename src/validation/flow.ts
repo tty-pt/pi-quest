@@ -50,23 +50,17 @@ export async function captureGitDiff(
   return res.diff;
 }
 
+export {
+  clearValidationRetries, clearValidationVerdictFails, getValidationVerdictFails,
+  MAX_CONSECUTIVE_VALIDATION_FAILS, MAX_VALIDATION_RETRIES, noteValidationVerdictFailed,
+  setValidationRetryDispatcher, VALIDATION_RETRY_BASE_MS, validationRetryCount,
+} from "./retry";
+import {
+  clearValidationRetries, clearValidationVerdictFails, MAX_CONSECUTIVE_VALIDATION_FAILS,
+  noteValidationVerdictFailed, scheduleValidationRetry, validationRetryCount,
+} from "./retry";
+
 const announced = new Set<string>();
-export const MAX_CONSECUTIVE_VALIDATION_FAILS = 2;
-const consecutiveValidationFails = new Map<string, number>();
-
-export function noteValidationVerdictFailed(qid: string): number {
-  const next = (consecutiveValidationFails.get(qid) ?? 0) + 1;
-  consecutiveValidationFails.set(qid, next);
-  return next;
-}
-
-export function clearValidationVerdictFails(qid: string): void {
-  consecutiveValidationFails.delete(qid);
-}
-
-export function getValidationVerdictFails(qid: string): number {
-  return consecutiveValidationFails.get(qid) ?? 0;
-}
 
 function announceOnce(pi: Pi, key: string, text: string): void {
   if (announced.has(key)) return;
@@ -297,11 +291,20 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   if (outcome.status === "failed") {
-    wakeOnce(pi, `failed:${qid}:${target}`, `Validation failed to run (${outcome.detail}). Claim completion again to retry, keep working (continueWork:true), or hold for the user to reply CONFIRM.`);
+    const scheduled = scheduleValidationRetry(qid, (attempt) => {
+      const s = getState();
+      if (s.disabled === true || s.phase !== "validating" || s.qid !== qid) return;
+      if (validationRetryCount(qid) !== attempt || hasInFlight(qid)) return;
+      void ensureValidationFlow(pi, ctx);
+    });
+    if (!scheduled) {
+      wakeOnce(pi, `failed:${qid}:${target}`, `Validation failed to run (${outcome.detail}). Claim completion again to retry, keep working (continueWork:true), or hold for the user to reply CONFIRM.`);
+    }
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
   if (getState().disabled === true) return;
+  clearValidationRetries(qid);
 
   if (outcome.review.verdict === "PASS") {
     clearValidationVerdictFails(qid);

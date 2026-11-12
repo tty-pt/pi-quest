@@ -157,7 +157,7 @@ export async function bootDraftReview(
   // Deterministic local fast-fail: when deterministic quality checks block or draft is below maturity bar,
   // reject immediately in 0ms without launching an expensive doomed subagent review.
   if (belowBar || quality.blocks) {
-    handleDraftFastFail(pi, qid, sections, thresholds, kind, state.difficulty, quality, belowBar);
+    handleDraftFastFail(pi, qid, target, sections, thresholds, kind, state.difficulty, quality, belowBar);
     return;
   }
 

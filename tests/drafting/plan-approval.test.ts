@@ -283,6 +283,7 @@ Deno.test("validatePlanBeforeApproval: reuses existing PASS lastReview for match
   const drafting = createDraft(createQuest("Add feature X", QID), "Add feature X");
   replaceState({
     ...drafting,
+    refinements: ["Pre-draft refinement already reviewed by draft reviewer"],
     draft: { ...drafting.draft!, planAuthored: true, contentHash: hash, outstandingFindings: false },
     lastReview: {
       verdict: "PASS",
@@ -298,6 +299,6 @@ Deno.test("validatePlanBeforeApproval: reuses existing PASS lastReview for match
   check(res.allowed === true, "allowed immediately");
   check(res.verdict === "PASS", "verdict is PASS");
   const subagentReq = pi.emitted.find((e) => e.event === "prompt-template:subagent:request");
-  check(subagentReq === undefined, "did NOT launch duplicate subagent when lastReview already passed target");
+  check(subagentReq === undefined, "did NOT launch duplicate subagent when lastReview already passed target even with refinements present");
   replaceState(IDLE_STATE);
 });

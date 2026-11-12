@@ -98,3 +98,29 @@ Deno.test("editing the draft file while provisional auto-transitions to drafting
   }
 });
 
+Deno.test("onTurnEndCatchAll does not re-boot an unedited draft when outstandingFindings is true", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-fastfail-catchall-"));
+  replaceState(drafting());
+  const rel = draftPath(QID);
+  const abs = join(cwd, rel);
+  await mkdir(dirname(abs), { recursive: true });
+  const doc = "## Requirements\n- R1\n- R2\n\n## Implementation Plan\n1. Step one\n";
+  await writeFile(abs, doc, "utf8");
+  const hash = hashContent(doc);
+  updateState((s) =>
+    s.draft === null
+      ? s
+      : { ...s, draft: { ...s.draft, planAuthored: true, contentHash: hash, outstandingFindings: true } }
+  );
+  let booted = 0;
+  try {
+    await onTurnEndCatchAll(fakePi(), fakeCtx(cwd), async () => { booted += 1; });
+    check(booted === 0, "onTurnEndCatchAll does not re-boot when outstandingFindings is true on unchanged hash");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+

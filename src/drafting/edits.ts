@@ -92,7 +92,7 @@ export async function onTurnEndCatchAll(
     const hash = hashContent(content);
     if (isCurrentReview(state.qid, hash)) return;
     if (hash === state.draft.contentHash) {
-      if (state.draft.planAuthored && state.draft.approvedBy === null && state.lastReview?.target !== hash) {
+      if (state.draft.planAuthored && state.draft.approvedBy === null && !state.draft.outstandingFindings && state.lastReview?.target !== hash) {
         noteDraftUpdated(ctx);
         void bootFn(pi, ctx);
       }

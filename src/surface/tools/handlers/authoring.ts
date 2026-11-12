@@ -28,6 +28,7 @@ export async function applyPlanParam(
   }
   if (state.phase === "drafting") {
     try {
+      const priorDifficulty = state.difficulty;
       let next = await writePlanToDraft(pi, ctx, state, plan.trim());
       applied.push("plan recorded in the draft file");
       const claims = await checkPlanCitations(ctx, plan.trim());
@@ -36,9 +37,11 @@ export async function applyPlanParam(
       const fileContent = await readFile(draftFilePath(ctx.cwd, qid), "utf8");
       const sections = parseDraftSections(fileContent);
       const recalibrated = recalibrateQuestDifficulty(next, sections, fileContent);
-      if (difficultyLevel(recalibrated) > difficultyLevel(next.difficulty)) {
+      if (!next.draft?.outstandingFindings && difficultyLevel(recalibrated) > difficultyLevel(next.difficulty)) {
         next = updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
-        applied.push(`complexity discovered mid-quest: task elevated to ${recalibrated}`);
+      }
+      if (difficultyLevel(next.difficulty) > difficultyLevel(priorDifficulty)) {
+        applied.push(`complexity discovered mid-quest: task elevated to ${next.difficulty}`);
       }
       applied.push(await profileForSavedDoc(ctx, fileContent, "standard"));
       return { state: next };
@@ -69,6 +72,7 @@ export async function applyAnalysisParam(
   }
   if (state.phase === "drafting") {
     try {
+      const priorDifficulty = state.difficulty;
       let next = await writeAnalysisToDraft(pi, ctx, state, analysis.trim());
       applied.push("analysis recorded in the draft file");
       const claims = await checkPlanCitations(ctx, analysis.trim());
@@ -77,9 +81,11 @@ export async function applyAnalysisParam(
       const fileContent = await readFile(draftFilePath(ctx.cwd, qid), "utf8");
       const sections = parseDraftSections(fileContent);
       const recalibrated = recalibrateQuestDifficulty(next, sections, fileContent);
-      if (difficultyLevel(recalibrated) > difficultyLevel(next.difficulty)) {
+      if (!next.draft?.outstandingFindings && difficultyLevel(recalibrated) > difficultyLevel(next.difficulty)) {
         next = updateState((s) => ({ ...s, difficulty: recalibrated, snapshotPending: true }));
-        applied.push(`complexity discovered mid-quest: task elevated to ${recalibrated}`);
+      }
+      if (difficultyLevel(next.difficulty) > difficultyLevel(priorDifficulty)) {
+        applied.push(`complexity discovered mid-quest: task elevated to ${next.difficulty}`);
       }
       applied.push(await profileForSavedDoc(ctx, fileContent, "analysis"));
       return { state: next };

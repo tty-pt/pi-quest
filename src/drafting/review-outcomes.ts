@@ -32,6 +32,7 @@ function hasSubagentRunner(pi: Pi): boolean {
 export function handleDraftFastFail(
   pi: Pi,
   qid: Qid,
+  target: string,
   sections: DraftSections,
   thresholds: DraftThresholds,
   kind: QuestKind,
@@ -43,10 +44,6 @@ export function handleDraftFastFail(
   if (hasSubagentRunner(pi)) {
     cancelReview(qid);
   }
-  updateState((s) => (s.phase === "drafting" ? noteDraftFindings(s) : s));
-  clearDraftReviewRetry(qid);
-  emitNow(pi);
-  const consecutive = noteReviewVerdictFailed(qid);
   const reasons: string[] = [];
   if (belowBar) {
     const req = sections.requirements.length;
@@ -57,6 +54,23 @@ export function handleDraftFastFail(
     reasons.push(quality.summary);
   }
   const findingText = reasons.join("; ");
+  updateState((s) =>
+    s.phase === "drafting"
+      ? {
+          ...noteDraftFindings(s),
+          activeReview: null,
+          lastReview: {
+            verdict: "FAIL",
+            target,
+            findings: findingText,
+          },
+          snapshotPending: true,
+        }
+      : s
+  );
+  clearDraftReviewRetry(qid);
+  emitNow(pi);
+  const consecutive = noteReviewVerdictFailed(qid);
   const profile = `\n\nDraft profile:\n${draftProfileText(sections, thresholds, "", kind, difficulty)}`;
 
   if (consecutive >= MAX_CONSECUTIVE_REVIEW_FAILS) {

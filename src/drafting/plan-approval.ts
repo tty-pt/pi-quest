@@ -139,7 +139,7 @@ export async function validatePlanBeforeApproval(
   const target = state.draft?.contentHash ?? hashContent(content);
   const verifyKey = `${qid}:${target}:${state.refinements.length}`;
   if (verifiedApprovalKeys.has(verifyKey)) return { allowed: true, verdict: "PASS" };
-  if (state.lastReview?.verdict === "PASS" && state.lastReview?.target === target && !state.draft?.outstandingFindings && state.refinements.length === 0) {
+  if (state.lastReview?.verdict === "PASS" && state.lastReview?.target === target && !state.draft?.outstandingFindings) {
     verifiedApprovalKeys.add(verifyKey);
     return { allowed: true, verdict: "PASS", findings: state.lastReview.findings };
   }

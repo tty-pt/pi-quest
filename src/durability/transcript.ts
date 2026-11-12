@@ -3,7 +3,7 @@
 // current session plus child-research sibling sessions, tail-bounded and
 // truncation-marked so the validator never faces the full transcript.
 import { homedir } from "node:os";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { PiCtx, TranscriptEntry } from "../hooks/events";
 import { decodeSnapshot, SNAPSHOT_TYPE } from "./snapshots";
@@ -92,9 +92,25 @@ async function sessionFiles(sessionsDir: string): Promise<Array<{ path: string; 
   return files.slice(0, SCAN_FILES);
 }
 
+const SCAN_TAIL_BYTES = 512 * 1024;
+
 async function tailLines(path: string): Promise<string[]> {
-  const text = await readFile(path, "utf8");
-  return text.split("\n").filter((line) => line.trim() !== "").slice(-SCAN_TAIL_LINES);
+  const fh = await open(path, "r");
+  try {
+    const info = await fh.stat();
+    const size = info.size;
+    if (size === 0) return [];
+    const readLen = Math.min(size, SCAN_TAIL_BYTES);
+    const offset = size - readLen;
+    const buf = new Uint8Array(readLen);
+    const { bytesRead } = await fh.read(buf, 0, readLen, offset);
+    const text = new TextDecoder("utf-8").decode(buf.subarray(0, bytesRead));
+    const lines = text.split("\n");
+    if (offset > 0 && lines.length > 0) lines.shift();
+    return lines.filter((line) => line.trim() !== "").slice(-SCAN_TAIL_LINES);
+  } finally {
+    await fh.close();
+  }
 }
 
 function parseLine(line: string): Array<Record<string, unknown>> | null {

@@ -36,7 +36,7 @@ export async function writePlanToDraft(
   if (updated === current) throw new Error("plan text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
-  const next = updateState((s) => s.draft === null ? s : {
+  updateState((s) => s.draft === null ? s : {
     ...s,
     draft: { ...s.draft, planAuthored: true, contentHash: hash },
     snapshotPending: true,
