@@ -2,7 +2,7 @@
 // Status text is derived, never stored; commands re-assert it after acting.
 import { getState } from "../app/store";
 import { DEFAULT_CONFIG, readQuestConfig, type StatusStyle } from "../config";
-import type { Phase, QuestState } from "../domain/quest";
+import { difficultyLevel, type Phase, type QuestDifficulty, type QuestState } from "../domain/quest";
 import type { PiCtx } from "../hooks/events";
 import { hasInFlight } from "../review/tracker";
 
@@ -17,6 +17,15 @@ const PHASE_ICONS: Record<Phase, string> = {
 
 const SUBSCRIPTS = ["₀", "₁", "₂", "₃", "₄", "₅", "₆", "₇", "₈", "₉"];
 
+const DIFFICULTY_TINTS: Record<number, string> = {
+  1: "\x1b[90m", // trivial: gray
+  2: "\x1b[36m", // minor: cyan
+  3: "\x1b[32m", // standard: green
+  4: "\x1b[33m", // major: yellow
+  5: "\x1b[31m", // complex: red
+};
+const FG_RESET = "\x1b[39m";
+
 function toSubscript(n: number): string {
   return String(n)
     .split("")
@@ -24,11 +33,24 @@ function toSubscript(n: number): string {
     .join("");
 }
 
+export function formatDepthSubscript(depth: number, style: StatusStyle = "icon"): string {
+  const level = Math.max(1, (depth ?? 0) + 1);
+  if (style === "text") return `:${level}`;
+  return toSubscript(level);
+}
+
+export function formatDifficultySubscript(
+  difficulty?: QuestDifficulty | number | string,
+  style: StatusStyle = "icon",
+): string {
+  const lvl = difficultyLevel(difficulty);
+  if (style === "text") return `:${lvl}`;
+  const tint = DIFFICULTY_TINTS[lvl] ?? DIFFICULTY_TINTS[3];
+  return `${tint}${toSubscript(lvl)}${FG_RESET}`;
+}
+
 export function formatDepthPrefix(depth: number, style: StatusStyle = "icon"): string {
-  if (depth <= 0) return "";
-  if (style === "text") return `:${depth}`;
-  if (depth === 1) return "↳ ";
-  return `↳${toSubscript(depth)} `;
+  return formatDepthSubscript(depth, style);
 }
 
 export function questDisplayName(state: QuestState): string {
@@ -51,6 +73,12 @@ function isReviewActive(state: QuestState): boolean {
   return false;
 }
 
+function formatNameWithSubscripts(state: QuestState, label: string, style: StatusStyle): string {
+  const depthSub = formatDepthSubscript(state.depth, style);
+  const diffSub = formatDifficultySubscript(state.difficulty, style);
+  return `${label}${depthSub}${diffSub}`;
+}
+
 export function questStatus(state: QuestState, style: StatusStyle = "icon"): string {
   const label = questDisplayName(state);
   const slot = extractSlotLabel(state.worktreePath ?? state.contract?.worktreePath);
@@ -60,11 +88,12 @@ export function questStatus(state: QuestState, style: StatusStyle = "icon"): str
     if (state.qid === null) {
       return style === "text" ? "off" : "⏸️ off";
     }
-    const idPart = style === "text"
-      ? `${label}${formatDepthPrefix(state.depth, "text")}`
-      : `${formatDepthPrefix(state.depth, "icon")}${label}`;
-    const slotPart = slot ? ` (${slot})` : "";
-    return style === "text" ? `paused ${idPart}${slotPart}` : `⏸️ ${idPart}${slotPart}`;
+    const pausedToken = style === "text" ? "paused" : "⏸️";
+    const namePart = formatNameWithSubscripts(state, label, style);
+    const parts: string[] = [pausedToken];
+    if (slot) parts.push(slot);
+    parts.push(namePart);
+    return parts.join(" ");
   }
 
   if (state.qid === null) {
@@ -76,12 +105,11 @@ export function questStatus(state: QuestState, style: StatusStyle = "icon"): str
     ? (reviewing ? "reviewing" : state.phase)
     : (reviewing ? "👀" : PHASE_ICONS[state.phase]);
 
-  const namePart = style === "text"
-    ? `${label}${formatDepthPrefix(state.depth, "text")}`
-    : `${formatDepthPrefix(state.depth, "icon")}${label}`;
+  const namePart = formatNameWithSubscripts(state, label, style);
 
-  const parts: string[] = [`${phaseToken} ${namePart}`];
-  if (slot) parts.push(`(${slot})`);
+  const parts: string[] = [phaseToken];
+  if (slot) parts.push(slot);
+  parts.push(namePart);
   if (hasPassingTest) parts.push("✓");
 
   return parts.join(" ");

@@ -53,52 +53,55 @@ export async function restoreSubmoduleWorktrees(
   primaryRoot: string,
   pi?: Pi,
 ): Promise<void> {
-  const gitmodulesPath = join(primaryRoot, ".gitmodules");
-  if (!existsSync(gitmodulesPath)) return;
+  const roots = [primaryRoot, join(primaryRoot, ".pi")];
+  for (const rootDir of roots) {
+    const gitmodulesPath = join(rootDir, ".gitmodules");
+    if (!existsSync(gitmodulesPath)) continue;
 
-  try {
-    const content = readFileSync(gitmodulesPath, "utf-8");
-    const subPaths: string[] = [];
-    for (const line of content.split("\n")) {
-      const match = line.match(/^\s*path\s*=\s*(.+)$/);
-      if (match) subPaths.push(match[1].trim());
-    }
-
-    for (const subPath of subPaths) {
-      const gitFile = join(primaryRoot, subPath, ".git");
-      if (!existsSync(gitFile)) continue;
-
-      let gitFileContent = "";
-      try {
-        gitFileContent = readFileSync(gitFile, "utf-8").trim();
-      } catch {
-        continue;
+    try {
+      const content = readFileSync(gitmodulesPath, "utf-8");
+      const subPaths: string[] = [];
+      for (const line of content.split("\n")) {
+        const match = line.match(/^\s*path\s*=\s*(.+)$/);
+        if (match) subPaths.push(match[1].trim());
       }
 
-      if (!gitFileContent.startsWith("gitdir:")) continue;
-      const relGitDir = gitFileContent.replace(/^gitdir:\s*/, "").trim();
-      const gitDir = resolve(primaryRoot, subPath, relGitDir);
-      const cfgFile = join(gitDir, "config");
-      if (!existsSync(cfgFile)) continue;
+      for (const subPath of subPaths) {
+        const gitFile = join(rootDir, subPath, ".git");
+        if (!existsSync(gitFile)) continue;
 
-      const targetPath = join(primaryRoot, subPath);
-      const expectedRelWorktree = relative(gitDir, targetPath);
+        let gitFileContent = "";
+        try {
+          gitFileContent = readFileSync(gitFile, "utf-8").trim();
+        } catch {
+          continue;
+        }
 
-      const res = await runGit(
-        ["config", "--file", cfgFile, "core.worktree"],
-        primaryRoot,
-        pi,
-      );
-      if (res.exitCode !== 0 || res.stdout.trim() !== expectedRelWorktree) {
-        await runGit(
-          ["config", "--file", cfgFile, "core.worktree", expectedRelWorktree],
-          primaryRoot,
+        if (!gitFileContent.startsWith("gitdir:")) continue;
+        const relGitDir = gitFileContent.replace(/^gitdir:\s*/, "").trim();
+        const gitDir = resolve(rootDir, subPath, relGitDir);
+        const cfgFile = join(gitDir, "config");
+        if (!existsSync(cfgFile)) continue;
+
+        const targetPath = join(rootDir, subPath);
+        const expectedRelWorktree = relative(gitDir, targetPath);
+
+        const res = await runGit(
+          ["config", "--file", cfgFile, "core.worktree"],
+          rootDir,
           pi,
         );
+        if (res.exitCode !== 0 || res.stdout.trim() !== expectedRelWorktree) {
+          await runGit(
+            ["config", "--file", cfgFile, "core.worktree", expectedRelWorktree],
+            rootDir,
+            pi,
+          );
+        }
       }
+    } catch {
+      // Best-effort restoration
     }
-  } catch {
-    // Best-effort restoration
   }
 }
 

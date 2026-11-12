@@ -298,7 +298,7 @@ Deno.test("/quest pause and /quest on pause active quest and bypass auto-detecti
   await questCmd!.options.handler("pause", ctx);
   check(getState().disabled === true, "disabled flag is true after /quest pause");
   check(getState().qid === "1xPAUSED", "active quest qid preserved while paused");
-  check(questStatus(getState(), "icon") === "⏸️ fix-seams", "status bar shows paused quest with ⏸️ icon and readable name");
+  check(questStatus(getState(), "icon") === "⏸️ fix-seams₁\x1b[32m₃\x1b[39m", "status bar shows paused quest with ⏸️ icon, readable name, and subscripts");
 
   // 3. Verify tool calls are NOT blocked by draft gate while disabled
   const toolHandlers = pi.eventHandlers["tool_call"] ?? [];
