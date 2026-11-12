@@ -1,7 +1,7 @@
 import type { Pi, PiCtx } from "../../hooks/events";
 import { runGit } from "./exec";
 import { mergeWorktreeBranch } from "./worktree";
-import { rebaseSubmoduleBranch, alignPrimarySubmoduleBranches } from "./submodules";
+import { rebaseSubmoduleBranch, alignPrimarySubmoduleBranches, restoreSubmoduleWorktrees } from "./submodules";
 import { preflightWorktreeIntegration, promptConflictResolution, type PreflightCheckResult } from "./squash-preflight";
 
 export { preflightWorktreeIntegration, promptConflictResolution, type PreflightCheckResult };
@@ -271,6 +271,7 @@ export async function confirmAndSquashWorktree(
       }
       try {
         await runGit(["submodule", "update", "--init", "--no-fetch", "--force"], worktreePath, pi);
+        await restoreSubmoduleWorktrees(repoRoot, pi);
       } catch { /* best-effort submodule update */ }
     }
   }

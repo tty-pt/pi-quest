@@ -4,7 +4,7 @@ import { join, relative, resolve } from "node:path";
 import type { Pi } from "../../hooks/events";
 import { runGit } from "./exec";
 import { setupWorktreeEnvironment } from "./worktree";
-import { initWorktreeSubmodules, pruneSubmoduleWorktrees } from "./submodules";
+import { initWorktreeSubmodules, pruneSubmoduleWorktrees, restoreSubmoduleWorktrees } from "./submodules";
 import { rescueDirtySlotIfNeeded, squashSubmoduleCommits } from "./pool-rescue";
 import type { GitWorkflowConfig } from "../../config/schema";
 
@@ -127,6 +127,7 @@ export async function sanitizeSlot(
       await initWorktreeSubmodules(primaryRoot, slotDir, pi);
       await runGit(["submodule", "update", "--init", "--recursive", "--no-fetch", "--force"], slotDir, pi);
       await runGit(["submodule", "foreach", "--recursive", "git checkout --detach HEAD 2>/dev/null; git reset --hard HEAD 2>/dev/null; git clean -ffd -e var/chroot 2>/dev/null || true"], slotDir, pi);
+      await restoreSubmoduleWorktrees(primaryRoot, pi);
     } catch { /* best-effort submodule reset */ }
     setupWorktreeEnvironment(primaryRoot, slotDir);
     await pruneSubmoduleWorktrees(primaryRoot, pi);
