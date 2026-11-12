@@ -120,12 +120,13 @@ export async function createWorktree(
   options?: CreateWorktreeOptions,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    await runGit(["worktree", "prune", "--expire=now"], repoRoot, pi);
     const branchCheck = await runGit(["rev-parse", "--verify", `refs/heads/${branch}`], repoRoot, pi);
     const branchExists = branchCheck.exitCode === 0;
 
     const args = branchExists
-      ? ["worktree", "add", worktreePath, branch]
-      : ["worktree", "add", "-b", branch, worktreePath, "HEAD"];
+      ? ["worktree", "add", "-f", worktreePath, branch]
+      : ["worktree", "add", "-f", "-b", branch, worktreePath, "HEAD"];
 
     const res = await runGit(args, repoRoot, pi);
     if (res.exitCode !== 0) {

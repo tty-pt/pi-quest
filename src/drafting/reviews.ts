@@ -281,7 +281,7 @@ export async function approveDraft(pi: Pi, ctx: PiCtx, qid: Qid, by: ApprovedBy)
   const message = await promoteAfterPass(pi, ctx, qid, by);
   if (message === null) return false;
   sendSteer(pi, message);
-  return true;
+  return getState().phase !== "drafting";
 }
 
 export async function handleGoInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {

@@ -50,12 +50,13 @@ export async function initializeSlot(
   notifier?: PoolProgressNotifier,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    await runGit(["worktree", "prune", "--expire=now"], primaryRoot, pi);
     await pruneSubmoduleWorktrees(primaryRoot, pi);
     mkdirSync(resolve(slotDir, ".."), { recursive: true });
     notifier?.notify?.(`[Scratch Pool] Provisioning ${slotId}...`, "info");
 
     if (!existsSync(join(slotDir, ".git"))) {
-      const res = await runGit(["worktree", "add", "--detach", relative(primaryRoot, slotDir), "HEAD"], primaryRoot, pi);
+      const res = await runGit(["worktree", "add", "--detach", "-f", relative(primaryRoot, slotDir), "HEAD"], primaryRoot, pi);
       if (res.exitCode !== 0) return { ok: false, error: res.stdout || "git worktree add failed for slot" };
       mkdirSync(slotDir, { recursive: true });
     }
@@ -86,6 +87,11 @@ export async function sanitizeSlot(
   options?: SanitizeSlotOptions,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    if (!existsSync(join(slotDir, ".git"))) {
+      const initRes = await initializeSlot(primaryRoot, slotDir, slotId, pi, notifier);
+      if (!initRes.ok) return initRes;
+    }
+
     const existingLease = readSlotLease(slotDir);
     if (options?.rescueDirty) {
       await rescueDirtySlotIfNeeded(
@@ -124,6 +130,7 @@ export async function sanitizeSlot(
       try { rmSync(nestedScratch, { recursive: true, force: true }); } catch { /* ignore */ }
     }
     try {
+      await pruneSubmoduleWorktrees(primaryRoot, pi);
       await initWorktreeSubmodules(primaryRoot, slotDir, pi);
       await runGit(["submodule", "update", "--init", "--recursive", "--no-fetch", "--force"], slotDir, pi);
       await runGit(["submodule", "foreach", "--recursive", "git checkout --detach HEAD 2>/dev/null; git reset --hard HEAD 2>/dev/null; git clean -ffd -e var/chroot 2>/dev/null || true"], slotDir, pi);
@@ -155,7 +162,12 @@ export async function auditAndReclaimPool(
       if (!entry.startsWith("slot-")) continue;
       const slotDir = join(fullPoolDir, entry);
       const lease = readSlotLease(slotDir);
-      if (!lease || lease.status !== "leased") continue;
+      if (!lease) {
+        const initRes = await sanitizeSlot(primaryRoot, slotDir, entry, pi, notifier);
+        if (initRes.ok) reclaimed.push(entry);
+        continue;
+      }
+      if (lease.status !== "leased") continue;
 
       const pidAlive = lease.pid !== null && isPidAlive(lease.pid);
       const deadPid = lease.pid !== null && !pidAlive;
@@ -190,7 +202,7 @@ function scanPoolSlots(poolDir: string): SlotCandidate[] {
   }).filter((s): s is SlotCandidate => s !== null).sort((a, b) => a.num - b.num);
 }
 async function findOrReclaimCandidate(slots: SlotCandidate[], primaryRoot: string, pi?: Pi, notifier?: PoolProgressNotifier): Promise<SlotCandidate | undefined> {
-  const idle = slots.find((s) => s.lease?.status === "idle");
+  const idle = slots.find((s) => !s.lease || s.lease.status === "idle");
   if (idle) return idle;
   for (const s of slots) {
     if (s.lease?.status === "leased" && s.lease.pid !== null && !isPidAlive(s.lease.pid)) {

@@ -451,3 +451,36 @@ Deno.test("pool: ensureQuestWorktreeAttached reuses parent slot for active sub-q
   }
 });
 
+Deno.test("pool: adopts manually added worktree slots lacking .lease.json even at max capacity", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-quest-poolmanual-"));
+  const poolDir = join(root, ".pi", "scratch");
+  const slot1 = join(poolDir, "slot-1");
+  mkdirSync(slot1, { recursive: true });
+  mkdirSync(join(slot1, ".git"), { recursive: true });
+  // Note: no .lease.json written in slot-1 (simulating manual `git worktree add .pi/scratch/slot-1`)
+
+  try {
+    const commands: Array<{ cmd: string; args: string[]; cwd: string }> = [];
+    const pi = fakePi(commands);
+
+    const res = await acquireWarmSlot(
+      root,
+      "1xMAN",
+      "HEAD",
+      {
+        ...DEFAULT_GIT_WORKFLOW_CONFIG,
+        worktreePoolSize: 1,
+        worktreePoolMaxSize: 1,
+      },
+      pi,
+    );
+
+    check(res.ok === true, "acquire succeeded on manually added slot without .lease.json");
+    check(res.slotId === "slot-1", "adopted slot-1");
+    const lease = readSlotLease(slot1);
+    check(lease?.status === "leased", "slot-1 now has active lease");
+    check(lease?.leasedToQid === "1xMAN", "leased to 1xMAN");
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});

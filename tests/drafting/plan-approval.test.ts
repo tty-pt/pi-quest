@@ -274,3 +274,30 @@ Deno.test("askHumanTool: non-approval questions bypass subagent validation", asy
   check(details["answer"] === "port 8080", "received user answer");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("validatePlanBeforeApproval: reuses existing PASS lastReview for matching contentHash without duplicate subagent launch", async () => {
+  replaceState(IDLE_STATE);
+  clearVerifiedApprovals();
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-already-pass-"));
+  const hash = writeSampleDraft(cwd, QID);
+  const drafting = createDraft(createQuest("Add feature X", QID), "Add feature X");
+  replaceState({
+    ...drafting,
+    draft: { ...drafting.draft!, planAuthored: true, contentHash: hash, outstandingFindings: false },
+    lastReview: {
+      verdict: "PASS",
+      target: hash,
+      findings: "All requirements covered",
+      reviewText: "VERDICT: PASS",
+    },
+  });
+
+  const pi = busPi();
+  const ctx = fakeCtx(cwd);
+  const res = await validatePlanBeforeApproval(pi, ctx, getState());
+  check(res.allowed === true, "allowed immediately");
+  check(res.verdict === "PASS", "verdict is PASS");
+  const subagentReq = pi.emitted.find((e) => e.event === "prompt-template:subagent:request");
+  check(subagentReq === undefined, "did NOT launch duplicate subagent when lastReview already passed target");
+  replaceState(IDLE_STATE);
+});
