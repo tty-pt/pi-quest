@@ -11,7 +11,7 @@ import { installObservedQuestions } from "./observed";
 export function installHumanAbsence(pi: Pi): void {
   onUserMessage(pi, async (text, ctx) => {
     const state = getState();
-    if (state.qid === null || pendingQuestion(state.qid) === undefined) return;
+    if (state.disabled === true || state.qid === null || pendingQuestion(state.qid) === undefined) return;
     // Steering ("go on") approves; it is never the answer to a pending question.
     const intent = await interpretUserTurn(text, state.phase, await readQuestConfig(ctx.cwd));
     if (intent.kind === "advance" || intent.kind === "abort") return;

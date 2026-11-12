@@ -298,7 +298,7 @@ Deno.test("/quest pause and /quest on pause active quest and bypass auto-detecti
   await questCmd!.options.handler("pause", ctx);
   check(getState().disabled === true, "disabled flag is true after /quest pause");
   check(getState().qid === "1xPAUSED", "active quest qid preserved while paused");
-  check(questStatus(getState(), "icon") === "⏸️ fix-seams₁\x1b[32m₃\x1b[39m", "status bar shows paused quest with ⏸️ icon, readable name, and subscripts");
+  check(questStatus(getState(), "icon") === "⏸️ fix-seams\x1b[32m₃\x1b[39m₁", "status bar shows paused quest with ⏸️ icon, readable name, and subscripts");
 
   // 3. Verify tool calls are NOT blocked by draft gate while disabled
   const toolHandlers = pi.eventHandlers["tool_call"] ?? [];
@@ -306,6 +306,12 @@ Deno.test("/quest pause and /quest on pause active quest and bypass auto-detecti
     const verdict = h({ toolName: "write", input: { path: "src/foo.ts", content: "hi" } }, ctx);
     check(verdict === undefined, "write tool not blocked by draft gate while disabled");
   }
+
+  // 3b. Verify quest_* tools refuse to bind or mutate state while paused
+  const { applyUpdate } = await import("../../src/surface/tools/update-state.ts");
+  const updateRes = await applyUpdate(pi, ctx, { objective: "Should not create quest while paused" });
+  check(Boolean(updateRes.error && updateRes.error.includes("paused")), "quest_update_state refuses while paused");
+  check(getState().qid === "1xPAUSED", "paused quest state unchanged by quest_update_state");
 
   // 4. Verify auto-detection is bypassed when idle + disabled
   replaceState({ ...IDLE_STATE, disabled: true });

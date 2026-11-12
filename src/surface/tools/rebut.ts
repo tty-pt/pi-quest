@@ -25,6 +25,12 @@ export function rebutTool(pi: Pi): PiToolSpec {
       additionalProperties: false,
     },
     execute: async (_toolCallId, params, signal, _onUpdate, ctx: PiCtx) => {
+      if (getState().disabled === true) {
+        return textResult(
+          "pi-quest is paused for this session (/quest pause). Do not call quest_rebut; work directly in the normal workflow.",
+          { error: "quest_paused" },
+        );
+      }
       const rebuttal = params["rebuttal"];
       if (typeof rebuttal !== "string" || rebuttal.trim().length < 10) {
         return textResult("quest_rebut needs a substantive rebuttal (at least 10 chars).", { error: "rebuttal_too_short" });

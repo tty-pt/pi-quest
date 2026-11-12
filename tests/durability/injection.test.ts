@@ -124,4 +124,38 @@ Deno.test("injection injects review running directive when review is in flight",
   }
 });
 
+Deno.test("injection injects explicit [PI-QUEST PAUSED] directive when paused", () => {
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  const pi = fakePi();
+  (pi as { on: unknown }).on = (event: string, handler: unknown) => {
+    handlers.set(event, handler as (event: unknown, ctx: unknown) => unknown);
+  };
+  injectQuestContext(pi as unknown as Pi);
+
+  const pausedQuest = {
+    ...createQuest("work", "paused1" as Qid),
+    phase: "drafting" as const,
+    disabled: true,
+  };
+  replaceState(pausedQuest);
+
+  try {
+    const injected = handlers.get("before_agent_start")!({}, fakeCtx("/tmp")) as
+      | { message?: { content?: unknown } }
+      | undefined;
+    const content = String(injected?.message?.content ?? "");
+    check(content.includes("[PI-QUEST PAUSED]:"), "paused notice injected");
+    check(content.includes("Do NOT call quest_* tools"), "explicitly forbids calling quest tools while paused");
+    check(content.includes("paused1"), "mentions paused quest id");
+
+    const sysEvent = { systemPromptOptions: { sections: {} as Record<string, string> } };
+    const sysInjected = handlers.get("before_agent_start")!(sysEvent, fakeCtx("/tmp"));
+    check(sysInjected === undefined, "returns undefined when systemPromptOptions present");
+    check(Boolean(sysEvent.systemPromptOptions.sections["quest_context"]?.includes("[PI-QUEST PAUSED]")), "populates quest_context section with paused notice");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
+});
+
+
 

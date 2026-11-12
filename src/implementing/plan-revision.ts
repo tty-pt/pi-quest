@@ -118,7 +118,7 @@ export async function bootPlanRevisionReview(
   if (signal?.aborted) return;
   const config = withEffectivePolicy(resolvedBase, ctx);
   const state = getState();
-  if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
+  if (state.disabled === true || state.phase !== "implementing" || state.qid === null || state.draft === null) return;
   if (signal === undefined && isCurrentReview(state.qid, target)) return;
   if (signal !== undefined && !isCurrentReview(state.qid, target)) return;
   const qid = state.qid;
@@ -185,7 +185,7 @@ async function retryPlanRevisionReview(
   attempt: number,
 ): Promise<void> {
   const state = getState();
-  if (state.phase !== "implementing" || state.qid === null || state.draft === null) return;
+  if (state.disabled === true || state.phase !== "implementing" || state.qid === null || state.draft === null) return;
   if (revisionRetries.get(state.qid) !== attempt) return;
   if (isCurrentReview(state.qid, target)) return;
   const content = await readPlanFile(ctx, state);

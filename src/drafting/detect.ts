@@ -146,6 +146,7 @@ export async function detectSubstantiveRequest(
 
 export function watchNewRequests(pi: Pi): void {
   onUserMessage(pi, async (text, ctx) => {
+    if (getState().disabled === true) return;
     try {
       await checkPostQuestReversions(ctx.cwd, async (args) => {
         return (await pi.exec("git", args, { cwd: ctx.cwd })) as

@@ -191,6 +191,12 @@ export async function applyUpdate(
   params: Record<string, unknown>,
 ): Promise<{ applied: string[]; error?: string }> {
   const applied: string[] = [];
+  if (getState().disabled === true) {
+    return {
+      applied,
+      error: "pi-quest is paused for this session (/quest pause). Do not call quest_update_state; work directly in the normal workflow.",
+    };
+  }
   const kind = params["kind"];
   if (kind !== undefined && kind !== "standard" && kind !== "analysis") {
     return { applied, error: `unknown quest kind ${JSON.stringify(kind)} — expected "standard" or "analysis"` };

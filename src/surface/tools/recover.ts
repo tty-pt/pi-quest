@@ -47,6 +47,12 @@ export function recoverTool(_pi: Pi): PiToolSpec {
       additionalProperties: false,
     },
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+      if (getState().disabled === true) {
+        return textResult(
+          "pi-quest is paused for this session (/quest pause). Run /quest on to resume quest recovery.",
+          { error: "quest_paused" },
+        );
+      }
       const qid = typeof params["qid"] === "string" ? params["qid"] as string : null;
       const done = await recoverQuest(ctx, qid);
       if (done.qid) {

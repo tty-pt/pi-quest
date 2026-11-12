@@ -325,3 +325,15 @@ export function noteLateAnswer(pi: Pi, text: string): boolean {
 export function pendingQuestion(qid: string): PendingQuestion | undefined {
   return pendingByQid.get(qid);
 }
+
+export function cancelPendingQuestion(qid: string): void {
+  const pending = pendingByQid.get(qid);
+  if (pending === undefined) return;
+  pendingByQid.delete(qid);
+  if (pending.resolve !== null) {
+    const resolve = pending.resolve;
+    pending.resolve = null;
+    resolve(null);
+  }
+}
+

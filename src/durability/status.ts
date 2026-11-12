@@ -74,9 +74,9 @@ function isReviewActive(state: QuestState): boolean {
 }
 
 function formatNameWithSubscripts(state: QuestState, label: string, style: StatusStyle): string {
-  const depthSub = formatDepthSubscript(state.depth, style);
   const diffSub = formatDifficultySubscript(state.difficulty, style);
-  return `${label}${depthSub}${diffSub}`;
+  const depthSub = formatDepthSubscript(state.depth, style);
+  return `${label}${diffSub}${depthSub}`;
 }
 
 export function questStatus(state: QuestState, style: StatusStyle = "icon"): string {

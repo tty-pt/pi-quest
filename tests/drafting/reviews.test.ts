@@ -202,7 +202,7 @@ Deno.test("turn-end catch-all absorbs the scaffold silently, then blinks on bypa
     check(getState().draft?.contentHash !== null, "baseline recorded");
     await writeFile(file, "# abc123\n\nScaffold.\n\nBypass edit.\n", "utf8");
     await onTurnEndCatchAll(pi, ctx);
-    check(calls.length >= 1 && calls[0] === "\x1b[97m📝 thing\x1b[0m", "bypass edit flashes bright");
+    check(calls.length >= 1 && calls[0] === "\x1b[97m📝 thing\x1b[32m₃\x1b[39m₁\x1b[0m", "bypass edit flashes bright");
     check(getState().snapshotPending === true, "bypass edit marks snapshot pending");
   } finally {
     stopBlink();

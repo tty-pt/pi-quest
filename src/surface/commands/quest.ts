@@ -11,13 +11,14 @@ import { questStatus } from "../../durability/status.ts";
 import type { Pi, PiCtx } from "../../hooks/events.ts";
 import { draftFilePath, listDraftQids } from "../../files.ts";
 import { readQuestConfig } from "../../config.ts";
-import { ensureQuestWorktreeAttached, findPrimaryRepoRoot } from "../../utils/git/index.ts";
+import { ensureQuestWorktreeAttached, findPrimaryRepoRoot, syncHarnessCwd } from "../../utils/git/index.ts";
 import { cancelReview, hasInFlight } from "../../review/tracker.ts";
 import { clearPlanRevisionRetries } from "../../implementing/plan-revision.ts";
 import { clearDraftReviewRetry } from "../../drafting/reviews.ts";
 import { openDetectedQuest } from "../../drafting/detect.ts";
 import { extractPriorConversationObjective } from "../../durability/transcript.ts";
 import { readDraftHeading, readDraftObjective } from "../../durability/quest-doc-io.ts";
+import { cancelPendingQuestion } from "../../absence/ask.ts";
 
 export { listDraftQids, readDraftHeading, readDraftObjective };
 
@@ -113,20 +114,33 @@ export async function reattachWorktreeIfNeeded(pi: Pi, ctx: PiCtx, state: QuestS
         worktreeBranch: res.slotBranch,
         snapshotPending: true,
       }));
+      syncHarnessCwd(res.slotPath, pi);
     }
   } catch { /* best-effort reattach */ }
 }
 
 export async function toggleQuestDisabled(pi: Pi, ctx: PiCtx, disabled: boolean, rawObjective = ""): Promise<string> {
   const prev = getState();
-  if (disabled && prev.qid && hasInFlight(prev.qid)) {
-    cancelReview(prev.qid);
+  if (disabled && prev.qid) {
+    if (hasInFlight(prev.qid)) {
+      cancelReview(prev.qid);
+    }
     clearPlanRevisionRetries(prev.qid);
     clearDraftReviewRetry(prev.qid);
+    cancelPendingQuestion(prev.qid);
+    updateState((s) => (s.activeReview !== null ? { ...s, activeReview: null, snapshotPending: true } : s));
   }
   const next = setQuestDisabled(disabled);
+  if (disabled) {
+    syncHarnessCwd(null, pi);
+  }
   if (!disabled && next.qid) {
     await reattachWorktreeIfNeeded(pi, ctx, getState());
+    const after = getState();
+    const activeWt = (after.phase === "implementing" || after.phase === "validating")
+      ? (after.worktreePath ?? after.contract?.worktreePath)
+      : null;
+    syncHarnessCwd(activeWt, pi);
   }
   if (!disabled && !next.qid && rawObjective.trim() !== "") {
     const cfg = await readQuestConfig(ctx.cwd);

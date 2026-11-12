@@ -66,6 +66,12 @@ export function archiveTool(pi: Pi): PiToolSpec {
       additionalProperties: false,
     },
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+      if (getState().disabled === true) {
+        return textResult(
+          "pi-quest is paused for this session (/quest pause). Do not call quest_archive; work directly in the normal workflow.",
+          { error: "quest_paused" },
+        );
+      }
       const qid = getState().qid;
       if (qid === null) return textResult("No active quest to archive.", { error: "no_active_quest" });
 

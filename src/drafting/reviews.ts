@@ -70,7 +70,7 @@ const staleRecovered = new Set<string>();
 // for the current file content, then wake the agent instead of looping.
 async function recoverStaleVerdict(pi: Pi, ctx: PiCtx, qid: Qid, target: string): Promise<void> {
   const state = getState();
-  if (state.phase !== "drafting" || state.qid !== qid || state.draft === null) return;
+  if (state.disabled === true || state.phase !== "drafting" || state.qid !== qid || state.draft === null) return;
   if (hasInFlight(qid) || state.draft.approvedBy !== null) return;
   const key = `${qid}:${target}`;
   if (staleRecovered.has(key)) {
@@ -123,7 +123,7 @@ export async function bootDraftReview(
   if (signal?.aborted) return;
   const config = withEffectivePolicy(baseConfig, ctx);
   const state = getState();
-  if (state.phase !== "drafting" || state.qid === null) return;
+  if (state.disabled === true || state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
   if (signal !== undefined && !isCurrentReview(qid, target)) return;
   const kind = state.kind;
@@ -177,6 +177,7 @@ export async function bootDraftReview(
     return;
   }
   if (outcome.status !== "verdict") return;
+  if (getState().disabled === true) return;
   if (!outcome.settled) {
     await recoverStaleVerdict(pi, ctx, qid, target);
     return;

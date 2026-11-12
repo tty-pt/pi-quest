@@ -247,7 +247,7 @@ async function executePendingValidationTest(
 
 export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   const state = getState();
-  if (state.phase !== "validating" || state.qid === null) return;
+  if (state.disabled === true || state.phase !== "validating" || state.qid === null) return;
   const qid = state.qid;
   const target = implementationFingerprint(state);
   if (state.lastReview?.verdict === "PASS" && state.lastReview.target === target) {
@@ -301,6 +301,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
+  if (getState().disabled === true) return;
 
   if (outcome.review.verdict === "PASS") {
     clearValidationVerdictFails(qid);
@@ -317,7 +318,7 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
 
 export async function handleConfirmInput(pi: Pi, ctx: PiCtx, text: string): Promise<boolean> {
   const state = getState();
-  if (state.phase !== "validating" || state.qid === null) return false;
+  if (state.disabled === true || state.phase !== "validating" || state.qid === null) return false;
   const config = await readQuestConfig(ctx.cwd);
   const intent = await interpretUserTurn(text, "validating", config);
   if (intent.kind !== "advance") return false;

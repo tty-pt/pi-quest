@@ -42,6 +42,9 @@ export async function createChildQuest(
   contractParams?: ChildQuestContractParams,
 ): Promise<{ childQid: Qid; switched: boolean; worktreePath?: string; worktreeBranch?: string }> {
   const parent = getState();
+  if (parent.disabled === true) {
+    throw new Error("pi-quest is paused for this session (/quest pause). Do not call quest_subquest; work directly in the normal workflow.");
+  }
   if (parent.qid === null) throw new Error("no active quest to parent the sub-quest");
   const config = await readQuestConfig(ctx.cwd);
   const depth = parent.depth + 1;

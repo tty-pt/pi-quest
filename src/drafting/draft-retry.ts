@@ -83,7 +83,7 @@ export async function bumpReviewCountAndReboot(
   bootReview: (pi: Pi, ctx: PiCtx, target: string, config: QuestConfig, signal?: AbortSignal) => Promise<void>,
 ): Promise<void> {
   const state = getState();
-  if (state.phase !== "drafting" || state.qid === null) return;
+  if (state.disabled === true || state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
   if (retryAttempts.get(qid) !== attempt) return;
   let file: string;

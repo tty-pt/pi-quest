@@ -12,6 +12,12 @@ quest id (`future/<qid>.md`); there are no slugs.
 
 ## Modes
 
+- **Paused (`/quest pause` / `[PI-QUEST PAUSED]`).** When the session context contains
+  `[PI-QUEST PAUSED]` or `pi-quest` is disabled/paused for the session, do NOT use any
+  `quest_*` tools (`quest_update_state`, `quest_subquest`, `quest_archive`,
+  `quest_ask_human`, `quest_rebut`, `quest_recover`, `quest_run_test`) and do NOT create
+  or edit `.pi/quest/` draft files. Work directly in the normal workflow with standard
+  tools (`read`, `edit`, `write`, `bash`, etc.).
 - **Drafting.** The only write path, in order: (1) `quest_update_state`
   with findings to establish identity; (2) `quest_update_state` with
   `draftName` — the draft lives at `.pi/quest/future/<qid>.md` (its

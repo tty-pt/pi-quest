@@ -165,7 +165,22 @@ export function injectQuestContext(pi: Pi): void {
   pi.on("before_agent_start", (eventUnknown: unknown) => {
     try {
       const state = getState();
-      if (state.disabled === true || state.phase === "idle") {
+      const event = eventUnknown as { systemPromptOptions?: { sections?: Record<string, string> } } | undefined;
+      if (state.disabled === true) {
+        syncHarnessCwd(null, pi);
+        const pausedMsg = state.qid
+          ? `[PI-QUEST PAUSED]: pi-quest is disabled/paused for this session (Quest ${state.qid} is paused in phase ${state.phase}). Do NOT call quest_* tools (quest_update_state, quest_subquest, quest_archive, quest_ask_human, quest_rebut, quest_recover, quest_handoff, quest_run_test) or enforce quest drafting/review/worktree gates. Fulfill the user's request directly using standard tools in the normal workflow.`
+          : `[PI-QUEST PAUSED]: pi-quest is disabled/paused for this session. Do NOT call quest_* tools or create quests. Fulfill the user's request directly using standard tools in the normal workflow.`;
+        if (event?.systemPromptOptions && typeof event.systemPromptOptions === "object") {
+          if (!event.systemPromptOptions.sections) {
+            event.systemPromptOptions.sections = {};
+          }
+          event.systemPromptOptions.sections["quest_context"] = pausedMsg;
+          return undefined;
+        }
+        return { message: { customType: SNAPSHOT_TYPE, content: pausedMsg } };
+      }
+      if (state.phase === "idle") {
         syncHarnessCwd(null, pi);
         return undefined;
       }
@@ -179,7 +194,6 @@ export function injectQuestContext(pi: Pi): void {
       const compactionBlock = pointer === null ? "" : renderCompactionPointer(pointer);
       const resumptionBlock = resumption === null ? "" : renderSubquestResumption(resumption);
       const content = contextLine(state) + compactionBlock + resumptionBlock;
-      const event = eventUnknown as { systemPromptOptions?: { sections?: Record<string, string> } } | undefined;
       if (event?.systemPromptOptions && typeof event.systemPromptOptions === "object") {
         if (!event.systemPromptOptions.sections) {
           event.systemPromptOptions.sections = {};

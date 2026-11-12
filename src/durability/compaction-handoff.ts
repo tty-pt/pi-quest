@@ -105,7 +105,7 @@ export function renderSubquestResumption(info: SubquestHandbackInfo): string {
 /** Write the pre-compaction handoff for the active quest. Never throws. */
 export async function handoffBeforeCompaction(pi: Pi, ctx: PiCtx): Promise<void> {
   const state = getState();
-  if (state.qid === null || state.phase === "idle" || state.phase === "archived") return;
+  if (state.disabled === true || state.qid === null || state.phase === "idle" || state.phase === "archived") return;
   try {
     const done = await writeHandoff(pi, ctx, state, "compaction");
     const latestReceipt = state.lastPassingTestReceipt ?? state.lastTestReceipt;
@@ -174,6 +174,7 @@ export function maybeTriggerPostSubquestCompaction(
   piOrCtx: Pi | PiCtx,
   maybeCtx?: PiCtx,
 ): boolean {
+  if (getState().disabled === true) return false;
   const pi = maybeCtx ? (piOrCtx as Pi) : undefined;
   const ctx = maybeCtx ?? (piOrCtx as PiCtx);
   const staged = getStagedPostSubquestCompaction();
@@ -231,6 +232,7 @@ export function maybeTriggerPostSubquestCompaction(
 }
 
 export function notifyCompactionCompleted(pi: Pi): void {
+  if (getState().disabled === true) return;
   if (postCompactionFollowUpPending !== null) {
     const info = postCompactionFollowUpPending;
     postCompactionFollowUpPending = null;

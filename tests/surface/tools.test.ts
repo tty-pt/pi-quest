@@ -438,7 +438,7 @@ Deno.test("draft creation carries refinements and blinks", async () => {
     check(file.includes("## Findings (pre-draft investigation)"), "refinements carried into scaffold");
     check(file.includes("- found a global registry"), "refinement text filed");
     check(!drafted.applied.join(" ").includes("created thin"), "no thin nudge when findings exist");
-    check(calls.length === 1 && calls[0] === "\x1b[97m📝 thing\x1b[0m", "creation flashes bright");
+    check(calls.length === 1 && calls[0] === "\x1b[97m📝 thing\x1b[32m₃\x1b[39m₁\x1b[0m", "creation flashes bright");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
@@ -460,7 +460,7 @@ Deno.test("plan writes blink the hint", async () => {
     await applyUpdate(pi, ctx, { draftName: "thing" });
     calls.length = 0;
     await applyUpdate(pi, ctx, { plan: "Do step one." });
-    check(calls.length === 1 && calls[0] === "\x1b[97m📝 thing\x1b[0m", "plan write flashes bright");
+    check(calls.length === 1 && calls[0] === "\x1b[97m📝 thing\x1b[32m₃\x1b[39m₁\x1b[0m", "plan write flashes bright");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);

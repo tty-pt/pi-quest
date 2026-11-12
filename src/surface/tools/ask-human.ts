@@ -86,6 +86,12 @@ function renderAskResult(result: { details?: unknown }, theme: unknown): { rende
 }
 
 async function executeAsk(pi: Pi, ctx: PiCtx, params: Record<string, unknown>) {
+  if (getState().disabled === true) {
+    return textResult(
+      "pi-quest is paused for this session (/quest pause). Do not call quest_ask_human; ask the user directly in your message if needed.",
+      { error: "quest_paused" },
+    );
+  }
   const question = params["question"];
   const def = params["default"];
   if (typeof question !== "string" || question.trim() === "") {
