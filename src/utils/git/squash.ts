@@ -105,6 +105,7 @@ export async function squashMergeBranch(
   pi?: Pi,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    await restoreSubmoduleWorktrees(repoRoot, pi);
     const mergeRes = await runGit(["merge", "--squash", featureBranch], repoRoot, pi);
     if (mergeRes.exitCode !== 0) {
       await runGit(["reset", "--merge"], repoRoot, pi);

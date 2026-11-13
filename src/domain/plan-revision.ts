@@ -36,6 +36,13 @@ export function recordPlanRevision(
   });
 }
 
+function clearReviewNextAction(state: QuestState): string {
+  if (state.exactNextAction.startsWith("Review running for quest")) {
+    return "Implement the approved plan; claim completion via quest_update_state {claimComplete: true} when done.";
+  }
+  return state.exactNextAction;
+}
+
 // Adopt a reviewed revision: the binding moves to the reviewed hash and the
 // review baseline follows the new plan text.
 export function approvePlanRevision(state: QuestState, hash: string, planText: string): QuestState {
@@ -45,6 +52,7 @@ export function approvePlanRevision(state: QuestState, hash: string, planText: s
     pendingDirectiveRevision: false,
     pendingDirectiveText: undefined,
     activeReview: null,
+    exactNextAction: clearReviewNextAction(state),
     draft: { ...draft, approvedPlanHash: hash, lastReviewedPlan: planText, stagedPlan: null },
   });
 }
@@ -55,6 +63,7 @@ export function revertPlanRevision(state: QuestState): QuestState {
   const draft = requireImplementingDraft(state);
   return markChanged(state, {
     activeReview: null,
+    exactNextAction: clearReviewNextAction(state),
     draft: { ...draft, contentHash: draft.approvedPlanHash, stagedPlan: null },
   });
 }

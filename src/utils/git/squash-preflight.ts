@@ -1,5 +1,6 @@
 import type { Pi, PiCtx } from "../../hooks/events";
 import { runGit } from "./exec";
+import { restoreSubmoduleWorktrees } from "./submodules";
 import { getCurrentRef } from "./workspace-runner";
 
 export interface PreflightCheckResult {
@@ -38,6 +39,7 @@ export async function preflightWorktreeIntegration(
   worktreePath?: string,
   pi?: Pi,
 ): Promise<PreflightCheckResult> {
+  await restoreSubmoduleWorktrees(repoRoot, pi);
   const ref = await getCurrentRef(repoRoot, pi);
   const primaryBranch = ref.branch || "HEAD";
   const primaryHeadSha = ref.commit || "HEAD";

@@ -20,6 +20,7 @@ import { onUserMessage, type Pi, type PiCtx } from "../hooks/events";
 import { readQuestConfig } from "../config";
 import { interpretUserTurn } from "../judge/intent-classifier";
 import { cancelReview } from "../review/tracker";
+import { clearPlanRevisionRetries } from "../implementing/plan-revision";
 import { createChildQuest } from "../surface/tools/subquest";
 import { triageInQuestRequest } from "./scope";
 import { writeHandoff } from "../durability/handoff-io";
@@ -152,11 +153,23 @@ function handleAmendRequirement(
 ): void {
   const demoteToDraft = isConstraint && (state.phase === "implementing" || state.phase === "validating");
   const demoteFromValidating = state.phase === "validating" && !demoteToDraft;
-  if (demoteToDraft || demoteFromValidating) cancelReview(state.qid);
+  if (demoteToDraft || demoteFromValidating || state.phase === "implementing") {
+    cancelReview(state.qid);
+    clearPlanRevisionRetries(state.qid);
+  }
   updateState((s) => {
     let next = recordAmendment(recordRefinement(s, cleanText), cleanText, "User mid-quest directive");
     if (s.phase === "implementing") {
-      next = { ...next, pendingDirectiveRevision: true, pendingDirectiveText: cleanText, snapshotPending: true };
+      next = {
+        ...next,
+        activeReview: null,
+        pendingDirectiveRevision: true,
+        pendingDirectiveText: cleanText,
+        ...(next.exactNextAction.startsWith("Review running for quest")
+          ? { exactNextAction: `Address operator directive "${cleanText}" via quest_update_state { planRevision } (or reply 'go' / 'APPROVE' to bypass).` }
+          : {}),
+        snapshotPending: true,
+      };
     }
     if (demoteToDraft && (next.phase === "implementing" || next.phase === "validating")) {
       const nextAction = next.kind === "analysis"
@@ -198,11 +211,23 @@ function handleRefinementDirective(
   defaultSteer: string,
 ): void {
   const demoteFromValidating = state.phase === "validating";
-  if (demoteFromValidating) cancelReview(state.qid);
+  if (demoteFromValidating || state.phase === "implementing") {
+    cancelReview(state.qid);
+    clearPlanRevisionRetries(state.qid);
+  }
   updateState((s) => {
     const next = recordRefinement(s, cleanText);
     if (s.phase === "implementing") {
-      return { ...next, pendingDirectiveRevision: true, pendingDirectiveText: cleanText, snapshotPending: true };
+      return {
+        ...next,
+        activeReview: null,
+        pendingDirectiveRevision: true,
+        pendingDirectiveText: cleanText,
+        ...(next.exactNextAction.startsWith("Review running for quest")
+          ? { exactNextAction: `Address operator refinement "${cleanText}" via quest_update_state { planRevision } (or reply 'go' / 'APPROVE' to bypass).` }
+          : {}),
+        snapshotPending: true,
+      };
     }
     if (demoteFromValidating && next.phase === "validating") {
       return next.kind === "analysis"

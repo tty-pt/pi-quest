@@ -95,7 +95,7 @@ export async function concludeValidationPass(
   target: string,
   review: ParsedReview,
   autoArchive: boolean,
-): Promise<{ archived: boolean; zipPath: string | null }> {
+): Promise<{ archived: boolean; zipPath: string | null; error?: string }> {
   if (!autoArchive) return { archived: false, zipPath: null };
   if (implementationFingerprint(getState()) !== target) {
     sendSteer(pi, `Quest ${qid} changed during validation — conclusion skipped; a fresh validation will boot against the current work.`);
@@ -106,8 +106,9 @@ export async function concludeValidationPass(
   let done;
   try {
     done = await archiveActiveQuest(pi, ctx, "COMPLETED", buildConclusionSummary(getState(), target, review));
-  } catch {
-    return { archived: false, zipPath: null };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { archived: false, zipPath: null, error: detail };
   }
   if (isAnalysis) {
     const delivered = excerpt === "" ? "" : `\n\nDELIVERED ANALYSIS:\n${excerpt}`;
@@ -152,7 +153,8 @@ async function handleBypassIfEligible(
   emitNow(pi);
   const concluded = await concludeValidationPass(pi, ctx, qid, target, syntheticReview, config.autoArchive);
   if (!concluded.archived && getState().phase === "validating") {
-    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} (${reason}) — run quest_archive to complete the quest.`);
+    const errNote = concluded.error ? ` (auto-archive halted: ${concluded.error})` : "";
+    wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} (${reason})${errNote} — run quest_archive to complete the quest.`);
   }
   return true;
 }
@@ -252,19 +254,17 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
   let signal!: AbortSignal;
   supersedeReviewThenBootFresh(qid, target, (s) => {
     signal = s;
+    updateState((c) => (c.qid === qid ? { ...c, activeReview: { kind: "validation", target }, snapshotPending: true } : c));
   });
   const config = withEffectivePolicy(await readQuestConfig(ctx.cwd), ctx);
   if (signal.aborted || !isCurrentReview(qid, target)) return;
-
   await executePendingValidationTest(pi, ctx, state, config, qid);
   if (signal.aborted || !isCurrentReview(qid, target)) return;
-
   if (await handleBypassIfEligible(pi, ctx, qid, target, config)) {
     if (isCurrentReview(qid, target)) cancelReview(qid);
     return;
   }
   if (signal.aborted || !isCurrentReview(qid, target)) return;
-
   const validatorModel = resolveRoleModel(config, "validator");
   const brief = await validationBrief(ctx, state, pi);
   if (signal.aborted || !isCurrentReview(qid, target)) return;
@@ -310,8 +310,9 @@ export async function ensureValidationFlow(pi: Pi, ctx: PiCtx): Promise<void> {
     clearValidationVerdictFails(qid);
     const concluded = await concludeValidationPass(pi, ctx, qid, target, outcome.review, config.autoArchive);
     if (!concluded.archived && getState().phase === "validating") {
+      const errNote = concluded.error ? ` (auto-archive halted: ${concluded.error})` : "";
       const advisories = outcome.review.advisories.trim();
-      wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid} — run quest_archive to complete the quest.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
+      wakeOnce(pi, `accepted:${qid}:${target}`, `Validation PASS for ${qid}${errNote} — run quest_archive to complete the quest.${advisories === "" ? "" : ` Non-blocking advisories: ${advisories} Record adopted ones via amendment as you work.`}`);
     }
     return;
   }

@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readlinkSync, symlinkSync, unlinkSync
 import { join, relative, resolve } from "node:path";
 import type { Pi } from "../../hooks/events";
 import { runGit } from "./exec";
-import { hasSubmodules, initWorktreeSubmodules, pruneSubmoduleWorktrees, alignPrimarySubmoduleBranches } from "./submodules";
+import { hasSubmodules, initWorktreeSubmodules, pruneSubmoduleWorktrees, alignPrimarySubmoduleBranches, restoreSubmoduleWorktrees } from "./submodules";
 
 export interface CreateWorktreeOptions {
   initSubmodules?: boolean;
@@ -162,6 +162,7 @@ export async function mergeWorktreeBranch(
   pi?: Pi,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    await restoreSubmoduleWorktrees(repoRoot, pi);
     const res = await runGit(["merge", "--no-ff", "-m", `Merge branch '${branch}'`, branch], repoRoot, pi);
     if (res.exitCode !== 0) {
       await runGit(["merge", "--abort"], repoRoot, pi);

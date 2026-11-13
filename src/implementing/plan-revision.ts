@@ -61,6 +61,14 @@ async function readPlanFile(ctx: PiCtx, state: QuestState): Promise<string | nul
   }
 }
 
+const DEFAULT_IMPLEMENTING_ACTION = "Implement the approved plan; claim completion via quest_update_state {claimComplete: true} when done.";
+
+function clearStaleReviewState(s: QuestState): QuestState {
+  const stale = s.exactNextAction.startsWith("Review running for quest");
+  if (s.activeReview === null && !stale) return s;
+  return { ...s, activeReview: null, ...(stale ? { exactNextAction: DEFAULT_IMPLEMENTING_ACTION } : {}), snapshotPending: true };
+}
+
 async function handleRevisionOutcome(
   pi: Pi,
   ctx: PiCtx,
@@ -81,17 +89,20 @@ async function handleRevisionOutcome(
     if (attempts < MAX_REVISION_RETRIES) {
       const attempt = attempts + 1;
       revisionRetries.set(qid, attempt);
-      const delay = REVISION_RETRY_BASE_MS * 2 ** (attempt - 1);
-      dispatchRevisionRetry(delay, () => {
+      dispatchRevisionRetry(REVISION_RETRY_BASE_MS * 2 ** (attempt - 1), () => {
         void retryPlanRevisionReview(pi, ctx, target, config, attempt);
       });
       return;
     }
     revisionRetries.delete(qid);
+    updateState((s) => (s.qid === qid ? clearStaleReviewState(s) : s));
+    emitNow(pi);
     sendWake(pi, `Plan-revision review failed ${MAX_REVISION_RETRIES} times (last error: ${outcome.detail}). The previous plan still stands; revise again via planRevision to retry, or reply APPROVE to adopt on a live user's judgment.`);
     return;
   }
   if (outcome.status !== "verdict" || !outcome.settled) return;
+  const current = getState();
+  if (current.disabled === true || current.phase !== "implementing" || current.qid !== qid || current.pendingDirectiveRevision === true) return;
   if (outcome.review.verdict === "PASS") {
     clearPlanRevisionRetries(qid);
     updateState((s) => approvePlanRevision(s, target, plan));
@@ -274,12 +285,7 @@ export async function maybeBootPlanRevisionReview(pi: Pi, ctx: PiCtx, note: stri
   supersedeReviewThenBootFresh(qid, hash, (signal) => {
     updateState((s) =>
       s.qid === qid
-        ? {
-            ...s,
-            activeReview: { kind: "draft", target: hash },
-            exactNextAction: `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`,
-            snapshotPending: true,
-          }
+        ? { ...s, activeReview: { kind: "draft", target: hash }, exactNextAction: `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`, snapshotPending: true }
         : s
     );
     void bootPlanRevisionReview(pi, ctx, hash, config, signal);
@@ -300,7 +306,7 @@ export async function handleApproveInput(pi: Pi, ctx: PiCtx, text: string): Prom
   if (hasInFlight(state.qid)) {
     cancelReview(state.qid);
   }
-  updateState((s) => (s.activeReview !== null ? { ...s, activeReview: null, snapshotPending: true } : s));
+  updateState(clearStaleReviewState);
   if (state.pendingDirectiveRevision) {
     updateState((s) => ({ ...s, pendingDirectiveRevision: false, pendingDirectiveText: undefined, snapshotPending: true }));
     emitNow(pi);

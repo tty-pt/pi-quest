@@ -19,6 +19,7 @@ import { openDetectedQuest } from "../../drafting/detect.ts";
 import { extractPriorConversationObjective } from "../../durability/transcript.ts";
 import { readDraftHeading, readDraftObjective } from "../../durability/quest-doc-io.ts";
 import { cancelPendingQuestion } from "../../absence/ask.ts";
+import { resumePendingReviewForState, sanitizeLoadedReviewState } from "../../durability/index.ts";
 
 export { listDraftQids, readDraftHeading, readDraftObjective };
 
@@ -128,19 +129,21 @@ export async function toggleQuestDisabled(pi: Pi, ctx: PiCtx, disabled: boolean,
     clearPlanRevisionRetries(prev.qid);
     clearDraftReviewRetry(prev.qid);
     cancelPendingQuestion(prev.qid);
-    updateState((s) => (s.activeReview !== null ? { ...s, activeReview: null, snapshotPending: true } : s));
+    updateState((s) => sanitizeLoadedReviewState({ ...s, activeReview: null, snapshotPending: true }));
   }
   const next = setQuestDisabled(disabled);
   if (disabled) {
     syncHarnessCwd(null, pi);
   }
   if (!disabled && next.qid) {
+    updateState((s) => sanitizeLoadedReviewState(s));
     await reattachWorktreeIfNeeded(pi, ctx, getState());
     const after = getState();
     const activeWt = (after.phase === "implementing" || after.phase === "validating")
       ? (after.worktreePath ?? after.contract?.worktreePath)
       : null;
     syncHarnessCwd(activeWt, pi);
+    resumePendingReviewForState(pi, ctx);
   }
   if (!disabled && !next.qid && rawObjective.trim() !== "") {
     const cfg = await readQuestConfig(ctx.cwd);
@@ -167,6 +170,7 @@ async function adoptDraftFile(pi: Pi, ctx: PiCtx, qid: string): Promise<string> 
   const draftName = heading ?? qid;
   replaceState({ ...createDraft(createQuest(objective, qid), draftName), disabled: false });
   emitNow(pi);
+  resumePendingReviewForState(pi, ctx);
   return `Resumed draft ${qid}: ${summarizeActive()}`;
 }
 
@@ -188,9 +192,10 @@ export async function resumeQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<s
   if (isQid(arg)) {
     const hit = newestSnapshotFor(entries, arg);
     if (hit) {
-      replaceState({ ...hit, disabled: false });
+      replaceState(sanitizeLoadedReviewState({ ...hit, disabled: false }));
       await reattachWorktreeIfNeeded(pi, ctx, getState());
       emitNow(pi);
+      resumePendingReviewForState(pi, ctx);
       return `Resumed quest ${arg}: ${summarizeActive()}`;
     }
     return adoptDraftFile(pi, ctx, arg);
@@ -200,15 +205,18 @@ export async function resumeQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<s
     if (active.disabled) {
       await toggleQuestDisabled(pi, ctx, false);
     } else {
-      await reattachWorktreeIfNeeded(pi, ctx, active);
+      updateState((s) => sanitizeLoadedReviewState(s));
+      await reattachWorktreeIfNeeded(pi, ctx, getState());
+      resumePendingReviewForState(pi, ctx);
     }
     return summarizeActive();
   }
   for (const [qid, snap] of newestSnapshotPerQid(entries)) {
     if (snap.name === arg || snap.draft?.name === arg) {
-      replaceState({ ...snap, disabled: false });
+      replaceState(sanitizeLoadedReviewState({ ...snap, disabled: false }));
       await reattachWorktreeIfNeeded(pi, ctx, getState());
       emitNow(pi);
+      resumePendingReviewForState(pi, ctx);
       return `Resumed quest ${qid}: ${summarizeActive()}`;
     }
   }
@@ -223,9 +231,10 @@ export async function resumeQuest(pi: Pi, ctx: PiCtx, rawArg: string): Promise<s
   }
   const newest = newestSnapshot(entries);
   if (newest?.name === arg && newest.qid) {
-    replaceState({ ...newest, disabled: false });
+    replaceState(sanitizeLoadedReviewState({ ...newest, disabled: false }));
     await reattachWorktreeIfNeeded(pi, ctx, getState());
     emitNow(pi);
+    resumePendingReviewForState(pi, ctx);
     return `Resumed quest ${newest.qid}: ${summarizeActive()}`;
   }
   return `No quest matching "${arg}".`;

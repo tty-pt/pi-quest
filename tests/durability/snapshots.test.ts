@@ -87,3 +87,18 @@ Deno.test("reconstruct cold-starts when no snapshot exists", () => {
   check(state.qid === null, "no qid");
   check(newestSnapshot([]) === null, "empty branch null");
 });
+
+Deno.test("loadQuestState clears orphaned activeReview and stale Review running notice when no review is in flight", async () => {
+  const { loadQuestState } = await import("../../src/durability/index.ts");
+  const zombieState = {
+    ...createQuest("fix bug", "abc123"),
+    phase: "implementing" as const,
+    activeReview: { kind: "draft" as const, target: "deadbeef" },
+    exactNextAction: "Review running for quest abc123 — end your turn; the verdict arrives as a new turn.",
+  };
+  const snap = encodeSnapshot(zombieState, "2026-01-01T00:00:00.000Z");
+  const loaded = await loadQuestState([entry(snap)]);
+  check(loaded.activeReview === null, "orphaned activeReview cleared on loadQuestState");
+  check(!loaded.exactNextAction.startsWith("Review running for quest"), "stale Review running notice reset on loadQuestState");
+});
+

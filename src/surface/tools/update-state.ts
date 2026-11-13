@@ -132,12 +132,18 @@ async function handleDirectives(
   const satisfiedReqs = params["satisfiedRequirements"];
   if (Array.isArray(satisfiedReqs) && current.rtm) {
     const set = new Set(satisfiedReqs.map((s) => String(s).toLowerCase().trim()));
-    updateState((s) => ({
+    const updatedState = updateState((s) => ({
       ...s,
       rtm: s.rtm ? s.rtm.map((r) => set.has(r.id.toLowerCase()) ? { ...r, status: "satisfied" as const } : r) : s.rtm,
       snapshotPending: true,
     }));
     applied.push(`marked requirements satisfied: ${satisfiedReqs.join(", ")}`);
+    const allSatisfied = updatedState.rtm !== undefined &&
+      updatedState.rtm.length > 0 &&
+      updatedState.rtm.every((r) => r.status === "satisfied" || r.status === "verified");
+    if (allSatisfied && updatedState.phase === "implementing" && params["claimComplete"] !== true) {
+      applied.push("all RTM requirements satisfied — pass {claimComplete: true} to quest_update_state when ready to launch validation");
+    }
   }
 }
 

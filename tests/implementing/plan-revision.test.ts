@@ -550,6 +550,7 @@ Deno.test("writePlanRevision loads settings.json config for roles.reviewer and r
     });
     await new Promise((r) => setTimeout(r, 20));
     check(getState().draft?.approvedPlanHash !== "hash-v1", "revision adopted cleanly");
+    check(!getState().exactNextAction.startsWith("Review running for quest"), "exactNextAction reset after PASS");
   } finally {
     cancelReview(d.qid);
     clearPlanRevisionRetries(d.qid);
@@ -558,5 +559,68 @@ Deno.test("writePlanRevision loads settings.json config for roles.reviewer and r
   }
 });
 
+Deno.test("approvePlanRevision, revertPlanRevision, and handleApproveInput clear stale Review running exactNextAction", async () => {
+  const base = {
+    ...implementing(),
+    activeReview: { kind: "draft" as const, target: "hash-v2" },
+    exactNextAction: `Review running for quest ${QID} — end your turn; the verdict arrives as a new turn.`,
+  };
+  const staged = recordPlanRevision(base, "hash-v1", "hash-v2", "fix", "old plan");
+  const approved = approvePlanRevision(staged, "hash-v2", "new plan");
+  check(!approved.exactNextAction.startsWith("Review running for quest"), "approvePlanRevision resets exactNextAction");
+  check(approved.activeReview === null, "approvePlanRevision clears activeReview");
 
+  const reverted = revertPlanRevision(staged);
+  check(!reverted.exactNextAction.startsWith("Review running for quest"), "revertPlanRevision resets exactNextAction");
+  check(reverted.activeReview === null, "revertPlanRevision clears activeReview");
 
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  try {
+    updateState((s) => ({
+      ...s,
+      activeReview: { kind: "draft", target: d.target },
+      exactNextAction: `Review running for quest ${d.qid} — end your turn; the verdict arrives as a new turn.`,
+      pendingDirectiveRevision: true,
+    }));
+    const ok = await handleApproveInput(bus.pi, fakeCtx(d.cwd), "go");
+    check(ok === true, "handleApproveInput handled user advance");
+    check(getState().activeReview === null, "handleApproveInput cleared activeReview");
+    check(!getState().exactNextAction.startsWith("Review running for quest"), "handleApproveInput cleared Review running exactNextAction");
+  } finally {
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("stale plan-revision PASS does not clobber a newer pendingDirectiveRevision", async () => {
+  const d = await revisionFailureSetup();
+  const bus = revisionBus();
+  try {
+    const ctx = fakeCtx(d.cwd);
+    const booted = bootPlanRevisionReview(bus.pi, ctx, d.target, DEFAULT_CONFIG);
+    await waitForRevisionRequests(bus.emitted, 1);
+
+    // Operator sends a new directive while the revision review is in flight
+    updateState((s) => ({
+      ...s,
+      pendingDirectiveRevision: true,
+      pendingDirectiveText: "What did you just say? Can you enhance it?",
+    }));
+
+    bus.feed({
+      requestId: revisionRequests(bus.emitted)[0]["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE" },
+    });
+    await booted;
+    check(getState().pendingDirectiveRevision === true, "pendingDirectiveRevision preserved when superseded review finishes");
+    check(getState().draft?.approvedPlanHash === "hash-v1", "superseded revision was not adopted over newer directive");
+    check(revisionWakes(bus.pi).length === 0, "no spurious wake sent for superseded revision");
+  } finally {
+    cancelReview(d.qid);
+    clearPlanRevisionRetries(d.qid);
+    replaceState(IDLE_STATE);
+  }
+});

@@ -6,7 +6,7 @@
 // HIGH_LEVEL: #no direct mutation — the flow records evidence, transitions stay in domain.
 import { createHash } from "node:crypto";
 import { updateState } from "../app/store";
-import { sendSteer } from "../app/interpreter";
+import { emitNow, sendSteer } from "../app/interpreter";
 import type { Pi, PiCtx } from "../hooks/events";
 import type { Qid } from "../domain/qid";
 import type { QuestState, ReviewKind } from "../domain/quest";
@@ -171,7 +171,14 @@ function handleCandidateError(detail: string, model: string | undefined, cooldow
 function clearActiveReviewIfMatching(qid: Qid, target: string): void {
   updateState((s) =>
     s.qid === qid && s.activeReview?.target === target
-      ? { ...s, activeReview: null, snapshotPending: true }
+      ? {
+          ...s,
+          activeReview: null,
+          ...(s.exactNextAction === reviewRunningNotice(qid) && s.phase === "implementing"
+            ? { exactNextAction: "Implement the approved plan; claim completion via quest_update_state {claimComplete: true} when done." }
+            : {}),
+          snapshotPending: true,
+        }
       : s
   );
 }
@@ -261,6 +268,7 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       } else {
         clearActiveReviewIfMatching(qid, target);
       }
+      emitNow(pi);
       return { status: "verdict", review, settled };
     } catch (err) {
       if (controller.signal.aborted) {
@@ -272,11 +280,13 @@ export async function runIsolatedReview(args: FlowArgs): Promise<FlowOutcome> {
       if (!(isModelResolutionOrProviderError(detail) && i + 1 < candidates.length)) {
         if (isCurrentReview(qid, target)) cancelReview(qid);
         clearActiveReviewIfMatching(qid, target);
+        emitNow(pi);
         return { status: "failed", detail };
       }
     }
   }
   if (isCurrentReview(qid, target)) cancelReview(qid);
   clearActiveReviewIfMatching(qid, target);
+  emitNow(pi);
   return { status: "failed", detail: "all reviewer model candidates exhausted" };
 }
