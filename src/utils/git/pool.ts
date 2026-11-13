@@ -232,6 +232,10 @@ async function checkoutAndLeaseSlot(
   if (checkoutRes.exitCode !== 0) {
     return { ok: false, error: `Checkout of ${branchName} in ${candidate.id} failed: ${checkoutRes.stdout}` };
   }
+  try {
+    await runGit(["submodule", "update", "--init", "--recursive", "--no-fetch", "--force"], candidate.dir, pi);
+    await restoreSubmoduleWorktrees(primaryRoot, pi);
+  } catch { /* best-effort submodule sync on existing branch checkout */ }
 
   writeSlotLease(candidate.dir, {
     slotId: candidate.id, status: "leased", leasedToQid: qid, leasedAt: Date.now(),
@@ -264,6 +268,10 @@ export async function acquireWarmSlot(
       const verify = await runGit(["rev-parse", "--verify", `refs/heads/${targetBranch}`], primaryRoot, pi);
       const args = verify.exitCode === 0 ? ["checkout", targetBranch] : ["checkout", "-B", targetBranch, targetBase];
       await runGit(args, alreadyLeased.dir, pi);
+      try {
+        await runGit(["submodule", "update", "--init", "--recursive", "--no-fetch", "--force"], alreadyLeased.dir, pi);
+        await restoreSubmoduleWorktrees(primaryRoot, pi);
+      } catch { /* best-effort submodule sync on existing branch checkout */ }
     }
     if (alreadyLeased.lease && alreadyLeased.lease.pid !== process.pid) {
       writeSlotLease(alreadyLeased.dir, { ...alreadyLeased.lease, pid: process.pid });
@@ -304,16 +312,7 @@ export async function releaseWarmSlot(
   if (lease.leasedToQid !== qid && lease.status === "leased") {
     return { ok: false, error: `Slot ${lease.slotId} is leased to ${lease.leasedToQid}, not ${qid}` };
   }
-  return await sanitizeSlot(
-    primaryRoot,
-    slotPath,
-    lease.slotId,
-    pi,
-    notifier,
-    undefined,
-    lease.branch ?? undefined,
-    { deleteBranch: options?.deleteBranch === true },
-  );
+  return await sanitizeSlot(primaryRoot, slotPath, lease.slotId, pi, notifier, undefined, lease.branch ?? undefined, { deleteBranch: options?.deleteBranch === true });
 }
 
 export async function ensureQuestWorktreeAttached(
