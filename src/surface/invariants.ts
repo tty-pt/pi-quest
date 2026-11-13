@@ -10,11 +10,68 @@ export interface ActiveInvariant {
   project?: string;
 }
 
+const HARMFUL_INVARIANT_PATTERNS: RegExp[] = [
+  // Anti-testing and skipping verification
+  /\b(?:work on tests later|tests?\s+later|skip tests?|ignore tests?|bypass tests?|no tests?(?:\s+needed)?|without(?: running)? tests?)\b/i,
+  // Transient WIP / one-off commit instructions
+  /\b(?:wip commit|as part of this wip|wip commit thing|just commit\b)/i,
+  /\bmake sure (?:the )?[a-z0-9_-]+ work is committed\b/i,
+  /\bmake sure everything is committed and pushed\b/i,
+  // Conversational analysis markers
+  /\bthis is an analysis request\b/i,
+];
+
+/**
+ * Normalizes raw memory summary into a clean standing directive statement.
+ * Strips episode wrapping ("Episode: Standing directive: <text> — tested: <proof>").
+ */
+export function cleanInvariantSummary(raw: string): string {
+  let text = raw.trim();
+  const episodeDirectiveMatch = text.match(/^Episode:\s*Standing directive:\s*(.*?)(?:\s*—\s*tested:.*)?$/i);
+  if (episodeDirectiveMatch && episodeDirectiveMatch[1].trim().length > 0) {
+    text = episodeDirectiveMatch[1].trim();
+  } else {
+    const episodeGenericMatch = text.match(/^Episode:\s*(.*?)(?:\s*—\s*tested:.*)?$/i);
+    if (episodeGenericMatch && episodeGenericMatch[1].trim().length > 0) {
+      text = episodeGenericMatch[1].trim();
+    }
+  }
+  return text;
+}
+
+/**
+ * Validates whether an invariant is a genuine, non-harmful standing technical invariant.
+ * Rejects questions, transient WIP/commit commands, and harmful directives that contradict
+ * testing or quality gates (e.g. 'just commit, we can work on tests later').
+ */
+export function isEligibleStandingInvariant(summary: string): boolean {
+  if (!summary || typeof summary !== "string") return false;
+  const s = summary.trim();
+  if (s.length < 8) return false;
+
+  // Interrogatives, conversational queries, or confirmations are never standing invariants
+  if (s.endsWith("?") || /\?\s*$/i.test(s) || /\b(?:Correct|Understood|Right)\?\s*$/i.test(s)) {
+    return false;
+  }
+  if (/^(?:is|are|can|could|would|should|how|what|why|where|when|who|which|judging by)\b/i.test(s) && s.includes("?")) {
+    return false;
+  }
+
+  // Reject harmful patterns
+  for (const pattern of HARMFUL_INVARIANT_PATTERNS) {
+    if (pattern.test(s)) return false;
+  }
+
+  return true;
+}
+
 function parseInvariantItem(item: unknown): ActiveInvariant | null {
   if (typeof item !== "object" || item === null) return null;
   const d = item as Record<string, unknown>;
-  const summary = typeof d["summary"] === "string" ? d["summary"] : typeof d["text"] === "string" ? d["text"] : "";
-  if (!summary) return null;
+  const rawSummary = typeof d["summary"] === "string" ? d["summary"] : typeof d["text"] === "string" ? d["text"] : "";
+  if (!rawSummary) return null;
+  const summary = cleanInvariantSummary(rawSummary);
+  if (!isEligibleStandingInvariant(summary)) return null;
   return {
     ref: typeof d["ref"] === "number" ? d["ref"] : undefined,
     summary,
@@ -73,19 +130,28 @@ export async function fetchActiveInvariants(cwd: string): Promise<ActiveInvarian
 
 export function formatInvariantsComment(invariants: Array<ActiveInvariant | string>): string {
   if (!invariants || invariants.length === 0) return "";
+  const validItems: string[] = [];
+  for (const inv of invariants) {
+    if (typeof inv === "string") {
+      const cleaned = cleanInvariantSummary(inv);
+      if (isEligibleStandingInvariant(cleaned)) {
+        validItems.push(`  • Invariant: ${cleaned}`);
+      }
+    } else {
+      const cleaned = cleanInvariantSummary(inv.summary);
+      if (isEligibleStandingInvariant(cleaned)) {
+        const refStr = inv.ref !== undefined ? ` (Ref ${inv.ref})` : "";
+        validItems.push(`  • Invariant${refStr}: ${cleaned}`);
+      }
+    }
+  }
+  if (validItems.length === 0) return "";
   const lines: string[] = [
     "<!-- [Compliance Criteria]",
     "[Active Mid-Quest Directives - Must be satisfied]",
     "[Standing Repository Invariants from Memory]:",
+    ...validItems,
+    "-->",
   ];
-  for (const inv of invariants) {
-    if (typeof inv === "string") {
-      lines.push(`  • Invariant: ${inv}`);
-    } else {
-      const refStr = inv.ref !== undefined ? ` (Ref ${inv.ref})` : "";
-      lines.push(`  • Invariant${refStr}: ${inv.summary}`);
-    }
-  }
-  lines.push("-->");
   return lines.join("\n");
 }

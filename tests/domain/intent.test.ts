@@ -2,11 +2,13 @@ import { check } from "../check.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
 import {
   FALLBACK_ADVANCE_WORD,
-  clearIntentMemo,
-  interpretUserTurn,
   isFallbackAdvance,
   parseExplicitSyntax,
 } from "../../src/domain/intent.ts";
+import {
+  clearIntentMemo,
+  interpretUserTurn,
+} from "../../src/judge/intent-classifier.ts";
 import { DEFAULT_INTENT_EXEMPLARS } from "../../src/domain/intent-exemplars.ts";
 import { clearEmbedState } from "../../src/judge/embed.ts";
 import { stubJudgeFetch } from "../judge-stub.ts";
@@ -194,4 +196,20 @@ Deno.test("long messages are directives: no embedding request", async () => {
     clearIntentMemo();
     clearEmbedState();
   }
+});
+
+Deno.test("handoff meta-requests: explicit sigils and enough exemplars", () => {
+  check(parseExplicitSyntax("!handoff")?.kind === "handoff", "!handoff alone");
+  check(parseExplicitSyntax("!handoff for the next agent")?.cleanText === "for the next agent", "!handoff text");
+  check(parseExplicitSyntax("handoff: I'll compact now")?.kind === "handoff", "handoff:");
+  check(parseExplicitSyntax("!handoffs please") === null, "word boundary on sigil");
+  check((DEFAULT_INTENT_EXEMPLARS["handoff"]?.length ?? 0) >= 8, "handoff exemplars");
+});
+
+Deno.test("embeddings classify a paraphrased handoff request (margin-gated like any action)", async () => {
+  await withEmbed(() => null, async () => {
+    const cfg: QuestConfig = { ...ON, intentExemplars: { handoff: ["zzz-custom"] } };
+    const r = await interpretUserTurn("give me a handoff prompt", "implementing", cfg);
+    check(r.kind === "handoff" && r.source === "embed", `handoff via embed, got ${r.kind}/${r.source}`);
+  });
 });

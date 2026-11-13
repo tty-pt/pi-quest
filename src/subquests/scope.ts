@@ -10,6 +10,7 @@ export type TriageAction =
   | "queue_subquest"
   | "preempt_subquest"
   | "refinement"
+  | "handoff"
   | "pass_through";
 
 export interface Triage {
@@ -17,6 +18,17 @@ export interface Triage {
   action: TriageAction;
   steer: string;
   directiveText?: string;
+}
+
+/**
+ * Returns true if a directive represents a coding standard, style rule, or negative constraint
+ * (e.g. "avoid magic constants", "don't use X", "never Y", "stop doing Z") that should bind
+ * the active plan rather than spawning a separate sub-quest.
+ */
+export function isNegativeOrStyleConstraint(text: string): boolean {
+  const norm = text.trim().toLowerCase();
+  return /^(?:avoid\b|don'?t\b|do\s+not\b|never\b|stop\b|no\b|decline\b|reject\b|hold\s+on\b|wait\b|please\s+(?:avoid|don'?t|do\s+not|never)|be\s+aware\b|remember\s+to\s+avoid\b)/i.test(norm) ||
+    /\b(?:decline|magic\s+constants?|magic\s+numbers?|naming\s+conventions?|code\s+style|formatting|indentation)\b/i.test(norm);
 }
 
 export function triageInQuestRequest(
@@ -31,6 +43,29 @@ export function triageInQuestRequest(
   }
 
   const text = cleanText ?? "";
+
+  // Meta request (handoff / "I'll compact"): served, never recorded.
+  if (kind === "handoff") {
+    return {
+      record: false,
+      action: "handoff",
+      steer: `Operator asked for a handoff on quest ${qid}. This is a meta request, NOT a requirement: it was not recorded.`,
+      directiveText: text,
+    };
+  }
+
+  // Safety invariant: negative constraints and coding standards ("avoid magic constants",
+  // "don't use X") must NEVER spawn a sub-quest, even if misclassified by an embedding model.
+  if (isNegativeOrStyleConstraint(text)) {
+    return {
+      record: true,
+      action: "amend_requirement",
+      steer: `Recorded user constraint on quest ${qid}: "${text}". ` +
+        `Added as requirement to plan; validation re-binds to verify this constraint. ` +
+        `If this changes the implementation plan, record an amendment via quest_update_state.`,
+      directiveText: text,
+    };
+  }
 
   if (kind === "subquest_now") {
     return {

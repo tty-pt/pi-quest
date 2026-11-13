@@ -156,3 +156,22 @@ Deno.test("detection fails closed when judge is unreachable and no trigger is pr
   check(getState().phase === "idle", "phase remains idle");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("detection extracts substantive objective from prior Argon conversation when triggered with short referential phrase", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const entries = [
+    { data: { role: "user", content: "We need to fix the duplicate draft reviewer launch in watchDraftEdits and retain worktree slots on completion." } },
+    { data: { role: "assistant", content: "I analyzed src/drafting/reviews.ts and src/surface/tools/archive/core.ts. Here is the 3-step plan." } },
+  ];
+  const ctx = fakeCtx(cwd, entries);
+  const created = await detectSubstantiveRequest(pi, ctx, "quest: Go for it.");
+  check(created, "quest created via referential trigger");
+  check(getState().objective.includes("fix the duplicate draft reviewer launch"), "objective extracted from prior conversation");
+  const file = await readFile(join(cwd, draftPath(getState().qid!)), "utf8");
+  check(file.includes("## Context / Background Discussion"), "draft scaffold includes prior conversation context");
+  check(String(pi.sent[0]?.message?.content ?? "").includes("Prior conversation context is already captured"), "steer prompts immediate plan authoring");
+  replaceState(IDLE_STATE);
+});
+

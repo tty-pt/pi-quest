@@ -11,7 +11,8 @@ export type SectionKey =
   | "amendments"
   | "predraft"
   | "status"
-  | "followups";
+  | "followups"
+  | "assumptions";
 
 export const SECTION_TITLES: Record<SectionKey, readonly string[]> = {
   requirements: ["requirements"],
@@ -23,6 +24,13 @@ export const SECTION_TITLES: Record<SectionKey, readonly string[]> = {
   predraft: ["findings (pre-draft investigation)"],
   status: ["status"],
   followups: ["follow-up requests"],
+  assumptions: [
+    "assumptions",
+    "assumptions & falsification criteria",
+    "assumptions and falsification criteria",
+    "assumptions & risks",
+    "assumptions and risks",
+  ],
 };
 
 function norm(title: string): string {
@@ -55,6 +63,14 @@ export function isHeading(line: string, key: SectionKey): boolean {
 
 /** Canonical display title for a section. */
 export function sectionTitle(key: SectionKey): string {
-  const t = key === "plan" ? "Implementation Plan" : key === "subquests" ? "Sub-Quests" : key === "followups" ? "Follow-up Requests" : key.charAt(0).toUpperCase() + key.slice(1);
+  const t = key === "plan"
+    ? "Implementation Plan"
+    : key === "subquests"
+    ? "Sub-Quests"
+    : key === "followups"
+    ? "Follow-up Requests"
+    : key === "assumptions"
+    ? "Assumptions & Falsification Criteria"
+    : key.charAt(0).toUpperCase() + key.slice(1);
   return t;
 }

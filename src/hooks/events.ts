@@ -28,6 +28,7 @@ export interface PiOverlayComponent {
   render(width: number): string[];
   handleInput?(data: string): void;
   handleMouse?(event: unknown): unknown;
+  invalidate?(): void;
   dispose?(): void;
 }
 
@@ -71,6 +72,8 @@ export interface PiCtx {
   parentSessionId?: unknown;
   modelRegistry?: unknown;
   model?: unknown;
+  getContextUsage?: () => { tokens?: number; totalTokens?: number; contextLimit?: number } | undefined;
+  compact?: (options?: { customInstructions?: string; onComplete?: (result: unknown) => void; onError?: (error: Error) => void }) => void;
 }
 
 export interface SessionStartEvent {
@@ -85,6 +88,12 @@ export interface TurnEvent {
 
 export interface BeforeCompactEvent {
   type: "session_before_compact";
+  reason?: "manual" | "threshold" | "overflow";
+}
+
+export interface CompactEvent {
+  type: "session_compact";
+  reason?: "manual" | "threshold" | "overflow";
 }
 
 export interface ToolCallEvent {
@@ -134,11 +143,20 @@ export interface AgentToolResult {
   details?: unknown;
 }
 
+export interface PiComponent {
+  render: (width: number) => string[];
+  handleInput?: (data: string) => void;
+  invalidate: () => void;
+}
+
 export interface PiToolSpec {
   name: string;
   label: string;
   description: string;
   parameters: unknown;
+  renderShell?: "self";
+  renderCall?: (args: Record<string, unknown>, theme?: unknown, context?: { cwd: string; [key: string]: unknown }) => PiComponent;
+  renderResult?: (result: AgentToolResult, options?: unknown, theme?: unknown, context?: unknown) => PiComponent;
   execute: (
     toolCallId: string,
     params: Record<string, unknown>,
@@ -164,7 +182,8 @@ export interface Pi {
   on(event: "session_start", handler: (e: SessionStartEvent, ctx: PiCtx) => unknown): void;
   on(event: "turn_start" | "turn_end", handler: (e: TurnEvent, ctx: PiCtx) => unknown): void;
   on(event: "session_before_compact", handler: (e: BeforeCompactEvent, ctx: PiCtx) => unknown): void;
-  on(event: "tool_call", handler: (e: ToolCallEvent, ctx: PiCtx) => BlockVerdict | undefined): void;
+  on(event: "session_compact", handler: (e: CompactEvent, ctx: PiCtx) => unknown): void;
+  on(event: "tool_call", handler: (e: ToolCallEvent, ctx: PiCtx) => BlockVerdict | undefined | void | Promise<BlockVerdict | undefined | void>): void;
   on(event: "tool_result", handler: (e: ToolResultEvent, ctx: PiCtx) => unknown): void;
   on(event: "input", handler: (e: InputEvent, ctx: PiCtx) => unknown): void;
   on(event: "before_agent_start", handler: (e: BeforeAgentStartEvent, ctx: PiCtx) => AgentStartInjection | undefined): void;
@@ -182,6 +201,7 @@ export interface Pi {
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
   ): void;
   getAllTools(): PiToolInfo[];
+  refreshTools?(): void;
   exec(command: string, args: string[], options?: { cwd?: string }): Promise<PiExecResult>;
   events: PiEventBus;
 }
@@ -204,8 +224,18 @@ export function onTurnEnd(pi: Pi, handler: (e: TurnEvent, ctx: PiCtx) => void): 
   });
 }
 
-export function onBeforeCompact(pi: Pi, handler: (e: BeforeCompactEvent, ctx: PiCtx) => void): void {
-  pi.on("session_before_compact", (event, ctx) => {
+// The handler may be async: pi awaits it, so a handoff written here lands on
+// disk before the transcript is summarized. It must resolve to undefined
+// (never cancel or replace pi's compaction).
+export function onBeforeCompact(pi: Pi, handler: (e: BeforeCompactEvent, ctx: PiCtx) => void | Promise<void>): void {
+  pi.on("session_before_compact", async (event, ctx) => {
+    await handler(event, ctx);
+    return undefined;
+  });
+}
+
+export function onAfterCompact(pi: Pi, handler: (e: CompactEvent, ctx: PiCtx) => void): void {
+  pi.on("session_compact", (event, ctx) => {
     handler(event, ctx);
   });
 }

@@ -1,9 +1,8 @@
 // HIGH_LEVEL: #storage — the generated quest view and slim archives.
 // The transcript is the truth; these files are views only.
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import type { ArchivedOutcome, QuestState } from "../domain/quest";
-import { archivePath, draftPath, stageDir } from "../domain/paths";
+import { draftFilePath, stageDirPath } from "../files";
 import type { Qid } from "../domain/qid";
 import type { Pi } from "../hooks/events";
 
@@ -69,35 +68,15 @@ export function renderManifest(state: QuestState, outcome: ArchivedOutcome, summ
 }
 
 export async function archiveQuestFiles(
-  pi: Pi,
+  _pi: Pi,
   cwd: string,
   state: QuestState,
-  outcome: ArchivedOutcome,
-  summary: string | null,
+  _outcome: ArchivedOutcome,
+  _summary: string | null,
 ): Promise<string> {
   if (state.qid === null) throw new Error("cannot archive without a qid");
   const qid: Qid = state.qid;
-  const preview: QuestState = { ...state, phase: "archived", archivedOutcome: outcome, activeReview: null, exactNextAction: "" };
-  const dir = join(cwd, stageDir(qid));
-  await mkdir(dir, { recursive: true });
-  // The quest document (agent-owned, the only into-archive copy) is staged
-  // before the future/ copy is removed; the rendered view keeps the review
-  // dialogue, last review, human answers, and sub-quest findings.
-  try {
-    await writeFile(join(dir, "quest.md"), await readFile(join(cwd, draftPath(qid)), "utf8"), "utf8");
-  } catch {
-    // Missing quest document: the archive still keeps the rendered view.
-  }
-  await writeFile(join(dir, "rendered-view.md"), renderQuestView(preview), "utf8");
-  await writeFile(join(dir, "manifest.json"), renderManifest(preview, outcome, summary), "utf8");
-  const zipPath = join(cwd, archivePath(qid));
-  await mkdir(join(cwd, ".pi", "quest", "archive"), { recursive: true });
-  const res = await pi.exec("zip", ["-j", zipPath, "quest.md", "rendered-view.md", "manifest.json"], { cwd: dir });
-  if (res.code !== 0) {
-    await rm(dir, { recursive: true, force: true });
-    throw new Error(`zip failed: ${res.stderr.slice(0, 500)}`);
-  }
-  await rm(dir, { recursive: true, force: true });
-  await rm(join(cwd, draftPath(qid)), { force: true });
-  return zipPath;
+  await rm(stageDirPath(cwd, qid), { recursive: true, force: true });
+  await rm(draftFilePath(cwd, qid), { force: true });
+  return "";
 }

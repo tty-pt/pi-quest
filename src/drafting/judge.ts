@@ -3,7 +3,6 @@
 import type { PiCtx } from "../hooks/events.ts";
 import { type QuestConfig } from "../config.ts";
 import { gate, mergeExemplars, nearestExemplar } from "../judge/nearest.ts";
-import { isQuestLikeRequest } from "./detect.ts";
 import { QUEST_EXEMPLARS, QUEST_INTENT_KINDS } from "./quest-exemplars.ts";
 import { KIND_EXEMPLARS, QUEST_KINDS } from "./kind-exemplars.ts";
 import type { QuestKind } from "../domain/quest.ts";
@@ -14,6 +13,38 @@ export interface QuestIntentResult {
   degraded?: boolean;
   reason?: string;
 }
+
+const IMPERATIVE_ACTION_VERBS =
+  /\b(?:implement|refactor|update|fix|add|remove|create|test|build|wire|audit|ensure|integrate|migrate|optimize|rewrite)\b/i;
+const CODE_FILE_PATTERN =
+  /\b[\w\-./]+\.(?:c|h|ts|js|jsx|tsx|py|rs|go|sh|json|md|yaml|yml|toml|sql)\b|\b(?:Makefile|Dockerfile|package\.json)\b/i;
+const CODE_SYMBOL_OR_SNIPPET =
+  /`[^`]+`|\b[a-zA-Z_]\w*\(\)|\b(?:git diff|pull request|PR|function|class|method|struct|endpoint|API|CLI)\b/i;
+const TECHNICAL_ERROR_PATTERN =
+  /\b(?:bug|error|exception|stack\s*trace|segfault|null\s*pointer|compiler|failed\s+test|syntax\s*error|regression)\b/i;
+
+/**
+ * High-confidence software task heuristic for offline / degraded embedding fallback.
+ * Checks for imperative coding action verbs combined with codebase paths, symbols, or error traces.
+ */
+export function detectTaskHeuristic(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 30) return false;
+
+  const hasVerb = IMPERATIVE_ACTION_VERBS.test(trimmed);
+  const hasFile = CODE_FILE_PATTERN.test(trimmed);
+  const hasSymbol = CODE_SYMBOL_OR_SNIPPET.test(trimmed);
+  const hasError = TECHNICAL_ERROR_PATTERN.test(trimmed);
+
+  if (hasVerb && (hasFile || hasSymbol || hasError)) {
+    return true;
+  }
+  if (hasFile && hasError) {
+    return true;
+  }
+  return false;
+}
+
 
 export const QUEST_INTENT_QUESTION = {
   id: "quest_intent",

@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { updateState } from "../app/store";
 import { hashContent } from "../drafting/plan-text";
 import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
+import { dedupeDocBullets } from "../domain/dedupe";
 import { reconcileDocContent, upsertDocStatus } from "../domain/quest-doc";
 import type { HandbackReceipt } from "../domain/contract";
 import type { Qid } from "../domain/qid";
@@ -16,7 +18,29 @@ import type { PiCtx } from "../hooks/events";
 
 export async function readQuestDoc(ctx: PiCtx, qid: Qid): Promise<string | null> {
   try {
-    return await readFile(join(ctx.cwd, draftPath(qid)), "utf8");
+    return await readFile(draftFilePath(ctx.cwd, qid), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+export async function readDraftHeading(cwd: string, qid: string): Promise<string | null> {
+  try {
+    const text = await readFile(draftFilePath(cwd, qid as Qid), "utf8");
+    const h1 = text.match(/^#\s+(?:Quest\s+\S+:\s*)?(.+?)\s*$/m)?.[1]?.trim();
+    if (h1 && h1 !== qid) return h1;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readDraftObjective(cwd: string, qid: string): Promise<string | null> {
+  try {
+    const text = await readFile(draftFilePath(cwd, qid as Qid), "utf8");
+    return text.match(/^##\s+Original request\s*\n+(.+?)(?:\n##\s|\n*$)/ims)?.[1]?.trim() ||
+      text.split("\n")[0] ||
+      qid;
   } catch {
     return null;
   }
@@ -33,10 +57,10 @@ export async function setDocStatus(
 ): Promise<void> {
   const content = await readQuestDoc(ctx, qid);
   if (content === null) return;
-  const updated = upsertDocStatus(content, phase, complete);
+  const updated = dedupeDocBullets(upsertDocStatus(content, phase, complete)).text;
   if (updated === content) return;
   try {
-    await writeFile(join(ctx.cwd, draftPath(qid)), updated, "utf8");
+    await writeFile(draftFilePath(ctx.cwd, qid), updated, "utf8");
   } catch {
     return;
   }
@@ -55,10 +79,10 @@ export async function reconcileParentDocOnReturn(
   parentQid: Qid,
   receipt: HandbackReceipt,
 ): Promise<void> {
-  const filePath = join(cwd, draftPath(parentQid));
+  const filePath = draftFilePath(cwd, parentQid);
   try {
     const content = await readFile(filePath, "utf8");
-    const updated = reconcileDocContent(content, receipt);
+    const updated = dedupeDocBullets(reconcileDocContent(content, receipt)).text;
     if (updated !== content) {
       await writeFile(filePath, updated, "utf8");
       const hash = hashContent(updated);

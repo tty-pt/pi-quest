@@ -67,7 +67,8 @@ export function nextPendingSubQuest(
         completedReqs.add(req.toLowerCase());
       }
       if (r.findings) {
-        const idMatch = r.findings.match(/\b(SQ\d+)\b/i);
+        const idMatch = r.findings.match(/^(?:Sub-Quest\s+)?(SQ\d+)[\s:\-–—]/i) ??
+          r.findings.match(/\b(SQ\d+)\s*(?:completed|passed|finished|verified|done)\b/i);
         if (idMatch) completedIds.add(idMatch[1].toUpperCase());
       }
     }
@@ -90,6 +91,8 @@ export function createContractForBacklogItem(
   item: BacklogItem,
   parentQid: Qid,
   childQid: Qid,
+  worktreePath?: string,
+  worktreeBranch?: string,
 ): SubQuestContract {
   return {
     qid: childQid,
@@ -99,6 +102,8 @@ export function createContractForBacklogItem(
     allowedPaths: item.allowedPaths,
     requiredTestCommands: item.requiredTestCommands,
     acceptanceCriteria: [`Complete ${item.id}: ${item.goal}`],
+    worktreePath,
+    worktreeBranch,
   };
 }
 
@@ -116,7 +121,9 @@ export function advanceForeman(
   const nextItem = nextPendingSubQuest(items, parentState.handbackReceipts ?? []);
   if (!nextItem) return null;
 
-  const contract = createContractForBacklogItem(nextItem, parentState.qid as Qid, nextChildQid);
+  const wtPath = parentState.worktreePath ?? parentState.contract?.worktreePath;
+  const wtBranch = parentState.worktreeBranch ?? parentState.contract?.worktreeBranch;
+  const contract = createContractForBacklogItem(nextItem, parentState.qid as Qid, nextChildQid, wtPath, wtBranch);
   const nextMountedState = pushStackFrame(parentState, contract, nextChildQid);
 
   return { nextMountedState, nextItem, contract };

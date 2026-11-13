@@ -28,12 +28,15 @@ Deno.test("installRouter — safely no-ops if registerVirtualModel is not availa
   // Should not throw
 });
 
-Deno.test("commands — registers quest-router command", () => {
+Deno.test("commands — registers quest command with router subcommand", async () => {
   const pi = fakePi();
   installCommands(pi);
 
-  const found = pi.commands.find((c) => c.name === "quest-router");
-  assertEquals(found !== undefined, true);
+  const questCmd = pi.commands.find((c) => c.name === "quest");
+  assertEquals(questCmd !== undefined, true);
+  const ctx = fakeCtx("/tmp");
+  await questCmd!.options.handler("router", ctx);
+  assertEquals(ctx.notifications.calls.some((n) => n.message.includes("Pi-Quest Virtual Model Router")), true);
 });
 
 Deno.test("getRouterStatusLines — formats status lines with cell and matrix info", async () => {

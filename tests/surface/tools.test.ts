@@ -19,7 +19,7 @@ import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { implementationFingerprint } from "../../src/review/flow.ts";
 import { archiveActiveQuest, archiveTool } from "../../src/surface/tools/archive.ts";
-import { applyUpdate } from "../../src/surface/tools/update-state.ts";
+import { applyUpdate, formatProgressCard } from "../../src/surface/tools/update-state.ts";
 import { stopBlink } from "../../src/durability/index.ts";
 import { createChildQuest } from "../../src/surface/tools/subquest.ts";
 import { recoverQuest, recoverTool } from "../../src/surface/tools/recover.ts";
@@ -158,6 +158,109 @@ Deno.test("subquest links children and enforces the depth cap", async () => {
   replaceState(IDLE_STATE);
 });
 
+Deno.test("subquest provisions isolated worktree when requested", async () => {
+  const parent = { ...authored(), phase: "implementing" as const };
+  replaceState(parent);
+  const gitCommands: string[][] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+    gitCommands.push(args);
+    if (cmd === "git" && args[0] === "rev-parse") return { code: 1, stdout: "" };
+    return { code: 0, stdout: "" };
+  };
+  const ctx = fakeCtx(tmp());
+  const done = await createChildQuest(pi, ctx, "worktree slice", "slice", false, {
+    worktree: true,
+  });
+  check(done.worktreePath !== undefined, "worktreePath returned");
+  check(done.worktreeBranch !== undefined, "worktreeBranch returned");
+  check(done.worktreeBranch === `quest/${done.childQid}`, "worktreeBranch follows quest/qid pattern");
+  check(gitCommands.some((a) => a.includes("worktree") && a.includes("add")), "git worktree add executed");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("archive merges worktree branch and removes worktree directory on return", async () => {
+  const gitCommands: string[][] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+    gitCommands.push(args);
+    return { code: 0, stdout: "" };
+  };
+  const ctx = fakeCtx(tmp());
+  const parent = createQuest("parent task", "par001");
+  const child = {
+    ...claimComplete({ ...authored(), phase: "implementing" as const }),
+    parentQid: "par001" as Qid,
+    worktreePath: "/repo/.pi/worktrees/abc123",
+    worktreeBranch: "quest/abc123",
+  };
+  const childTarget = implementationFingerprint(child);
+  replaceState({ ...child, lastReview: { verdict: "PASS", target: childTarget, findings: "ok" } });
+  const entries = [{ customType: SNAPSHOT_TYPE, data: encodeSnapshot(parent) }];
+  const returned = await archiveActiveQuest(pi, fakeCtx(ctx.cwd, entries), "COMPLETED", "child done");
+  check(returned.returnedToParent === "par001", "returned to parent");
+  check(gitCommands.some((a) => a.includes("merge") && a.includes("quest/abc123")), "git merge executed");
+  check(gitCommands.some((a) => a.includes("worktree") && a.includes("remove")), "git worktree remove executed");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("subquest inherits parent worktreePath and worktreeBranch without creating new worktree", async () => {
+  const parent = {
+    ...authored(),
+    phase: "implementing" as const,
+    worktreePath: "/repo/.pi/worktrees/par001",
+    worktreeBranch: "quest/par001",
+  };
+  replaceState(parent);
+  const gitCommands: string[][] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (_cmd: string, args: string[]) => {
+    gitCommands.push(args);
+    return { code: 0, stdout: "" };
+  };
+  const ctx = fakeCtx(tmp());
+  const done = await createChildQuest(pi, ctx, "child task", "child", false);
+  check(done.worktreePath === "/repo/.pi/worktrees/par001", "inherited parent worktreePath");
+  check(done.worktreeBranch === "quest/par001", "inherited parent worktreeBranch");
+  check(!gitCommands.some((a) => a.includes("worktree") && a.includes("add")), "did NOT execute git worktree add");
+
+  // Even when worktree: true is passed, if parent already has a worktree slot, child shares it
+  const doneWithFlag = await createChildQuest(pi, ctx, "child task 2", "child 2", false, { worktree: true });
+  check(doneWithFlag.worktreePath === "/repo/.pi/worktrees/par001", "inherited parent worktreePath even with worktree: true");
+  check(doneWithFlag.worktreeBranch === "quest/par001", "inherited parent worktreeBranch even with worktree: true");
+  check(!gitCommands.some((a) => a.includes("worktree") && a.includes("add")), "still did NOT execute git worktree add");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("archive does not remove or squash worktree when inherited from parent", async () => {
+  const gitCommands: string[][] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+    gitCommands.push(args);
+    return { code: 0, stdout: "" };
+  };
+  const ctx = fakeCtx(tmp());
+  const parent = {
+    ...createQuest("parent task", "par001"),
+    worktreePath: "/repo/.pi/worktrees/par001",
+    worktreeBranch: "quest/par001",
+  };
+  const child = {
+    ...claimComplete({ ...authored(), phase: "implementing" as const }),
+    parentQid: "par001" as Qid,
+    worktreePath: "/repo/.pi/worktrees/par001",
+    worktreeBranch: "quest/par001",
+  };
+  const childTarget = implementationFingerprint(child);
+  replaceState({ ...child, lastReview: { verdict: "PASS", target: childTarget, findings: "ok" } });
+  const entries = [{ customType: SNAPSHOT_TYPE, data: encodeSnapshot(parent) }];
+  const returned = await archiveActiveQuest(pi, fakeCtx(ctx.cwd, entries), "COMPLETED", "child done");
+  check(returned.returnedToParent === "par001", "returned to parent");
+  check(!gitCommands.some((a) => a.includes("worktree") && a.includes("remove")), "did NOT remove shared worktree");
+  check(!gitCommands.some((a) => a.includes("merge") && a.includes("--squash")), "did NOT squash shared worktree");
+  replaceState(IDLE_STATE);
+});
+
 Deno.test("creation pre-creates the child scaffold and never clobbers", async () => {
   const parent = { ...authored(), phase: "implementing" as const };
   replaceState(parent);
@@ -193,7 +296,7 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
     threw = true;
   }
   check(threw, "completed without PASS rejected");
-  const claimed = claimComplete({ ...authored(), phase: "implementing" as const });
+  const claimed = claimComplete({ ...authored(), phase: "implementing" as const, touchedFiles: ["src/custom_feature.ts"] });
   const target = implementationFingerprint(claimed);
   replaceState({ ...claimed, lastReview: { verdict: "PASS", target, findings: "clean" } });
   const done = await archiveActiveQuest(pi, ctx, "COMPLETED", "shipped");
@@ -202,6 +305,7 @@ Deno.test("archive enforces PASS for completed and returns children", async () =
   check(done.kind === "standard", "kind preserved in archive result");
   check(done.difficulty === "standard", "difficulty preserved in archive result");
   check(Array.isArray(done.modifiedFiles), "modifiedFiles is array");
+  check(done.modifiedFiles.includes("src/custom_feature.ts"), "modifiedFiles includes touchedFiles");
   check(Array.isArray(done.findings), "findings is array");
   check(done.findings.includes("shipped"), "summary included in findings");
   check(getState().phase === "idle", "top-level archive clears");
@@ -334,7 +438,7 @@ Deno.test("draft creation carries refinements and blinks", async () => {
     check(file.includes("## Findings (pre-draft investigation)"), "refinements carried into scaffold");
     check(file.includes("- found a global registry"), "refinement text filed");
     check(!drafted.applied.join(" ").includes("created thin"), "no thin nudge when findings exist");
-    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [^Q]\x1b[0m`, "creation flashes bright");
+    check(calls.length === 1 && calls[0] === "\x1b[97m📝 thing\x1b[32m₃\x1b[39m₁\x1b[0m", "creation flashes bright");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
@@ -354,10 +458,9 @@ Deno.test("plan writes blink the hint", async () => {
   try {
     await applyUpdate(pi, ctx, { objective: "Thin the code." });
     await applyUpdate(pi, ctx, { draftName: "thing" });
-    const qid = getState().qid!;
     calls.length = 0;
     await applyUpdate(pi, ctx, { plan: "Do step one." });
-    check(calls.length === 1 && calls[0] === `\x1b[97m📝 ${qid} [^Q]\x1b[0m`, "plan write flashes bright");
+    check(calls.length === 1 && calls[0] === "\x1b[97m📝 thing\x1b[32m₃\x1b[39m₁\x1b[0m", "plan write flashes bright");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
@@ -558,7 +661,7 @@ Deno.test("analysis quests author the ## Analysis deliverable and refuse plans",
   }
 });
 
-Deno.test("an invalid kind and a standard-quest analysis are refused", async () => {
+Deno.test("an invalid kind is refused and a standard-quest analysis is accepted", async () => {
   replaceState(IDLE_STATE);
   const pi = fakePi();
   const ctx = fakeCtx(tmp());
@@ -568,8 +671,9 @@ Deno.test("an invalid kind and a standard-quest analysis are refused", async () 
     check(getState().qid === null, "nothing created on bogus kind");
     await applyUpdate(pi, ctx, { objective: "Build the thing." });
     await applyUpdate(pi, ctx, { draftName: "thing" });
-    const refused = await applyUpdate(pi, ctx, { analysis: "some analysis body" });
-    check(refused.error !== undefined && refused.error.includes("analysis text is for analysis quests"), "analysis refused on standard kind");
+    const accepted = await applyUpdate(pi, ctx, { analysis: "some analysis body" });
+    check(accepted.error === undefined, "analysis accepted on standard kind");
+    check(accepted.applied.includes("analysis recorded in the draft file"), "analysis recorded");
   } finally {
     stopBlink();
     replaceState(IDLE_STATE);
@@ -636,3 +740,80 @@ Deno.test("quest_update_state infers or overrides difficulty tier", async () => 
     replaceState(IDLE_STATE);
   }
 });
+
+Deno.test("formatProgressCard renders active quest telemetry", () => {
+  check(formatProgressCard(IDLE_STATE) === "", "empty card for idle state");
+
+  const quest = {
+    ...IDLE_STATE,
+    qid: "card123" as Qid,
+    phase: "implementing" as const,
+    difficulty: "major" as const,
+    rtm: [
+      { id: "R1", description: "First", status: "satisfied" as const },
+      { id: "R2", description: "Second", status: "pending" as const },
+    ],
+    touchedFiles: ["src/a.ts", "src/b.ts"],
+    lastPassingTestReceipt: { command: "npm test", exitCode: 0, tailOutput: "ok" },
+  };
+
+  const card = formatProgressCard(quest);
+  check(card.includes("[Quest card123 | implementing | major]"), "card header");
+  check(card.includes("RTM: 1/2"), "card rtm info");
+  check(card.includes("Files: 2"), "card files info");
+  check(card.includes("Tests: PASS ✓"), "card tests info");
+});
+
+Deno.test("quest_update_state plan and analysis report accurate saved-doc profile instead of 0/0 missing", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const ctx = fakeCtx(cwd);
+  try {
+    await mkdir(join(cwd, "src"), { recursive: true });
+    await writeFile(join(cwd, "src/mod.ts"), "export const x = 1;\nexport const y = 2;\n", "utf8");
+    await applyUpdate(pi, ctx, { objective: "Fix the bug in src/mod.ts", draftName: "fix-bug" });
+    const qid = getState().qid!;
+    const draftFile = join(cwd, draftPath(qid));
+    await writeFile(
+      draftFile,
+      `# ${qid}\n\n## Requirements\n- R1: Fix x in src/mod.ts:1\n- R2: Fix y in src/mod.ts:2\n\n## Evidence\n- src/mod.ts:1 — x definition\n- src/mod.ts:2 — y definition\n\n## Implementation Plan\n`,
+      "utf8",
+    );
+    const res = await applyUpdate(pi, ctx, {
+      plan: "1. Update `src/mod.ts:1` for R1.\n2. Update `src/mod.ts:2` for R2.\n3. Run `deno test`.",
+    });
+    const joined = res.applied.join("\n");
+    check(joined.includes("requirements 2, evidence 2, plan present"), `expected accurate profile in plan update, got: ${joined}`);
+    check(!joined.includes("plan missing"), "must not report plan missing after writing plan");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+
+  replaceState(IDLE_STATE);
+  const analysisCwd = tmp();
+  const analysisCtx = fakeCtx(analysisCwd);
+  try {
+    await mkdir(join(analysisCwd, "src"), { recursive: true });
+    await writeFile(join(analysisCwd, "src/mod.ts"), "export const x = 1;\nexport const y = 2;\n", "utf8");
+    await applyUpdate(pi, analysisCtx, { objective: "Analyze src/mod.ts", kind: "analysis", draftName: "analyze-mod" });
+    const qid = getState().qid!;
+    const draftFile = join(analysisCwd, draftPath(qid));
+    await writeFile(
+      draftFile,
+      `# ${qid}\n\n## Requirements\n- R1: Audit x in src/mod.ts:1\n- R2: Audit y in src/mod.ts:2\n\n## Evidence\n- src/mod.ts:1 — x definition\n- src/mod.ts:2 — y definition\n\n## Analysis\n`,
+      "utf8",
+    );
+    const res = await applyUpdate(pi, analysisCtx, {
+      analysis: "1. `src/mod.ts:1` defines x.\n2. `src/mod.ts:2` defines y.\n3. Both satisfy the invariants.",
+    });
+    const joined = res.applied.join("\n");
+    check(joined.includes("requirements 2, evidence 2, analysis present"), `expected accurate profile in analysis update, got: ${joined}`);
+    check(!joined.includes("analysis missing") && !joined.includes("plan missing"), "must not report missing deliverable after writing analysis");
+  } finally {
+    stopBlink();
+    replaceState(IDLE_STATE);
+  }
+});
+

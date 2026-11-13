@@ -3,7 +3,7 @@
 // command line ("git commit -m 'make it work'" is not a build).
 import type { SubQuestContract } from "../domain/contract";
 
-const RUNNERS_ANY = new Set(["make", "pytest", "jest", "vitest", "tsc"]);
+const RUNNERS_ANY = new Set(["make", "pytest", "jest", "vitest", "tsc", "ctest"]);
 const RUNNERS_WITH_SUBCOMMAND: Record<string, string> = {
   npm: "test",
   pnpm: "test",
@@ -12,17 +12,28 @@ const RUNNERS_WITH_SUBCOMMAND: Record<string, string> = {
   cargo: "test",
   deno: "test",
   go: "test",
+  node: "--test",
 };
-const TEST_SCRIPT_BASENAMES = new Set(["test", "test.sh"]);
-const WRAPPERS = new Set(["sudo", "time", "env", "nice", "npx", "exec", "command"]);
+const TEST_SCRIPT_BASENAMES = new Set(["test", "test.sh", "run-tests.sh", "run-test.sh", "verify.sh", "test.py", "test.js", "test.mjs"]);
+const WRAPPERS = new Set(["sudo", "time", "env", "nice", "npx", "exec", "command", "{", "}"]);
+const SCRIPT_RUNNERS = new Set(["bash", "sh", "zsh", "node", "python", "python3", "deno", "bun"]);
 
 function basename(token: string): string {
   const i = token.lastIndexOf("/");
   return i >= 0 ? token.slice(i + 1) : token;
 }
 
+function isTestScriptToken(token: string): boolean {
+  const base = basename(token);
+  if (TEST_SCRIPT_BASENAMES.has(base)) return true;
+  if (/^(?:test[-_]|run-tests?[-_]|check[-_])/i.test(base)) return true;
+  if (/\.(?:test|spec)\.[a-z0-9]+$/i.test(base) || /_test\.[a-z0-9]+$/i.test(base)) return true;
+  if (/(?:^|\/)(?:tests?|specs?)\//i.test(token) && /\.(?:sh|mjs|js|ts|py|rb|pl)$/i.test(base)) return true;
+  return false;
+}
+
 function segmentTokens(segment: string): string[] {
-  const tokens = segment.replace(/^[\s(]+/, "").split(/\s+/).filter((t) => t !== "");
+  const tokens = segment.replace(/^[\s({]+/, "").split(/\s+/).filter((t) => t !== "");
   while (tokens.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]) || WRAPPERS.has(tokens[0]))) tokens.shift();
   return tokens;
 }
@@ -36,8 +47,8 @@ function isRunnerSegment(segment: string, extra: readonly string[]): boolean {
   if (RUNNERS_ANY.has(program)) return true;
   const sub = RUNNERS_WITH_SUBCOMMAND[program];
   if (sub !== undefined && tokens.slice(1).includes(sub)) return true;
-  // "./test", "bash test.sh", "sh ./test.sh"
-  return tokens.some((t, i) => (i === 0 || program === "bash" || program === "sh") && TEST_SCRIPT_BASENAMES.has(basename(t)));
+  if ((program === "python" || program === "python3") && tokens.includes("-m") && (tokens.includes("unittest") || tokens.includes("pytest"))) return true;
+  return tokens.some((t, i) => (i === 0 || SCRIPT_RUNNERS.has(program)) && isTestScriptToken(t));
 }
 
 export function isTestCommand(

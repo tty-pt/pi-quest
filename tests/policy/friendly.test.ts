@@ -68,10 +68,10 @@ Deno.test("collectConfigWarnings: a rule shadowed by an earlier broader rule", (
   check(w.includes("never match") && w.includes("anthropic/claude-opus*"), "shadow reported");
 });
 
-Deno.test("/quest-policy: registered and reports model, policy, rule, quality tiers", async () => {
+Deno.test("/quest policy: registered under /quest and reports model, policy, rule, quality tiers", async () => {
   const pi = fakePi();
   installCommands(pi);
-  check(pi.commands.some((c) => c.name === "quest-policy"), "command registered");
+  check(pi.commands.some((c) => c.name === "quest"), "command registered");
   const cwd = mkdtempSync(join(tmpdir(), "pi-quest-policy-"));
   await mkdir(join(cwd, ".pi"), { recursive: true });
   await writeFile(join(cwd, ".pi", "settings.json"), JSON.stringify({

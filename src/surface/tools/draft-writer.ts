@@ -3,13 +3,16 @@
 // update-state.ts so that file stays under the complexity budget.
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { updateState } from "../../app/store";
+import { getState, updateState } from "../../app/store";
 import { emitNow } from "../../app/interpreter";
 import type { QuestState } from "../../domain/quest";
 import { recordPlanRevision } from "../../domain/plan-revision";
 import { draftPath } from "../../domain/paths";
+import { draftFilePath } from "../../files";
 import { bootPlanRevisionReview, clearPlanRevisionRetries } from "../../implementing/plan-revision";
 import { clearDraftReviewRetry, maybeBootDraftReview } from "../../drafting/reviews";
+import { supersedeReviewThenBootFresh } from "../../review/tracker";
+import { dedupeDocBullets } from "../../domain/dedupe";
 import { assertNoSectionHeadings, hashContent, parseDraftSections, seedReviewCount, spliceAnalysisSection, splicePlanSection } from "../../drafting/plan-text";
 import { noteDraftUpdated } from "../../durability/status";
 import type { Pi, PiCtx } from "../../hooks/events";
@@ -26,14 +29,14 @@ export async function writePlanToDraft(
   if (state.kind !== "standard") {
     throw new Error("plan text is for standard quests — author the ## Analysis via {analysis: ...} instead");
   }
-  assertNoSectionHeadings(planText, "plan");
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const cleanPlan = assertNoSectionHeadings(planText, "plan");
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
-  const updated = splicePlanSection(current, seedReviewCount(planText));
+  const updated = dedupeDocBullets(splicePlanSection(current, seedReviewCount(cleanPlan))).text;
   if (updated === current) throw new Error("plan text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
-  const next = updateState((s) => s.draft === null ? s : {
+  updateState((s) => s.draft === null ? s : {
     ...s,
     draft: { ...s.draft, planAuthored: true, contentHash: hash },
     snapshotPending: true,
@@ -41,8 +44,8 @@ export async function writePlanToDraft(
   emitNow(pi);
   noteDraftUpdated(ctx);
   clearDraftReviewRetry(state.qid);
-  void maybeBootDraftReview(pi, ctx);
-  return next;
+  await maybeBootDraftReview(pi, ctx);
+  return getState();
 }
 
 export async function writeAnalysisToDraft(
@@ -54,17 +57,14 @@ export async function writeAnalysisToDraft(
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) {
     throw new Error(`analysis text needs an active draft (phase ${state.phase}); the analysis is drafting-only`);
   }
-  if (state.kind !== "analysis") {
-    throw new Error("analysis text is for analysis quests — author the ## Implementation Plan via {plan: ...} instead");
-  }
-  assertNoSectionHeadings(analysisText, "analysis");
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const cleanAnalysis = assertNoSectionHeadings(analysisText, "analysis");
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
-  const updated = spliceAnalysisSection(current, seedReviewCount(analysisText));
+  const updated = dedupeDocBullets(spliceAnalysisSection(current, seedReviewCount(cleanAnalysis))).text;
   if (updated === current) throw new Error("analysis text identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
-  const next = updateState((s) => s.draft === null ? s : {
+  updateState((s) => s.draft === null ? s : {
     ...s,
     draft: { ...s.draft, planAuthored: true, contentHash: hash },
     snapshotPending: true,
@@ -72,8 +72,8 @@ export async function writeAnalysisToDraft(
   emitNow(pi);
   noteDraftUpdated(ctx);
   clearDraftReviewRetry(state.qid);
-  void maybeBootDraftReview(pi, ctx);
-  return next;
+  await maybeBootDraftReview(pi, ctx);
+  return getState();
 }
 
 // Mid-implementation plan revision: the objective is immutable here — a new
@@ -96,31 +96,47 @@ export async function writePlanRevision(
       throw new Error("plan revision keeps the quest objective — a new goal is a scope change, start a new quest");
     }
   }
-  assertNoSectionHeadings(planText, "plan");
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const cleanRevision = assertNoSectionHeadings(planText, "plan");
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
   const previousPlan = parseDraftSections(current).plan;
-  const updated = splicePlanSection(current, seedReviewCount(planText));
+  const updated = dedupeDocBullets(splicePlanSection(current, seedReviewCount(cleanRevision))).text;
   if (updated === current) throw new Error("plan revision identical to the draft file");
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
+  const stagedPlan = parseDraftSections(updated).plan;
   const previousHash = state.draft.contentHash;
-  const next = updateState((s) => recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan));
+  const qid = state.qid;
+  const next = updateState((s) =>
+    recordPlanRevision(s, previousHash, hash, note === "" ? "plan revision" : note, previousPlan, Date.now(), stagedPlan)
+  );
   emitNow(pi);
   noteDraftUpdated(ctx);
-  clearPlanRevisionRetries(state.qid);
-  void bootPlanRevisionReview(pi, ctx, hash);
+  clearPlanRevisionRetries(qid);
+  supersedeReviewThenBootFresh(qid, hash, (signal) => {
+    updateState((s) =>
+      s.qid === qid
+        ? {
+            ...s,
+            activeReview: { kind: "draft", target: hash },
+            exactNextAction: `Review running for quest ${qid} — end your turn; the verdict arrives as a new turn.`,
+            snapshotPending: true,
+          }
+        : s
+    );
+    void bootPlanRevisionReview(pi, ctx, hash, undefined, signal);
+  });
   return next;
 }
 
 export async function carryRefinementsToDraft(ctx: PiCtx, state: QuestState): Promise<QuestState> {
   if (state.phase !== "drafting" || state.draft === null || state.qid === null) return state;
   if (state.refinements.length === 0) return state;
-  const path = join(ctx.cwd, draftPath(state.qid));
+  const path = draftFilePath(ctx.cwd, state.qid);
   const current = await readFile(path, "utf8");
   const items = state.refinements.map((refinement) => `- ${refinement}`).join("\n");
   const body = current.endsWith("\n") ? current : `${current}\n`;
-  const updated = `${body}\n## Findings (pre-draft investigation)\n\n${items}\n`;
+  const updated = dedupeDocBullets(`${body}\n## Findings (pre-draft investigation)\n\n${items}\n`).text;
   await writeFile(path, updated, "utf8");
   const hash = hashContent(updated);
   return updateState((s) => s.draft === null ? s : {

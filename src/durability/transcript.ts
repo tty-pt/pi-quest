@@ -3,7 +3,7 @@
 // current session plus child-research sibling sessions, tail-bounded and
 // truncation-marked so the validator never faces the full transcript.
 import { homedir } from "node:os";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { PiCtx, TranscriptEntry } from "../hooks/events";
 import { decodeSnapshot, SNAPSHOT_TYPE } from "./snapshots";
@@ -92,9 +92,25 @@ async function sessionFiles(sessionsDir: string): Promise<Array<{ path: string; 
   return files.slice(0, SCAN_FILES);
 }
 
+const SCAN_TAIL_BYTES = 512 * 1024;
+
 async function tailLines(path: string): Promise<string[]> {
-  const text = await readFile(path, "utf8");
-  return text.split("\n").filter((line) => line.trim() !== "").slice(-SCAN_TAIL_LINES);
+  const fh = await open(path, "r");
+  try {
+    const info = await fh.stat();
+    const size = info.size;
+    if (size === 0) return [];
+    const readLen = Math.min(size, SCAN_TAIL_BYTES);
+    const offset = size - readLen;
+    const buf = new Uint8Array(readLen);
+    const { bytesRead } = await fh.read(buf, 0, readLen, offset);
+    const text = new TextDecoder("utf-8").decode(buf.subarray(0, bytesRead));
+    const lines = text.split("\n");
+    if (offset > 0 && lines.length > 0) lines.shift();
+    return lines.filter((line) => line.trim() !== "").slice(-SCAN_TAIL_LINES);
+  } finally {
+    await fh.close();
+  }
 }
 
 function parseLine(line: string): Array<Record<string, unknown>> | null {
@@ -224,5 +240,64 @@ export function extractRecentConversationContext(
     return `... [earlier conversation omitted] ...\n\n${joined.slice(-maxChars)}`;
   } catch {
     return "";
+  }
+}
+
+const REFERENTIAL_ACTIVATION_RE =
+  /^(?:go(?:\s+for\s+it|\s+ahead)?|do\s+it|let'?s\s+(?:do\s+it|go|build\s+it)|proceed|ship\s+it|implement(?:\s+(?:it|this|that|the\s+plan))?|execute(?:\s+(?:it|this|that|the\s+plan))?|start(?:\s+quest)?|for\s+it|yes|ok|okay)[.!?\s]*$/i;
+
+export function isReferentialActivationObjective(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed === "") return true;
+  return REFERENTIAL_ACTIVATION_RE.test(trimmed);
+}
+
+export function extractPriorConversationObjective(
+  ctx: PiCtx,
+  rawObjective = "",
+): string {
+  const trimmed = rawObjective.trim();
+  const referential = isReferentialActivationObjective(trimmed);
+  if (!referential && trimmed.length >= 25) return trimmed;
+  try {
+    if (!ctx || !ctx.sessionManager || typeof ctx.sessionManager.getEntries !== "function") {
+      return trimmed;
+    }
+    const entries = ctx.sessionManager.getEntries();
+    if (!Array.isArray(entries) || entries.length === 0) return trimmed;
+    const userMessages: string[] = [];
+    let lastAssistant = "";
+    for (let i = entries.length - 1; i >= 0 && userMessages.length < 4; i--) {
+      const entry = entries[i];
+      if (!entry) continue;
+      const text = messageText(entry["data"] ?? entry);
+      if (!text) continue;
+      if (text.startsWith("[assistant] ") && lastAssistant === "") {
+        lastAssistant = text.slice("[assistant] ".length).trim();
+      } else if (text.startsWith("[user] ")) {
+        const body = text.slice("[user] ".length).trim();
+        if (
+          body.length > 0 &&
+          !body.startsWith("/") &&
+          body !== trimmed &&
+          !isReferentialActivationObjective(body) &&
+          !REFERENTIAL_ACTIVATION_RE.test(body.replace(/^(?:quest|fix|feat|refactor|chore|@quest)[:\-\s]+/i, "").trim())
+        ) {
+          userMessages.unshift(body);
+        }
+      }
+    }
+    if (userMessages.length === 0 && lastAssistant === "") return trimmed;
+    const primaryUserGoal = userMessages[userMessages.length - 1] ?? "";
+    if (!referential && trimmed !== "") {
+      return primaryUserGoal ? `${trimmed} — Context: ${primaryUserGoal.slice(0, 300)}` : trimmed;
+    }
+    if (primaryUserGoal !== "") {
+      return primaryUserGoal.slice(0, 500);
+    }
+    const firstLine = lastAssistant.split("\n").find((l) => l.trim().length > 10)?.trim() ?? "";
+    return firstLine.slice(0, 400) || trimmed;
+  } catch {
+    return trimmed;
   }
 }

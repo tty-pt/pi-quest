@@ -6,15 +6,19 @@ import { createQuest } from "../domain/quest";
 import { nextQid } from "../domain/qid";
 import { ensureDraftFile, listKnownQids } from "../files";
 import { fetchActiveInvariants, formatInvariantsComment } from "../surface/invariants";
-import { extractRecentConversationContext } from "../durability/transcript";
+import {
+  extractPriorConversationObjective,
+  extractRecentConversationContext,
+  isReferentialActivationObjective,
+} from "../durability/transcript";
 import type { Pi, PiCtx } from "../hooks/events";
 import { onUserMessage } from "../hooks/events";
-import { parseExplicitSyntax } from "../domain/intent";
+import { isFallbackAdvance, normalizeSteeringText, parseExplicitSyntax } from "../domain/intent";
 import { readQuestConfig, type QuestConfig, DEFAULT_TRIGGER_PREFIXES } from "../config";
-import { evaluateQuestIntent, evaluateQuestKind } from "./judge";
+import { evaluateQuestIntent, evaluateQuestKind, detectTaskHeuristic } from "./judge";
 import { evaluateQuestDifficulty } from "./difficulty";
 import { checkPostQuestReversions, checkPostQuestCorrection } from "../durability/ratings";
-import { getGitHead } from "../utils/git";
+import { getGitHead, retainSlotLease } from "../utils/git";
 
 export function matchTriggerPrefix(
   text: string,
@@ -45,83 +49,104 @@ export function isQuestLikeRequest(text: string): boolean {
   return QUEST_HEADER_PATTERN.test(text.trim());
 }
 
+export async function openDetectedQuest(
+  pi: Pi,
+  ctx: PiCtx,
+  rawObjective: string,
+  cfg: QuestConfig,
+  triggerPrefix?: string,
+): Promise<void> {
+  const prev = getState();
+  const retainedWtPath = prev.worktreePath;
+  const retainedWtBranch = prev.worktreeBranch;
+  const context = extractRecentConversationContext(ctx, 8, 4000);
+  const objective = isReferentialActivationObjective(rawObjective)
+    ? (extractPriorConversationObjective(ctx, rawObjective) || rawObjective)
+    : rawObjective;
+  const [diff, kind, baseCommit] = await Promise.all([
+    evaluateQuestDifficulty(objective, cfg),
+    evaluateQuestKind(objective, cfg),
+    getGitHead(retainedWtPath || ctx.cwd, pi),
+  ]);
+  const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
+  const initial = createQuest(objective, qid, null, diff.difficulty, kind, baseCommit);
+  if (retainedWtPath) {
+    const wtBranch = retainedWtBranch || `${cfg.gitWorkflow?.featureBranchPrefix || "quest/"}${qid}`;
+    retainSlotLease(retainedWtPath, wtBranch, qid);
+    replaceState({ ...initial, worktreePath: retainedWtPath, worktreeBranch: wtBranch });
+  } else {
+    replaceState(initial);
+  }
+  const invariants = await fetchActiveInvariants(ctx.cwd);
+  await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty, formatInvariantsComment(invariants));
+  emitNow(pi);
+  const complexHint = diff.difficulty === "complex"
+    ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
+    : "";
+  const sourceText = triggerPrefix ? `via trigger '${triggerPrefix}'` : "as provisional";
+  const slotHint = retainedWtPath ? ` in retained worktree ${retainedWtPath} (${retainedWtBranch ?? `quest/${qid}`})` : "";
+  const fastTrackHint = context.trim().length > 0
+    ? " Prior conversation context is already captured in the draft scaffold — if the approach was already discussed with the operator, you may immediately author the ## Requirements, ## Evidence, and ## Implementation Plan in .pi/quest/future/" +
+      `${qid}.md (or pass {draftName, plan: ...} to quest_update_state in a single call) to boot the draft reviewer right away.`
+    : "";
+  sendSteer(
+    pi,
+    `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened ${sourceText}${slotHint}: "${objective.slice(0, 200)}". Flow: (1) investigate root cause & architecture deeply (proportional to difficulty), record findings via quest_update_state; ` +
+      `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
+      `(3) author that file's ## Analysis via quest_update_state {analysis: ...} and/or ## Implementation Plan via quest_update_state {plan: ...}; ` +
+      `(4) the draft reviewer validates the deliverable against requirements and evidence.${complexHint}${fastTrackHint} (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
+  );
+}
+
 export async function detectSubstantiveRequest(
   pi: Pi,
   ctx: PiCtx,
   text: string,
   config?: QuestConfig,
 ): Promise<boolean> {
+  if (getState().disabled === true) return false;
   if (getState().qid !== null) return false;
   const trimmed = text.trim();
   if (trimmed.startsWith("/")) return false;
 
   const cfg = config ?? await readQuestConfig(ctx.cwd);
 
-  // 1. Explicit deterministic trigger word families (fast & unambiguous)
   const trigger = matchTriggerPrefix(trimmed, cfg.triggerPrefixes);
   if (trigger.matched) {
-    const objective = trigger.objective;
-    const [diff, kind, baseCommit] = await Promise.all([
-      evaluateQuestDifficulty(objective, cfg),
-      evaluateQuestKind(objective, cfg),
-      getGitHead(ctx.cwd, pi),
-    ]);
-    const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-    replaceState(createQuest(objective, qid, null, diff.difficulty, kind, baseCommit));
-    const context = extractRecentConversationContext(ctx);
-    const invariants = await fetchActiveInvariants(ctx.cwd);
-    await ensureDraftFile(ctx, qid, qid, objective, context, diff.difficulty, formatInvariantsComment(invariants));
-    emitNow(pi);
-    const complexHint = diff.difficulty === "complex"
-      ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
-      : "";
-    sendSteer(
-      pi,
-      `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened via trigger '${trigger.prefix}': "${objective.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
-        `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
-        `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly.${complexHint} During drafting the quest doc is the only writable file; during implementing and validating it is locked — revise the plan via quest_update_state {planRevision: ...} (peer-reviewed) and claim completion via quest_update_state {claimComplete: true}. (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
-    );
+    await openDetectedQuest(pi, ctx, trigger.objective, cfg, trigger.prefix);
     return true;
   }
 
-  // Explicit chat sigils ("? ", !chat) are never new quests.
   const explicit = parseExplicitSyntax(trimmed);
   if (explicit !== null && explicit.kind === "chat") return false;
 
-  // The judge decides (any language); structural header check is the judge-less fallback.
+  const norm = normalizeSteeringText(trimmed);
+  if (
+    isFallbackAdvance(trimmed, cfg.steeringPhrases) ||
+    norm === "go on" || norm === "continue" || norm === "keep going" || norm === "carry on" ||
+    norm === "tell me more" || norm === "what else" || norm === "continua" || norm === "prossegue"
+  ) {
+    return false;
+  }
+
   let isQuest = isQuestLikeRequest(trimmed);
   if (!isQuest) {
     const decision = await evaluateQuestIntent(trimmed, cfg, ctx);
     isQuest = decision.isQuest;
+    if (!isQuest && decision.degraded) {
+      isQuest = detectTaskHeuristic(trimmed);
+    }
   }
 
   if (!isQuest) return false;
 
-  const [diff, kind, baseCommit] = await Promise.all([
-    evaluateQuestDifficulty(trimmed, cfg),
-    evaluateQuestKind(trimmed, cfg),
-    getGitHead(ctx.cwd, pi),
-  ]);
-  const qid = nextQid(Date.now() / 1000, await listKnownQids(ctx.cwd));
-  replaceState(createQuest(trimmed, qid, null, diff.difficulty, kind, baseCommit));
-  const context = extractRecentConversationContext(ctx);
-  const invariants = await fetchActiveInvariants(ctx.cwd);
-  await ensureDraftFile(ctx, qid, qid, trimmed, context, diff.difficulty, formatInvariantsComment(invariants));
-  emitNow(pi);
-  const complexHint = diff.difficulty === "complex"
-    ? " For complex tasks, decompose work into bounded sub-quests in ## Sub-Quests (e.g. - [ ] SQ1: Phase goal [paths: ...] [tests: ...])."
-    : "";
-  sendSteer(
-    pi,
-    `New quest ${qid} (kind: ${kind}, difficulty: ${diff.difficulty}) opened as provisional: "${trimmed.slice(0, 200)}". Flow: (1) investigate, record findings via quest_update_state; ` +
-      `(2) create the draft via quest_update_state {draftName} — the scaffold is already at .pi/quest/future/${qid}.md, no need to create directories; ` +
-      `(3) author that file's ## Implementation Plan via quest_update_state {plan: ...} (preferred) or by editing it directly.${complexHint} During drafting the quest doc is the only writable file; during implementing and validating it is locked — revise the plan via quest_update_state {planRevision: ...} (peer-reviewed) and claim completion via quest_update_state {claimComplete: true}. (Hint: the operator can reply "go" or "proceed" at any point to skip plan review and start coding immediately).`,
-  );
+  await openDetectedQuest(pi, ctx, trimmed, cfg);
   return true;
 }
 
 export function watchNewRequests(pi: Pi): void {
   onUserMessage(pi, async (text, ctx) => {
+    if (getState().disabled === true) return;
     try {
       await checkPostQuestReversions(ctx.cwd, async (args) => {
         return (await pi.exec("git", args, { cwd: ctx.cwd })) as

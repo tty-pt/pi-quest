@@ -64,7 +64,7 @@ async function runPassVerdict(evidence: boolean): Promise<{ phase: string; steer
   const drafting = createDraft(createQuest("work", QID), "work");
   replaceState({ ...drafting, draft: { ...drafting.draft!, planAuthored: true } });
   const pi = busPi();
-  const pending = bootDraftReview(pi, fakeCtx(cwd), target, DEFAULT_CONFIG);
+  const pending = bootDraftReview(pi, fakeCtx(cwd), target, { ...DEFAULT_CONFIG, approvalGate: false });
   await new Promise((r) => setTimeout(r, 50));
   const request = pi.emitted.find((e) => e.event === "prompt-template:subagent:request");
   check(request !== undefined, "review launched");
@@ -101,7 +101,7 @@ Deno.test("review PASS attaches advisories to the promotion wake", async () => {
   const drafting = createDraft(createQuest("work", QID), "work");
   replaceState({ ...drafting, draft: { ...drafting.draft!, planAuthored: true } });
   const pi = busPi();
-  const pending = bootDraftReview(pi, fakeCtx(cwd), target, DEFAULT_CONFIG);
+  const pending = bootDraftReview(pi, fakeCtx(cwd), target, { ...DEFAULT_CONFIG, approvalGate: false });
   try {
     await new Promise((r) => setTimeout(r, 50));
     const request = pi.emitted.find((e) => e.event === "prompt-template:subagent:request");
