@@ -152,3 +152,34 @@ Deno.test("versions: MIN_ENGINE_VERSIONS satisfies all REQUIRED_ENGINE_FEATURES 
     );
   }
 });
+
+Deno.test("versions: detectComponentVersion resolves node_modules/@tty-pt/* without system libs", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "npm-ver-test-"));
+  try {
+    const cormDir = join(tmp, "node_modules", "@tty-pt", "corm");
+    const jointDir = join(tmp, "node_modules", "@tty-pt", "joint");
+    Deno.mkdirSync(cormDir, { recursive: true });
+    Deno.mkdirSync(jointDir, { recursive: true });
+
+    // 1. Package with bundled .pc file
+    writeFileSync(join(cormDir, "corm.pc"), "Name: corm\nVersion: 2.4.0\n");
+    // 2. Package with package.json only
+    writeFileSync(join(jointDir, "package.json"), JSON.stringify({ name: "@tty-pt/joint", version: "1.8.0" }));
+
+    const cormRep = detectComponentVersion("libcorm", { cwd: tmp, home: tmp, includeDefaultDirs: false })!;
+    check(cormRep.installed === true, "libcorm detected via node_modules .pc");
+    check(cormRep.version === "2.4.0", "libcorm version 2.4.0");
+    check(cormRep.status === "satisfied", "libcorm satisfied");
+
+    const jointRep = detectComponentVersion("libjoint", { cwd: tmp, home: tmp, includeDefaultDirs: false })!;
+    check(jointRep.installed === true, "libjoint detected via node_modules package.json");
+    check(jointRep.version === "1.8.0", "libjoint version 1.8.0");
+    check(jointRep.status === "satisfied", "libjoint satisfied");
+    check(jointRep.source === "npm", "libjoint source is npm");
+
+    const missingRep = detectComponentVersion("liblemma", { cwd: tmp, home: tmp, includeDefaultDirs: false })!;
+    check(missingRep.installed === false && missingRep.status === "missing", "uninstalled liblemma is missing when includeDefaultDirs=false");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

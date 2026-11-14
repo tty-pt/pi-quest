@@ -7,9 +7,11 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { createRequire } from "node:module";
+import { join, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 export type EngineName =
   | "axil"
@@ -78,7 +80,15 @@ const PC_ALIASES: Record<EngineName, string[]> = {
   "axil-auren": ["auren.pc", "axil-auren.pc", "libaxil-auren.pc"],
 };
 
-export type VersionSource = "pkgconfig" | "git" | "daemon" | "fallback";
+const NPM_SHORT_NAMES: Partial<Record<EngineName, string>> = {
+  libcorm: "corm",
+  libsepal: "sepal",
+  liblemma: "lemma",
+  libjoint: "joint",
+  libislet: "islet",
+};
+
+export type VersionSource = "pkgconfig" | "npm" | "git" | "daemon" | "fallback";
 export type VersionStatus = "satisfied" | "outdated" | "missing";
 
 export interface ComponentVersionReport {
@@ -95,6 +105,7 @@ export interface VersionDetectOptions {
   cwd?: string;
   home?: string;
   searchDirs?: string[];
+  includeDefaultDirs?: boolean;
 }
 
 /**
@@ -237,6 +248,61 @@ function findGitVersion(comp: EngineName, cwd: string, home: string): { path: st
   return null;
 }
 
+function findNpmPackageDirs(comp: EngineName, cwd: string, includeModuleRelative = true): string[] {
+  const short = NPM_SHORT_NAMES[comp];
+  if (!short) return [];
+  const dirs: string[] = [];
+  const add = (d: string) => {
+    if (d && !dirs.includes(d) && existsSync(d)) dirs.push(d);
+  };
+
+  let curr = cwd;
+  for (let i = 0; i < 4; i++) {
+    add(join(curr, "node_modules", "@tty-pt", short));
+    const parent = dirname(curr);
+    if (!parent || parent === curr) break;
+    curr = parent;
+  }
+
+  if (includeModuleRelative) {
+    try {
+      const req = createRequire(import.meta.url);
+      const pkgJson = req.resolve(`@tty-pt/${short}/package.json`);
+      add(dirname(pkgJson));
+    } catch {
+      // ignore
+    }
+    try {
+      const here = dirname(fileURLToPath(import.meta.url));
+      add(resolve(here, "..", "node_modules", "@tty-pt", short));
+      add(resolve(here, "..", "..", short));
+      add(resolve(here, "..", "..", "node_modules", "@tty-pt", short));
+      add(resolve(here, "..", "..", "..", "node_modules", "@tty-pt", short));
+      add(resolve(here, "..", "..", "..", "..", "node_modules", "@tty-pt", short));
+    } catch {
+      // ignore
+    }
+  }
+
+  return dirs;
+}
+
+function findNpmPackageJsonVersion(dirs: string[]): { path: string; version: string } | null {
+  for (const dir of dirs) {
+    const pkgJsonPath = join(dir, "package.json");
+    if (!existsSync(pkgJsonPath)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(pkgJsonPath, "utf8")) as { version?: unknown };
+      if (typeof parsed.version === "string" && parsed.version.trim() !== "") {
+        return { path: pkgJsonPath, version: parsed.version.trim() };
+      }
+    } catch {
+      // ignore unreadable package.json
+    }
+  }
+  return null;
+}
+
 /**
  * Portable detection of a specific engine component's installed version.
  */
@@ -246,21 +312,28 @@ export function detectComponentVersion(
 ): ComponentVersionReport | null {
   const cwd = opts.cwd ?? (typeof process !== "undefined" ? process.cwd() : ".");
   const home = opts.home ?? homedir();
-  const repoRoot = findRepoRoot(cwd);
+  const includeDefaults = opts.includeDefaultDirs !== false;
+  const repoRoot = includeDefaults ? findRepoRoot(cwd) : null;
+  const npmDirs = findNpmPackageDirs(name, cwd, includeDefaults);
   const searchDirs = [
     ...(opts.searchDirs ?? []),
-    join(home, ".local", "lib", "pkgconfig"),
-    join(cwd, "external", name),
-    join(cwd, "external", name.replace(/^lib/, "")),
-    ...(repoRoot ? [join(repoRoot, "external", name), join(repoRoot, "external", name.replace(/^lib/, ""))] : []),
-    join(home, name),
-    ...DEFAULT_PC_DIRS,
+    ...npmDirs,
+    ...(includeDefaults
+      ? [
+          join(home, ".local", "lib", "pkgconfig"),
+          join(cwd, "external", name),
+          join(cwd, "external", name.replace(/^lib/, "")),
+          ...(repoRoot ? [join(repoRoot, "external", name), join(repoRoot, "external", name.replace(/^lib/, ""))] : []),
+          join(home, name),
+          ...DEFAULT_PC_DIRS,
+        ]
+      : []),
   ];
 
   const minRequired = MIN_ENGINE_VERSIONS[name];
   const aliases = PC_ALIASES[name] ?? [`${name}.pc`];
 
-  // 1. Check direct .pc files
+  // 1. Check direct .pc files (including bundled .pc inside node_modules/@tty-pt/*)
   const pc = findPcFile(aliases, searchDirs);
   if (pc) {
     const status = satisfiesMinVersion(pc.version, minRequired) ? "satisfied" : "outdated";
@@ -275,19 +348,36 @@ export function detectComponentVersion(
     };
   }
 
-  // 2. Check git checkouts in workspace or HOME
-  const git = findGitVersion(name, cwd, home);
-  if (git) {
-    const status = satisfiesMinVersion(git.version, minRequired) ? "satisfied" : "outdated";
+  // 2. Check package.json inside node_modules/@tty-pt/*
+  const npmPkg = findNpmPackageJsonVersion(npmDirs);
+  if (npmPkg) {
+    const status = satisfiesMinVersion(npmPkg.version, minRequired) ? "satisfied" : "outdated";
     return {
       name,
       installed: true,
-      version: git.version,
+      version: npmPkg.version,
       minRequired,
       status,
-      source: "git",
-      path: git.path,
+      source: "npm",
+      path: npmPkg.path,
     };
+  }
+
+  // 3. Check git checkouts in workspace or HOME
+  if (includeDefaults) {
+    const git = findGitVersion(name, cwd, home);
+    if (git) {
+      const status = satisfiesMinVersion(git.version, minRequired) ? "satisfied" : "outdated";
+      return {
+        name,
+        installed: true,
+        version: git.version,
+        minRequired,
+        status,
+        source: "git",
+        path: git.path,
+      };
+    }
   }
 
   return {
@@ -344,3 +434,4 @@ export function formatRemediationToast(report: ComponentVersionReport): string {
   }
   return `${report.name} is not installed (requires >= ${report.minRequired}). See: ${guide}`;
 }
+

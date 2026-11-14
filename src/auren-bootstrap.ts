@@ -13,10 +13,12 @@
  */
 import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync, openSync, closeSync } from "node:fs";
-import { join, dirname, delimiter } from "node:path";
+import { createRequire } from "node:module";
+import { join, dirname, delimiter, resolve } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 export const DEFAULT_AUREN_PORT = 4242;
 export const DEFAULT_AUREN_URL = `http://127.0.0.1:${DEFAULT_AUREN_PORT}`;
@@ -455,17 +457,71 @@ export function findAurenServer(cwd: string = process.cwd()): string | null {
   return l ? l.command : null;
 }
 
-export function findSepalLib(cwd: string = process.cwd()): string | null {
+export function findSepalLib(cwd: string = process.cwd(), includeDefaultDirs = true): string | null {
   const envLib = typeof process !== "undefined" ? process.env?.["SEPAL_LIB"] : undefined;
   if (envLib && existsSync(envLib)) return envLib;
-  const candidates = [
-    join(cwd, "external", "libsepal", "lib", "libsepal.so"),
-    join(homedir(), ".local", "lib", "libsepal.so"),
-    "/usr/local/lib/libsepal.so",
-    "/usr/lib/libsepal.so",
-    "/lib/libsepal.so",
-    "/usr/lib/x86_64-linux-gnu/libsepal.so",
-  ];
+
+  const exts = [".so", ".dylib", ".dll"];
+  const keys = typeof process !== "undefined"
+    ? (process.platform === "linux" ? [`${process.platform}-${process.arch}-musl`, `${process.platform}-${process.arch}`] : [`${process.platform}-${process.arch}`])
+    : ["linux-x64"];
+
+  const pkgRoots: string[] = [];
+  const addRoot = (r: string) => {
+    if (r && !pkgRoots.includes(r)) pkgRoots.push(r);
+  };
+  let curr = cwd;
+  for (let i = 0; i < 4; i++) {
+    addRoot(join(curr, "node_modules", "@tty-pt", "sepal"));
+    const parent = dirname(curr);
+    if (!parent || parent === curr) break;
+    curr = parent;
+  }
+  if (includeDefaultDirs) {
+    try {
+      const req = createRequire(import.meta.url);
+      addRoot(dirname(req.resolve("@tty-pt/sepal/package.json")));
+    } catch {
+      // ignore
+    }
+    try {
+      const here = dirname(fileURLToPath(import.meta.url));
+      addRoot(resolve(here, "..", "node_modules", "@tty-pt", "sepal"));
+      addRoot(resolve(here, "..", "..", "sepal"));
+      addRoot(resolve(here, "..", "..", "node_modules", "@tty-pt", "sepal"));
+      addRoot(resolve(here, "..", "..", "..", "node_modules", "@tty-pt", "sepal"));
+      addRoot(resolve(here, "..", "..", "..", "..", "node_modules", "@tty-pt", "sepal"));
+    } catch {
+      // ignore
+    }
+  }
+
+  const candidates: string[] = [];
+  for (const ext of exts) {
+    candidates.push(join(cwd, "external", "libsepal", "lib", `libsepal${ext}`));
+  }
+  for (const root of pkgRoots) {
+    for (const key of keys) {
+      for (const ext of exts) {
+        candidates.push(join(root, "prebuilds", key, `libsepal${ext}`));
+      }
+    }
+    for (const ext of exts) {
+      candidates.push(join(root, "build", "Release", `libsepal${ext}`));
+      candidates.push(join(root, "lib", `libsepal${ext}`));
+    }
+  }
+  if (includeDefaultDirs) {
+    for (const ext of exts) {
+      candidates.push(
+        join(homedir(), ".local", "lib", `libsepal${ext}`),
+        `/usr/local/lib/libsepal${ext}`,
+        `/usr/lib/libsepal${ext}`,
+        `/lib/libsepal${ext}`,
+        `/usr/lib/x86_64-linux-gnu/libsepal${ext}`,
+      );
+    }
+  }
   for (const c of candidates) if (existsSync(c)) return c;
   return null;
 }
