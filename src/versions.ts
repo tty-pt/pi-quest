@@ -11,15 +11,51 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 
-export type EngineName = "axil" | "libcorm" | "libsepal" | "liblemma" | "libjoint" | "axil-auren";
+export type EngineName =
+  | "axil"
+  | "libcorm"
+  | "libsepal"
+  | "liblemma"
+  | "libjoint"
+  | "libislet"
+  | "axil-auren";
+
+export interface EngineFeatureFloor {
+  engine: EngineName;
+  feature: string;
+  minVersion: string;
+}
+
+export const REQUIRED_ENGINE_FEATURES: readonly EngineFeatureFloor[] = [
+  // libcorm
+  { engine: "libcorm", feature: "LIST / GET / PUT / DEL / DEL_ALL / QUERY / RECONCILE CLI & cormd TCP/UDS protocol", minVersion: "2.0.0" },
+  { engine: "libcorm", feature: "HTOK v4 native binary packing (corm_htok_pack / corm_htok_unpack), PUT_JSON, GET_JSON", minVersion: "2.2.0" },
+  // libsepal
+  { engine: "libsepal", feature: "HNSW / sketch hybrid approximate vector index & recall axis plugin", minVersion: "1.0.0" },
+  { engine: "libsepal", feature: "rec_axis_store_typed for HTOK v4 binary vector embedding ingestion", minVersion: "1.2.0" },
+  // liblemma
+  { engine: "liblemma", feature: "Lexical inverted index & recall axis plugin", minVersion: "1.0.0" },
+  { engine: "liblemma", feature: "3-gram index, lemma_tok_encode/decode, and rec_axis_store_typed for HTOK v4", minVersion: "1.1.0" },
+  // libjoint
+  { engine: "libjoint", feature: "Interval tree temporal axis plugin (rec_axis_fill_interval)", minVersion: "1.0.0" },
+  { engine: "libjoint", feature: "rec_axis_store_typed for HTOK v4 temporal interval ingestion", minVersion: "1.5.0" },
+  // libislet
+  { engine: "libislet", feature: "Morton Z-order 2D/3D spatial index & cormr.h recall axis plugin (rec_axis_fill_bbox_2)", minVersion: "1.2.0" },
+  // axil
+  { engine: "axil", feature: "Browser axil-bridge.js, WebSocket/HTTP transport & /api/v1 proxy endpoints", minVersion: "1.6.0" },
+  // axil-auren
+  { engine: "axil-auren", feature: "POST /v1/embeddings (128D) & /v1/rerank HTTP endpoints", minVersion: "1.3.0" },
+  { engine: "axil-auren", feature: "Unified non-generative POST /v1/systemone & /api/v1/systemone/ (choice gating, exemplars, Jev)", minVersion: "1.4.0" },
+];
 
 export const MIN_ENGINE_VERSIONS: Record<EngineName, string> = {
   axil: "1.6.0",
-  libcorm: "2.0.0",
+  libcorm: "2.2.0",
   libsepal: "1.2.0",
   liblemma: "1.1.0",
   libjoint: "1.5.0",
-  "axil-auren": "1.3.0",
+  libislet: "1.2.0",
+  "axil-auren": "1.4.0",
 };
 
 export const DOCS_ENGINE_GUIDES: Record<EngineName, string> = {
@@ -28,6 +64,7 @@ export const DOCS_ENGINE_GUIDES: Record<EngineName, string> = {
   libsepal: "https://github.com/tty-pt/libsepal#installation--build",
   liblemma: "https://github.com/tty-pt/liblemma#installation--build",
   libjoint: "https://github.com/tty-pt/libjoint#installation--build",
+  libislet: "https://github.com/tty-pt/libislet#installation--build",
   "axil-auren": "https://github.com/tty-pt/axil-auren#installation--build",
 };
 
@@ -37,6 +74,7 @@ const PC_ALIASES: Record<EngineName, string[]> = {
   libsepal: ["sepal.pc", "sepallib.pc", "libsepal.pc"],
   liblemma: ["lemma.pc", "liblemma.pc"],
   libjoint: ["joint.pc", "libjoint.pc"],
+  libislet: ["islet.pc", "libislet.pc"],
   "axil-auren": ["auren.pc", "axil-auren.pc", "libaxil-auren.pc"],
 };
 
@@ -306,4 +344,3 @@ export function formatRemediationToast(report: ComponentVersionReport): string {
   }
   return `${report.name} is not installed (requires >= ${report.minRequired}). See: ${guide}`;
 }
-
