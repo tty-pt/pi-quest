@@ -5,7 +5,11 @@ All notable changes to the `pi-quest` extension are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] (target: v1.12.0)
+## [1.12.0] - 2026-11-14
+
+### Added
+- **Standalone `@tty-pt/*` Native Engine Resolution (`package.json`, `src/auren-bootstrap.ts`, `src/versions.ts`)**:
+  - Added `@tty-pt/{stele,corm,joint,lemma,sepal,islet}` dependencies to `package.json` and updated `findSepalLib()` and `detectComponentVersion()` to resolve `node_modules/@tty-pt/*` prebuilds without requiring system-installed C libraries.
 
 ### Changed
 - **Unified `/quest` Command Surface, `Alt+J` Shortcut & Default Disabled Mode** (`src/surface/commands/index.ts`, `src/surface/commands/quest.ts`, `src/config/defaults.ts`, `src/durability/status.ts`):
