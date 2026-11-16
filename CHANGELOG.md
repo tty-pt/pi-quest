@@ -376,10 +376,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.0] - 2026-10-26
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/tty-pt/pi-quest/main/cover.png" alt="pi-quest cover banner" width="100%">
-</p>
-
 ### Added
 - **Configurable Review Policies (`src/config.ts`, `src/drafting/reviews.ts`, `src/validation/flow.ts`, `src/implementing/plan-revision.ts`)**:
   - Added `reviewPolicy`: `"strict" | "balanced" | "off"` (default `"strict"`), configurable in `.pi/settings.json` or via `PI_QUEST_REVIEW_POLICY`.
