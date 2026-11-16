@@ -109,7 +109,7 @@ Deno.test("advanceForeman sequences from completed SQ1 directly into SQ2 mountin
   check(advanced !== null, "foreman advanced to next sub-quest");
   if (advanced) {
     check(advanced.nextMountedState.qid === SQ2_QID, "SQ2 mounted as active qid");
-    check(advanced.nextMountedState.phase === "implementing", "SQ2 in implementing");
+    check(advanced.nextMountedState.phase === "drafting", "SQ2 in drafting for plan authoring and review");
     check(advanced.nextMountedState.contract?.assignedRequirements[0] === "R2", "R2 assigned to SQ2");
     check(advanced.nextMountedState.questStack.length === 1, "parent frame saved in questStack");
     check(advanced.nextItem.id === "SQ2", "nextItem is SQ2");
@@ -234,18 +234,19 @@ Detailed execution.`;
   }
 });
 
-Deno.test("promoteAfterPass stays single-lane for standard difficulty task even if SQ items exist in plan", async () => {
+Deno.test("promoteAfterPass stays single-lane for genuinely standard task without subquests", async () => {
   const pi = fakePi();
   const cwd = Deno.makeTempDirSync({ prefix: "pi-quest-promote-standard-" });
   try {
     const parentQid = "std001" as Qid;
     const parent = createQuest("Standard Parent Task", parentQid, null, "standard");
     parent.phase = "drafting";
-    const plan = `## Sub-Quests
-- [ ] SQ1: Core foundation [paths: src/foundation] [tests: npm test] [req: R1]
+    const plan = `## Requirements
+- R1: Minor bug fix
 
 ## Implementation Plan
-Detailed execution.`;
+1. Fix typo in header
+2. Run test suite`;
 
     parent.draft = {
       name: "standard-plan",
@@ -268,6 +269,50 @@ Detailed execution.`;
     check(current.depth === 0, "stays at root depth 0");
     check(current.qid === parentQid, "stays on parent quest");
     check(current.phase === "implementing", "parent in implementing");
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+    replaceState(IDLE_STATE);
+  }
+});
+
+Deno.test("promoteAfterPass discovers complexity mid-quest from SQ items and mounts Foreman", async () => {
+  const pi = fakePi();
+  const cwd = Deno.makeTempDirSync({ prefix: "pi-quest-promote-discovered-" });
+  try {
+    const parentQid = "std002" as Qid;
+    // Originally initialized as standard
+    const parent = createQuest("Initially Standard Task", parentQid, null, "standard");
+    parent.phase = "drafting";
+    const plan = `## Sub-Quests
+- [ ] SQ1: Core foundation [paths: src/foundation] [tests: npm test] [req: R1]
+
+## Implementation Plan
+Detailed execution.`;
+
+    // Write draft file to disk so promoteAfterPass can inspect it
+    const futureDir = `${cwd}/.pi/quest/future`;
+    Deno.mkdirSync(futureDir, { recursive: true });
+    Deno.writeTextFileSync(`${futureDir}/${parentQid}.md`, plan);
+
+    parent.draft = {
+      name: "discovered-complex-plan",
+      contentHash: "hash789",
+      lastReviewedPlan: plan,
+      planAuthored: true,
+      approvedBy: null,
+      outstandingFindings: false,
+      approvedPlanHash: null,
+      planRevisions: [],
+    };
+    replaceState(parent);
+
+    const message = await promoteAfterPass(pi, fakeCtx(cwd), parentQid, "review");
+    check(message !== null, "promotion succeeded");
+    check(message!.includes("Foreman: Automatically mounting SQ1"), "Foreman automatically mounts SQ1 after discovering complexity");
+
+    const current = getState();
+    check(current.depth === 1, "child depth is 1");
+    check(current.parentQid === parentQid, "parent is linked");
   } finally {
     Deno.removeSync(cwd, { recursive: true });
     replaceState(IDLE_STATE);

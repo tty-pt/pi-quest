@@ -37,7 +37,9 @@ Deno.test("stack push saves parent state into stack frame and initializes child"
   const childState = pushStackFrame(root, contract, CHILD1_QID);
   check(childState.qid === CHILD1_QID, "child qid set");
   check(childState.parentQid === ROOT_QID, "parent qid linked");
-  check(childState.phase === "implementing", "child enters implementing directly");
+  check(childState.phase === "drafting", "child enters drafting for plan authoring and review");
+  check(childState.draft !== null, "child draft initialized");
+  check(childState.draft?.name === "Implement parser safety", "child draft name matches contract");
   check(childState.depth === 1, "depth bumped");
   check(childState.contract !== undefined, "contract attached");
   check(childState.contract?.allowedPaths[0] === "mods/song/parser.c", "allowed paths inherited");

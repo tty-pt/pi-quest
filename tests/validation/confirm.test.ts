@@ -25,6 +25,8 @@ import {
   clearValidationVerdictFails,
   getValidationVerdictFails,
   MAX_CONSECUTIVE_VALIDATION_FAILS,
+  setValidationRetryDispatcher,
+  clearValidationRetries,
 } from "../../src/validation/flow.ts";
 import { fakeCtx, fakePi, barePi } from "../fake-pi.ts";
 import { JUDGE_ON, stubIntentEmbeddings, writeQuestSettings } from "../judge-stub.ts";
@@ -199,6 +201,129 @@ Deno.test("reviewPolicy balanced validation auto-archives trivial task when test
   await ensureValidationFlow(pi, fakeCtx(cwd));
   check(getState().phase === "idle", "quest auto-archived under reviewPolicy balanced for trivial task");
   replaceState(IDLE_STATE);
+});
+
+Deno.test("concurrent ensureValidationFlow calls do not double-boot or self-abort validator subagent", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  pi.toolNames = ["subagent"];
+  const emitted: Array<{ event: string; data: unknown }> = [];
+  const handlers = new Map<string, Array<(data: unknown) => void>>();
+  (pi as { events: unknown }).events = {
+    on: (event: string, handler: (data: unknown) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => {};
+    },
+    emit: (event: string, data: unknown) => {
+      emitted.push({ event, data });
+    },
+  };
+  replaceState(validating());
+  await withDraftFile(cwd);
+  const ctx = fakeCtx(cwd);
+
+  // Fire two concurrent ensureValidationFlow calls (simulating claimForValidation + onTurnEnd)
+  const p1 = ensureValidationFlow(pi, ctx);
+  const p2 = ensureValidationFlow(pi, ctx);
+
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (emitted.some((e) => e.event === "prompt-template:subagent:request")) break;
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  await new Promise((r) => setTimeout(r, 25));
+
+  const subagentReqs = emitted.filter((e) => e.event === "prompt-template:subagent:request");
+  const subagentCancels = emitted.filter((e) => e.event === "prompt-template:subagent:cancel");
+  check(subagentReqs.length === 1, `expected exactly 1 validator subagent request, got ${subagentReqs.length}`);
+  check(subagentCancels.length === 0, `expected 0 self-aborts, got ${subagentCancels.length}`);
+
+  const reqData = subagentReqs[0].data as Record<string, unknown>;
+  for (const h of handlers.get("prompt-template:subagent:response") ?? []) {
+    h({
+      requestId: reqData["requestId"],
+      status: "completed",
+      result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE\nSUPPORTING FINDINGS:\n- all requirements met\n" },
+    });
+  }
+  await Promise.all([p1, p2]);
+  check(getState().phase === "idle", `expected quest concluded cleanly on single validator PASS, got phase ${getState().phase}`);
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("ensureValidationFlow automatically retries when validator subagent fails", async () => {
+  const cwd = tmp();
+  const pi = fakePi();
+  pi.toolNames = ["subagent"];
+  const emitted: Array<{ event: string; data: unknown }> = [];
+  const handlers = new Map<string, Array<(data: unknown) => void>>();
+  (pi as { events: unknown }).events = {
+    on: (event: string, handler: (data: unknown) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => {};
+    },
+    emit: (event: string, data: unknown) => {
+      emitted.push({ event, data });
+    },
+  };
+  replaceState(validating());
+  await withDraftFile(cwd);
+  const ctx = fakeCtx(cwd);
+  clearValidationRetries("abc123");
+
+  const scheduled: Array<() => void> = [];
+  const restore = setValidationRetryDispatcher((_delay, fn) => {
+    scheduled.push(fn);
+  });
+
+  try {
+    const p1 = ensureValidationFlow(pi, ctx);
+    const deadline1 = Date.now() + 2000;
+    while (Date.now() < deadline1 && !emitted.some((e) => e.event === "prompt-template:subagent:request")) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const req1 = emitted.find((e) => e.event === "prompt-template:subagent:request")!.data as Record<string, unknown>;
+    for (const h of handlers.get("prompt-template:subagent:response") ?? []) {
+      h({
+        requestId: req1["requestId"],
+        status: "failed",
+        error: "Subagent stopped before completion.",
+      });
+    }
+    await p1;
+    check(scheduled.length === 1, "scheduled retry after first failure");
+    check(getState().phase === "validating", "still validating while retry pending");
+
+    // Fire the retry
+    scheduled.shift()!();
+    const deadline2 = Date.now() + 2000;
+    while (Date.now() < deadline2 && emitted.filter((e) => e.event === "prompt-template:subagent:request").length < 2) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const reqs = emitted.filter((e) => e.event === "prompt-template:subagent:request");
+    check(reqs.length === 2, "second validator subagent launched on retry");
+    const req2 = reqs[1].data as Record<string, unknown>;
+    for (const h of handlers.get("prompt-template:subagent:response") ?? []) {
+      h({
+        requestId: req2["requestId"],
+        status: "completed",
+        result: { kind: "text", text: "VERDICT: PASS\nSEVERITY: NONE\nSUPPORTING FINDINGS:\n- all requirements met\n" },
+      });
+    }
+    const deadline3 = Date.now() + 2000;
+    while (Date.now() < deadline3 && getState().phase !== "idle") {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    check(getState().phase === "idle", "quest concluded after retry succeeded");
+  } finally {
+    setValidationRetryDispatcher(restore);
+    clearValidationRetries("abc123");
+    replaceState(IDLE_STATE);
+  }
 });
 
 

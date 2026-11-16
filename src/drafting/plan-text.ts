@@ -18,50 +18,38 @@ export interface DraftSections {
   analysis: string;
   subquests?: string;
   amendments?: string[];
+  assumptions?: string[];
 }
 
 export function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-// Generic ##-section splices: replace the named section's body, or append a
-// fresh section when absent. Both the plan and the analysis deliverable reuse
-// it so their splice semantics stay byte-identical.
-function spliceSection(text: string, key: SectionKey, label: string, body: string): string {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => isHeading(line, key));
-  if (start === -1) {
-    const base = text.endsWith("\n") ? text : `${text}\n`;
-    return `${base}\n## ${label}\n\n${body.trim()}\n`;
-  }
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s+.+?\s*$/.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-  return [...lines.slice(0, start + 1), "", body.trim(), "", ...lines.slice(end)].join("\n");
-}
+import {
+  RESERVED_SECTIONS,
+  spliceSection,
+  splicePlanSection,
+  spliceAnalysisSection,
+  spliceSubquestsSection,
+  spliceAmendmentsSection,
+  spliceAssumptionsSection,
+  hasAuthoredText,
+  normalizeDeliverableHeadings,
+  assertNoSectionHeadings,
+} from "./plan-splicing.ts";
 
-export function splicePlanSection(text: string, plan: string): string {
-  return spliceSection(text, "plan", "Implementation Plan", plan);
-}
-
-export function spliceAnalysisSection(text: string, analysis: string): string {
-  return spliceSection(text, "analysis", "Analysis", analysis);
-}
-
-export function spliceSubquestsSection(text: string, subquests: string): string {
-  return spliceSection(text, "subquests", "Sub-Quests", subquests);
-}
-
-export function spliceAmendmentsSection(text: string, amendments: string[]): string {
-  const body = amendments.length > 0
-    ? amendments.map((a) => `- ${a}`).join("\n")
-    : "<!-- No amendments recorded -->";
-  return spliceSection(text, "amendments", "Amendments", body);
-}
+export {
+  RESERVED_SECTIONS,
+  spliceSection,
+  splicePlanSection,
+  spliceAnalysisSection,
+  spliceSubquestsSection,
+  spliceAmendmentsSection,
+  spliceAssumptionsSection,
+  hasAuthoredText,
+  normalizeDeliverableHeadings,
+  assertNoSectionHeadings,
+};
 
 export function parseDraftSections(text: string): DraftSections {
   const requirements: string[] = [];
@@ -70,7 +58,8 @@ export function parseDraftSections(text: string): DraftSections {
   const analysisLines: string[] = [];
   const subquestLines: string[] = [];
   const amendments: string[] = [];
-  let section: "requirements" | "evidence" | "plan" | "analysis" | "subquests" | "amendments" | null = null;
+  const assumptions: string[] = [];
+  let section: "requirements" | "evidence" | "plan" | "analysis" | "subquests" | "amendments" | "assumptions" | null = null;
   let inComment = false;
   for (const line of text.split(/\r?\n/)) {
     const header = line.match(/^##\s+(.+?)\s*$/);
@@ -78,7 +67,7 @@ export function parseDraftSections(text: string): DraftSections {
       const key = sectionKeyOf(header[1]);
       // Pre-draft investigation recorded via recordRefinement is research:
       // its bullets fold into the evidence list so it counts toward the bar.
-      if (key === "requirements" || key === "evidence" || key === "analysis" || key === "plan" || key === "amendments") section = key;
+      if (key === "requirements" || key === "evidence" || key === "analysis" || key === "plan" || key === "amendments" || key === "assumptions") section = key;
       else if (key === "subquests") section = "subquests";
       else if (key === "predraft") section = "evidence";
       else section = null;
@@ -106,10 +95,11 @@ export function parseDraftSections(text: string): DraftSections {
       continue;
     }
     const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/);
-    if (bullet && (section === "requirements" || section === "evidence" || section === "amendments")) {
+    if (bullet && (section === "requirements" || section === "evidence" || section === "amendments" || section === "assumptions")) {
       if (section === "requirements") requirements.push(bullet[1]);
       else if (section === "evidence") evidence.push(bullet[1]);
       else if (section === "amendments") amendments.push(bullet[1]);
+      else if (section === "assumptions") assumptions.push(bullet[1]);
     }
   }
   return {
@@ -119,42 +109,34 @@ export function parseDraftSections(text: string): DraftSections {
     analysis: analysisLines.join("\n").trim(),
     subquests: subquestLines.join("\n").trim(),
     amendments,
+    assumptions,
   };
 }
 
 export function extractRtmFromRequirements(requirements: string[]): RtmItem[] {
   const rtm: RtmItem[] = [];
-  for (const req of requirements) {
+  for (let i = 0; i < requirements.length; i++) {
+    const req = requirements[i];
     const clean = req.replace(/^\*+|\*+$/g, "").trim();
-    const m = clean.match(/^([A-Za-z0-9_-]+)[:\-]\s*(.*)$/);
+    if (!clean) continue;
+    const m = clean.match(/^\[?([A-Za-z0-9_-]+)\]?[:\-]\s*(.*)$/);
     if (m && /^R\d+/i.test(m[1])) {
       rtm.push({
         id: m[1].toUpperCase(),
-        description: m[2],
+        description: m[2].trim() || m[1].toUpperCase(),
         status: "pending",
+        explicit: true,
+      });
+    } else {
+      rtm.push({
+        id: `R${i + 1}`,
+        description: clean,
+        status: "pending",
+        explicit: false,
       });
     }
   }
   return rtm;
-}
-
-// A deliverable is authored only when something other than HTML comments (the
-// review-count marker, template placeholders) is in it.
-export function hasAuthoredText(text: string): boolean {
-  return text.replace(/<!--[\s\S]*?-->/g, "").trim().length > 0;
-}
-
-// The doc is ##-sectioned: a "## " line inside a deliverable body ends its
-// section, silently orphaning everything after it (a plan written with its own
-// ## Requirements / ## Steps parses as an empty plan). Refuse it at the write.
-export function assertNoSectionHeadings(body: string, noun: "plan" | "analysis"): void {
-  const bad = body.split(/\r?\n/).find((line) => /^##\s+\S/.test(line));
-  if (bad !== undefined) {
-    throw new Error(
-      `the ${noun} text contains a section heading (${JSON.stringify(bad.trim())}): "## " lines end the ${noun} section in the quest doc. Use "###" for sub-headings inside the ${noun}; requirements and evidence belong in the doc's own ## Requirements and ## Evidence sections (edit the draft file directly).`,
-    );
-  }
-  if (!hasAuthoredText(body)) throw new Error(`the ${noun} text has no content beyond comments`);
 }
 
 export function meetsReviewThresholds(
@@ -170,7 +152,7 @@ export function meetsReviewThresholds(
   if (kind === "standard") {
     const rtm = extractRtmFromRequirements(sections.requirements);
     if (rtm.length > 0) {
-      const coverage = checkRtmCoverage(rtm, sections.plan);
+      const coverage = checkRtmCoverage(rtm, sections.plan, sections.requirements.length);
       if (!coverage.covered) return false;
     }
   }
@@ -195,7 +177,9 @@ export function draftProfileText(
   const planPresent = hasAuthoredText(deliverable);
   const counts = req >= thresholds.requirements || (req >= 1 && ev >= thresholds.evidence);
   const rtm = extractRtmFromRequirements(sections.requirements);
-  const rtmCoverage = kind === "standard" && rtm.length > 0 ? checkRtmCoverage(rtm, sections.plan) : { covered: true, missing: [] };
+  const rtmCoverage = kind === "standard" && rtm.length > 0
+    ? checkRtmCoverage(rtm, sections.plan, sections.requirements.length)
+    : { covered: true, missing: [], total: rtm.length, coveredCount: rtm.length };
   const meets = counts && planPresent && rtmCoverage.covered;
   const gapLeg = ` (needs ${thresholds.requirements} requirements, or 1 requirement + ${thresholds.evidence} evidence, with an ${analysis ? "authored analysis" : "actionable plan"})`;
   const diffTag = difficulty ? ` (difficulty: ${difficulty})` : "";
@@ -324,6 +308,7 @@ export function reviewMaterial(state: QuestState, sections: DraftSections): Revi
     requirements: sections.requirements,
     evidence: sections.evidence,
     amendments: allAmendments,
+    assumptions: sections.assumptions,
     rebuttal: openRebuttal?.implementerRebuttal,
     claimManifest: buildClaimManifest(sections, state.kind),
   };

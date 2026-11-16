@@ -125,6 +125,18 @@ export const QUEST_EXEMPLARS: Record<string, string[]> = {
     "Format these files with the code formatter",
     "Limpa os ficheiros temporários",
     "Mostra a estrutura de diretórios",
+    // Conversational follow-ups & continuations (EN & PT)
+    "Go on",
+    "Go on..",
+    "Continue",
+    "Keep going",
+    "Carry on",
+    "Tell me more",
+    "What else?",
+    "Continua",
+    "Prossegue",
+    "Conta-me mais",
+    "Diz mais",
     // System inquiries & meta questions (EN & PT)
     "Why did the quest system kick in for this?",
     "How can we make the system smarter about this stuff?",

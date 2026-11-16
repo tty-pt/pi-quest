@@ -14,7 +14,9 @@ export const KNOWN_PHASES: ReadonlySet<string> = new Set([
 
 export const KNOWN_DIFFICULTIES: ReadonlySet<string> = new Set([
   "trivial",
+  "minor",
   "standard",
+  "major",
   "complex",
   "*",
 ]);

@@ -1,4 +1,8 @@
 import { check } from "./check.ts";
+import { detectSubstantiveRequest } from "../src/drafting/detect.ts";
+import { fakeCtx, fakePi } from "./fake-pi.ts";
+import { IDLE_STATE } from "../src/domain/quest.ts";
+import { replaceState } from "../src/app/store.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../src/config.ts";
 import { evaluateQuestIntent } from "../src/drafting/judge.ts";
 import { evaluateQuestKind } from "../src/drafting/judge.ts";
@@ -124,4 +128,17 @@ Deno.test("exemplars list contains corrective bug reports and behavioral directi
     bugfixExemplars.some((e) => e.toLowerCase().includes("ephemeral") || e.toLowerCase().includes("stone") || e.toLowerCase().includes("shouldn't")),
     "KIND_EXEMPLARS.bugfix contains corrective bug report",
   );
+});
+
+Deno.test("detectSubstantiveRequest rejects conversational follow-ups when idle", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const ctx = fakeCtx("/tmp");
+
+  const phrases = ["Go on..", "go on", "Continue", "continue", "Keep going", "carry on", "tell me more", "what else?"];
+  for (const phrase of phrases) {
+    const opened = await detectSubstantiveRequest(pi, ctx, phrase, DEFAULT_CONFIG);
+    check(!opened, `expected '${phrase}' to NOT open a quest when idle`);
+  }
+  replaceState(IDLE_STATE);
 });

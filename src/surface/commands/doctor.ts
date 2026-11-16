@@ -91,16 +91,6 @@ export async function getQuestDoctorLines(ctx: PiCtx): Promise<string[]> {
     lines.push(`    -> Guide: ${n.link}`);
   }
 
-  // Core C Engine Versions & Requirements
-  const { checkAllEngineVersions } = await import("../../versions");
-  const engineReports = checkAllEngineVersions({ cwd: ctx.cwd });
-  lines.push("[-] Core C Engines & Versions:");
-  for (const rep of engineReports) {
-    const symbol = rep.status === "satisfied" ? "[✓]" : rep.status === "outdated" ? "[!]" : "[✗]";
-    const ver = rep.version ? `${rep.version} (${rep.source})` : "not installed";
-    lines.push(`  ${symbol} ${rep.name.padEnd(11)}: ${ver} (requires >= ${rep.minRequired})`);
-  }
-
   lines.push(`[-] Intent Evaluation: mode='${cfg.judgeMode}', model='${cfg.judgeModel}', timeout=${cfg.judgeTimeoutMs}ms`);
   lines.push(`[-] Fallback Policy: ${cfg.judgeFallback}`);
   lines.push(`[-] Active Trigger Prefixes: ${cfg.triggerPrefixes.map((p) => `'${p}'`).join(", ")}`);

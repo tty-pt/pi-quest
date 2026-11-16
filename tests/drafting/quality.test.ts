@@ -18,8 +18,8 @@ async function repo(): Promise<string> {
   return cwd;
 }
 
-const PLAN = `1. Edit src/a.ts:10 to add the option.
-2. Wire it in src/b.ts:20.
+const PLAN = `1. Edit src/a.ts:10 to add the option [R1].
+2. Wire it in src/b.ts:20 [R2].
 3. Add a test that verifies the option and run it.`;
 
 function sections(plan: string, evidence = ["src/a.ts:5 shows X", "src/b.ts:7 shows Y"]) {
@@ -90,6 +90,16 @@ Deno.test("standard defaults: a cited, stepped, verified plan passes", async () 
   const res = await assessDraftQuality(fakeCtx(cwd), DEFAULT_CONFIG, sections(PLAN), "standard", "standard");
   check(res.gaps.length === 0, `no gaps, got ${res.gaps.join(" | ")}`);
   check(res.summary.includes("quality"), "summary line present");
+  check(res.summary.includes("requirements covered: 2/2"), "rtm coverage in summary");
+});
+
+Deno.test("assessDraftQuality: missing RTM mapping flags gap on standard tier", async () => {
+  const cwd = await repo();
+  const unmapped = parseDraftSections(
+    `## Requirements\n- R1: feature alpha\n- R2: feature beta\n\n## Evidence\n- src/a.ts:5 shows X\n- src/b.ts:7 shows Y\n\n## Implementation Plan\n1. Edit src/a.ts:10 for unrelated work.\n2. Wire it in src/b.ts:20 for other task.\n3. Add a test and run it.\n`,
+  );
+  const res = await assessDraftQuality(fakeCtx(cwd), DEFAULT_CONFIG, unmapped, "standard", "standard");
+  check(res.gaps.some((g) => g.includes("map requirement(s)")), "RTM gap flagged when unmapped");
 });
 
 Deno.test("standard defaults: prose plan without citations lists gaps", async () => {

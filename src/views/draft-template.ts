@@ -1,6 +1,41 @@
 // HIGH_LEVEL: #storage — the drafting workspace starts from a template.
 import type { QuestDifficulty } from "../config.ts";
 
+export function extractInitialRequirements(objective: string): string[] {
+  const clean = objective.trim();
+  if (!clean) return [];
+
+  const lines = clean.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const bulletItems: string[] = [];
+
+  for (const line of lines) {
+    if (/^#+\s+/.test(line)) continue;
+    const match = line.match(/^(?:\d+[.)]|[-*+])\s+(.+)$/);
+    if (match) {
+      bulletItems.push(match[1].trim());
+    }
+  }
+
+  if (bulletItems.length > 0) {
+    return bulletItems.map((b, i) => `- R${i + 1}: ${b}`);
+  }
+
+  const contentLines = lines.filter((l) => !/^#+\s+/.test(l) && l.length > 15);
+  if (contentLines.length > 1) {
+    return contentLines.slice(0, 8).map((l, i) => `- R${i + 1}: ${l}`);
+  }
+
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 20);
+  if (sentences.length > 1) {
+    return sentences.slice(0, 8).map((s, i) => `- R${i + 1}: ${s}`);
+  }
+
+  return [];
+}
+
 export function renderDraftTemplate(
   name: string,
   objective: string,
@@ -14,6 +49,11 @@ export function renderDraftTemplate(
 
   const invBlockText = invariantsBlock && invariantsBlock.trim().length > 0
     ? `\n${invariantsBlock.trim()}\n`
+    : "";
+
+  const initialReqs = extractInitialRequirements(objective);
+  const reqsBlock = initialReqs.length > 0
+    ? `\n\n${initialReqs.join("\n")}`
     : "";
 
   const subquestsSection = difficulty === "complex"
@@ -45,11 +85,16 @@ ${contextSection}
 
 ## Requirements
 
-<!-- Author each requirement as its own bullet (e.g. - R1: description). A draft reaches the review bar at 2 requirements, or 1 requirement + 7 evidence items, with an actionable plan mapping every requirement. -->
+<!-- Author each requirement as its own bullet (e.g. - R1: description). A draft reaches the review bar at 2 requirements, or 1 requirement + 7 evidence items, with an actionable plan mapping every requirement. -->${reqsBlock}
 
 ## Evidence
 
 <!-- Record file-backed proof per requirement (file:line citations or measured verification). -->
+
+## Assumptions & Falsification Criteria
+
+<!-- Explicitly record key technical assumptions and what evidence/failure would falsify them.
+     When a falsification condition is hit during implementation, pause and pivot rather than hacking around it. -->
 
 ${subquestsSection}
 
@@ -70,40 +115,52 @@ export function renderChildDraftTemplate(
     allowedPaths?: string[];
     requiredTestCommands?: string[];
     acceptanceCriteria?: string[];
+    worktreePath?: string;
+    worktreeBranch?: string;
   },
   goal: string,
 ): string {
   const reqs = contract.assignedRequirements && contract.assignedRequirements.length > 0
-    ? contract.assignedRequirements.map((r) => `- [ ] ${r}`).join("\n")
-    : "- (inherited from parent)";
+    ? contract.assignedRequirements.map((r, i) => {
+      const trimmed = r.trim();
+      if (trimmed.startsWith("-")) return trimmed;
+      if (/^R\d+:/i.test(trimmed)) return `- ${trimmed}`;
+      return `- R${i + 1}: ${trimmed}`;
+    }).join("\n")
+    : `- R1: Fulfill sub-quest contract: ${contract.title}`;
   const paths = contract.allowedPaths && contract.allowedPaths.length > 0
-    ? contract.allowedPaths.map((p) => `- ${p}`).join("\n")
-    : "- (all workspace files)";
+    ? contract.allowedPaths.map((p) => `- Target scope: ${p}`).join("\n")
+    : "- Target scope: all workspace files";
   const tests = contract.requiredTestCommands && contract.requiredTestCommands.length > 0
-    ? contract.requiredTestCommands.map((t) => `- ${t}`).join("\n")
-    : "- npm test";
+    ? contract.requiredTestCommands.map((t) => `- Verification: ${t}`).join("\n")
+    : "- Verification: make test";
+
+  const wtBlock = contract.worktreePath
+    ? `\n## Isolated Worktree\n- Path: ${contract.worktreePath}${contract.worktreeBranch ? ` (branch: ${contract.worktreeBranch})` : ""}\n`
+    : "";
 
   return `# Quest ${childQid}: ${contract.title}
 
-> Sub-quest of parent ${parentQid}. Active in implementation mode.
+> Sub-quest of parent ${parentQid}. Active in drafting mode.
 
 ## Original request
 
 ${goal}
 
-## Parent Quest Link
-- Parent: ${parentQid} (.pi/quest/future/${parentQid}.md)
-
-## Assigned Requirements
+## Context / Background Discussion
+- Parent Quest: ${parentQid} (.pi/quest/future/${parentQid}.md)
+${wtBlock}
+## Requirements
 ${reqs}
 
-## Primary Focus Paths
+## Evidence
 ${paths}
-
-## Verification Commands
 ${tests}
 
+## Sub-Quests
+<!-- Sub-quests can be spawned recursively via quest_subquest if this task discovers mid-quest complexity: -->
+
 ## Implementation Plan
-Proceed autonomously with the sub-quest contract to implement assigned requirements.
+<!-- Author discrete step-by-step implementation plan below: -->
 `;
 }

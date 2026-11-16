@@ -130,9 +130,21 @@ Deno.test("planless drafts and idle stay silent on resume", async () => {
   check(resumeSteers(idlePi).length === 0, "idle is a no-op");
 });
 
-Deno.test("drafting installer resumes on session start", () => {
+Deno.test("drafting installer resumes on session start and after compaction", async () => {
+  const qid = "resume6" as Qid;
+  const { ctx } = await draftingSetup(qid, DRAFT_ONE);
   const pi = fakePi();
-  installDrafting(pi);
-  check(pi.subscriptions.includes("session_start"), "session start subscribed");
-  check(pi.subscriptions.includes("turn_end"), "turn end still subscribed");
+  try {
+    installDrafting(pi);
+    check(pi.subscriptions.includes("session_start"), "session start subscribed");
+    check(pi.subscriptions.includes("session_compact"), "session compact subscribed");
+    check(pi.subscriptions.includes("turn_end"), "turn end still subscribed");
+
+    const compactHandlers = pi.eventHandlers["session_compact"] ?? [];
+    for (const h of compactHandlers) await h({ type: "session_compact" }, ctx);
+    await settle();
+    check(resumeSteers(pi).length === 1, "session_compact boots unreviewed draft review");
+  } finally {
+    replaceState(IDLE_STATE);
+  }
 });

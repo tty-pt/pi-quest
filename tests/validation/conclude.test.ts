@@ -57,6 +57,7 @@ Deno.test("validation PASS concludes and archives automatically", async () => {
   check(getState().phase === "idle", "quest archived and cleared");
   check(!existsSync(join(cwd, stageDir("abc123" as Qid))), "staging dir removed");
   check(!existsSync(join(cwd, draftPath("abc123" as Qid))), "future draft removed");
+  check(!pi.sent.some((s) => JSON.stringify(s).includes("concluded and archived as completed")), "standard quest skips redundant post-archive wake turn");
   replaceState(IDLE_STATE);
 });
 

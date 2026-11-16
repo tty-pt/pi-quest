@@ -107,6 +107,16 @@ Deno.test("runner sends the configured model and omits it otherwise", async () =
   check(!("model" in (bare.data as Record<string, unknown>)), "inherit omits model");
   second.feed({ requestId: (bare.data as Record<string, unknown>)["requestId"], status: "completed", result: { kind: "text", text: "ok" } });
   await pending;
+
+  const third = busPi();
+  const virtualCtx = { ...fakeCtx("/tmp"), model: "quest/auto" };
+  const runner3 = createRunner({ pi: third.pi, ctx: virtualCtx, ownerRunId: "abc123", routerDefault: "custom/physical-model" })!;
+  const pending3 = runner3.launch("x", new AbortController().signal);
+  const virtualReq = third.emitted.find((e) => e.event === "prompt-template:subagent:request")!;
+  const sentModel = (virtualReq.data as Record<string, unknown>)["model"];
+  check(sentModel === "custom/physical-model", "physical fallback model sent for virtual session model");
+  third.feed({ requestId: (virtualReq.data as Record<string, unknown>)["requestId"], status: "completed", result: { kind: "text", text: "ok" } });
+  await pending3;
 });
 
 Deno.test("runner sends thinking only when configured", async () => {

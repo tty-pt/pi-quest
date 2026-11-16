@@ -1,6 +1,7 @@
 // HIGH_LEVEL: #storage — post-quest telemetry and Bayesian Beta-Binomial accuracy tracking.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { findPrimaryRepoRoot } from "../utils/git.ts";
 import type { QuestDifficulty, QuestKind, QuestState } from "../domain/quest.ts";
 import { readQuestConfig, type QuestConfig } from "../config.ts";
 import { gate, mergeExemplars, nearestExemplar, type ExemplarTable } from "../judge/nearest.ts";
@@ -39,8 +40,9 @@ export function calculateEpisodeScore(
   const revisions = state.draft?.planRevisions.length ?? 0;
   // Verification score: clean = 1.0, minus 0.15 per setback
   const sVerify = Math.max(0.1, 1.0 - (setbacks * 0.15));
-  // Execution score: minus 0.1 per plan revision
-  const sExec = Math.max(0.2, 1.0 - (revisions * 0.1));
+  // Execution score: adaptive revisions are encouraged; only penalize excessive churn (> 2 revisions)
+  const excessiveRevisions = Math.max(0, revisions - 2);
+  const sExec = Math.max(0.2, 1.0 - (excessiveRevisions * 0.1));
 
   let explicitScore: number | undefined;
   if (typeof explicitRating === "number" && !isNaN(explicitRating)) {
@@ -67,7 +69,8 @@ export function updateBetaDistribution(
 }
 
 export async function readRatingsStore(cwd: string): Promise<RatingsStore> {
-  const path = join(cwd, RATINGS_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, RATINGS_RELATIVE_PATH);
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw);
@@ -81,7 +84,8 @@ export async function readRatingsStore(cwd: string): Promise<RatingsStore> {
 }
 
 export async function writeRatingsStore(cwd: string, store: RatingsStore): Promise<void> {
-  const path = join(cwd, RATINGS_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, RATINGS_RELATIVE_PATH);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(store, null, 2), "utf8");
 }
@@ -144,7 +148,8 @@ export interface QuestHandoffReceipt {
 export const HANDOFF_RELATIVE_PATH = join(".pi", "quest", "recent-handoff.json");
 
 export async function readHandoffReceipt(cwd: string): Promise<QuestHandoffReceipt | null> {
-  const path = join(cwd, HANDOFF_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, HANDOFF_RELATIVE_PATH);
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw);
@@ -158,13 +163,15 @@ export async function readHandoffReceipt(cwd: string): Promise<QuestHandoffRecei
 }
 
 export async function writeHandoffReceipt(cwd: string, receipt: QuestHandoffReceipt): Promise<void> {
-  const path = join(cwd, HANDOFF_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, HANDOFF_RELATIVE_PATH);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(receipt, null, 2), "utf8");
 }
 
 export async function clearHandoffReceipt(cwd: string): Promise<void> {
-  const path = join(cwd, HANDOFF_RELATIVE_PATH);
+  const root = findPrimaryRepoRoot(cwd);
+  const path = join(root, HANDOFF_RELATIVE_PATH);
   try {
     await writeFile(path, "{}", "utf8");
   } catch {
@@ -232,6 +239,13 @@ export async function checkPostQuestReversions(
       const res = await execGit(["merge-base", "--is-ancestor", hash, "HEAD"]);
       const code = res?.code ?? res?.exitCode ?? 1;
       if (code !== 0) {
+        const branchRes = await execGit(["branch", "--contains", hash]);
+        const branchCode = branchRes?.code ?? branchRes?.exitCode ?? 1;
+        const branchOut = (branchRes?.stdout ?? branchRes?.output ?? "").trim();
+        if (branchCode === 0 && branchOut.length > 0) {
+          continue;
+        }
+
         await applyModelPenalty(cwd, receipt.model, 0.0);
         await clearHandoffReceipt(cwd);
         return { reverted: true, reason: `Commit ${hash.slice(0, 8)} from quest ${receipt.qid} was reset or reverted.` };

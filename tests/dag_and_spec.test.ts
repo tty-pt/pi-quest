@@ -108,7 +108,13 @@ Deno.test("Spec-map gate: code references all HIGH_LEVEL sections accurately", a
   try {
     await Deno.stat(SPEC);
   } catch {
-    SPEC = `/home/quirinpa/site/HIGH_LEVEL.md`;
+    try {
+      const archived = `${PKG}/../../../docs/archive/pi-quest/HIGH_LEVEL.md`;
+      await Deno.stat(archived);
+      SPEC = archived;
+    } catch {
+      SPEC = `/home/quirinpa/site/docs/archive/pi-quest/HIGH_LEVEL.md`;
+    }
   }
   const SRC = `${PKG}/src`;
 

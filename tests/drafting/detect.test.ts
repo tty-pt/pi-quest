@@ -156,3 +156,83 @@ Deno.test("detection fails closed when judge is unreachable and no trigger is pr
   check(getState().phase === "idle", "phase remains idle");
   replaceState(IDLE_STATE);
 });
+
+Deno.test("detection extracts substantive objective from prior Argon conversation when triggered with short referential phrase", async () => {
+  replaceState(IDLE_STATE);
+  const pi = fakePi();
+  const cwd = tmp();
+  const entries = [
+    { data: { role: "user", content: "We need to fix the duplicate draft reviewer launch in watchDraftEdits and retain worktree slots on completion." } },
+    { data: { role: "assistant", content: "I analyzed src/drafting/reviews.ts and src/surface/tools/archive/core.ts. Here is the 3-step plan." } },
+  ];
+  const ctx = fakeCtx(cwd, entries);
+  const created = await detectSubstantiveRequest(pi, ctx, "quest: Go for it.");
+  check(created, "quest created via referential trigger");
+  check(getState().objective.includes("fix the duplicate draft reviewer launch"), "objective extracted from prior conversation");
+  const file = await readFile(join(cwd, draftPath(getState().qid!)), "utf8");
+  check(file.includes("## Context / Background Discussion"), "draft scaffold includes prior conversation context");
+  check(String(pi.sent[0]?.message?.content ?? "").includes("Prior conversation context is already captured"), "steer prompts immediate plan authoring");
+  replaceState(IDLE_STATE);
+});
+
+Deno.test("resolvePriorConversationObjective uses /v1/systemone embeddings for unseen referential phrases not in steeringPhrases", async () => {
+  replaceState(IDLE_STATE);
+  let systemoneCalls = 0;
+  const server = Deno.serve({ port: 0 }, async (req) => {
+    const url = new URL(req.url);
+    if (url.pathname.includes("/v1/systemone")) {
+      systemoneCalls++;
+      const body = await req.json() as { text: string; labels: Record<string, string[]> };
+      if (body.labels["advance"]) {
+        const isAdv = body.text.toLowerCase().includes("roll with") || body.text.toLowerCase().includes("green light");
+        const decision = isAdv ? "advance" : "refinement";
+        return new Response(JSON.stringify({
+          ok: true,
+          decision,
+          choice: decision,
+          similarity: 0.84,
+          margin: 0.19,
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        decision: "standard",
+        choice: "standard",
+        similarity: 0.75,
+        margin: 0.12,
+      }), { headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("not found", { status: 404 });
+  });
+
+  const cfg: QuestConfig = {
+    ...DEFAULT_CONFIG,
+    judgeMode: "auto",
+    embedMode: "auto",
+    judgeUrl: `http://127.0.0.1:${server.addr.port}`,
+    embedUrl: `http://127.0.0.1:${server.addr.port}`,
+  };
+
+  try {
+    const cwd = tmp();
+    const entries = [
+      { data: { role: "user", content: "Refactor the WebGL shader compiler in external/liblamina to cache uniform locations." } },
+      { data: { role: "assistant", content: "We can store uniform locations in lamina_program_t." } },
+    ];
+    const ctx = fakeCtx(cwd, entries);
+    const pi = fakePi();
+
+    // "You have the green light, roll with that." is NOT in DEFAULT_STEERING_PHRASES or DEFAULT_INTENT_EXEMPLARS
+    const created = await detectSubstantiveRequest(pi, ctx, "quest: You have the green light, roll with that.", cfg);
+    check(created, "quest created via unseen referential phrase");
+    check(systemoneCalls >= 1, "consulted /v1/systemone for intent classification");
+    check(
+      getState().objective.includes("Refactor the WebGL shader compiler"),
+      `expected prior conversation objective, got: ${getState().objective}`,
+    );
+    replaceState(IDLE_STATE);
+  } finally {
+    await server.shutdown();
+  }
+});
+

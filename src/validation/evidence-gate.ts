@@ -29,6 +29,56 @@ export function clearTestExecution(): void {
 
 export { isTestCommand } from "../utils/commands";
 
+export function detectTestTampering(diffPatch: string): string[] {
+  const violations: string[] = [];
+  const fileDiffs = diffPatch.split(/^diff --git /m);
+
+  for (const fileDiff of fileDiffs) {
+    if (!fileDiff.trim()) continue;
+    const headerMatch = fileDiff.match(/^[a-b]\/([^\s]+)/m) || fileDiff.match(/^\+\+\+ b\/([^\s]+)/m);
+    const filePath = headerMatch ? headerMatch[1] : "";
+    const isTestFile = /(?:^|\/)(?:tests?|spec)\/|\.(?:test|spec)\.[a-z]+$|_test\.[a-z]+$|test-[^/]+\.sh$/i.test(filePath);
+    if (!isTestFile) continue;
+
+    const lines = fileDiff.split(/\r?\n/);
+    let deletedAssertions = 0;
+    let addedAssertions = 0;
+    let commentedOutAssertions = 0;
+
+    const ASSERT_PATTERN = /\b(?:assert|expect|check|ASSERT_[A-Z0-9_]+|TEST_ASSERT[A-Z0-9_]*)\s*[(<]/;
+    const COMMENTED_ASSERT_PATTERN = /^\+\s*(?:\/\/|\/\*|\*|#)\s*(?:assert|expect|check|ASSERT_[A-Z0-9_]+|TEST_ASSERT[A-Z0-9_]*)\s*[(<]/;
+
+    for (const line of lines) {
+      if (line.startsWith("---") || line.startsWith("+++")) continue;
+      if (COMMENTED_ASSERT_PATTERN.test(line)) {
+        commentedOutAssertions++;
+      } else if (line.startsWith("-") && ASSERT_PATTERN.test(line.slice(1))) {
+        deletedAssertions++;
+      } else if (line.startsWith("+") && ASSERT_PATTERN.test(line.slice(1))) {
+        addedAssertions++;
+      }
+    }
+
+    if (commentedOutAssertions > 0) {
+      violations.push(`Test assertion was commented out in ${filePath} (${commentedOutAssertions} occurrence(s)). Fix implementation, do not disable tests.`);
+    } else if (deletedAssertions > addedAssertions) {
+      violations.push(`Test assertions were deleted without replacement in ${filePath} (${deletedAssertions} deleted vs ${addedAssertions} added). Do not weaken tests to beat validation.`);
+    }
+  }
+  return violations;
+}
+
+function checkImplementationDepth(state: QuestState, diffStat: string, diffPatch: string): void {
+  if (state.rtm && state.rtm.length >= 3 && state.difficulty !== "trivial" && state.difficulty !== "minor") {
+    const lines = diffStat.trim().split("\n").filter((l) => l.trim().length > 0 && !/\bchanged\b/i.test(l));
+    if (lines.length <= 1 && (state.touchedFiles ?? []).length <= 1 && diffPatch.trim().length < 50) {
+      throw new Error(
+        `Cannot claim completion: Implementation depth check failed. Multi-requirement task (${state.rtm.length} requirements) requires substantive implementation before completion.`,
+      );
+    }
+  }
+}
+
 export async function assertCompletionEligibility(
   state: QuestState,
   options: EvidenceGateOptions = {},
@@ -68,6 +118,11 @@ export async function assertCompletionEligibility(
   const getDiffPatch = options.getDiffPatch ?? (async () => "");
   const diffPatch = await getDiffPatch();
   if (diffPatch.trim().length > 0) {
+    const tampering = detectTestTampering(diffPatch);
+    if (tampering.length > 0) {
+      throw new Error(`Cannot claim completion: Test integrity violation:\n${tampering.join("\n")}`);
+    }
+
     const violations = runSemanticLints(diffPatch, options.lintRules ?? []);
     if (violations.length > 0) {
       const summary = violations.map((v) => `[${v.ruleId}] ${v.message}`).join("\n");
@@ -75,12 +130,28 @@ export async function assertCompletionEligibility(
     }
   }
 
+  checkImplementationDepth(state, diffStat, diffPatch);
+
   const testReceipt = getLatestTest();
-  if (!testReceipt) {
+  if (!testReceipt && !state.lastPassingTestReceipt) {
     throw new Error("Cannot claim completion: No build/test verification command was executed in this quest session.");
   }
 
-  if (testReceipt.exitCode !== 0) {
-    throw new Error(`Cannot claim completion: The last test execution failed (exit code ${testReceipt.exitCode}):\n${testReceipt.tailOutput}`);
+  const passing = state.lastPassingTestReceipt;
+  const isPassingValid = Boolean(passing && passing.exitCode === 0 && (
+    !state.lastFileModifiedAt || (passing.executedAt ?? 0) >= state.lastFileModifiedAt
+  ));
+  const effectiveReceipt = (testReceipt && testReceipt.exitCode === 0)
+    ? testReceipt
+    : (isPassingValid && passing)
+    ? passing
+    : testReceipt;
+
+  if (!effectiveReceipt) {
+    throw new Error("Cannot claim completion: No build/test verification command was executed in this quest session.");
+  }
+
+  if (effectiveReceipt.exitCode !== 0) {
+    throw new Error(`Cannot claim completion: The last test execution failed (exit code ${effectiveReceipt.exitCode}):\n${effectiveReceipt.tailOutput}`);
   }
 }

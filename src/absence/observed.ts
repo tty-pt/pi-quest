@@ -67,6 +67,7 @@ function remember(toolCallId: string, question: string): void {
 export function installObservedQuestions(pi: Pi): void {
   onToolCall(pi, (event: ToolCallEvent) => {
     try {
+      if (getState().disabled === true) return undefined;
       if (!isAskingTool(event.toolName)) return undefined;
       const question = questionText(event.input);
       if (question !== null) remember(event.toolCallId, question);
@@ -77,6 +78,7 @@ export function installObservedQuestions(pi: Pi): void {
   });
   onToolResult(pi, (event: ToolResultEvent) => {
     try {
+      if (getState().disabled === true) return;
       if (!isAskingTool(event.toolName)) return;
       const question = pending.get(event.toolCallId);
       if (question === undefined) return;

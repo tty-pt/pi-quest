@@ -1,12 +1,129 @@
 import assert from "node:assert";
-import { fetchActiveInvariants, formatInvariantsComment } from "../../src/surface/invariants.ts";
+import {
+  classifyInvariantByEmbedding,
+  cleanInvariantSummary,
+  fetchActiveInvariants,
+  formatInvariantsComment,
+  INVARIANT_EXEMPLARS,
+  isEligibleStandingInvariant,
+} from "../../src/surface/invariants.ts";
+import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
 import { renderDraftTemplate } from "../../src/views/draft-template.ts";
 import { ensureDraftFile } from "../../src/files.ts";
 import { fakeCtx } from "../fake-pi.ts";
 
-Deno.test("invariant_seeding: formatInvariantsComment formats active invariants cleanly", () => {
+Deno.test("invariant_seeding: cleanInvariantSummary strips episode wrapper cleanly", () => {
+  const raw = "Episode: Standing directive: Minimize and eliminate regex usage across the system. — tested: Recorded permanent invariant.";
+  assert.strictEqual(cleanInvariantSummary(raw), "Minimize and eliminate regex usage across the system.");
+
+  const plain = "Accent-sensitive search (pão ≠ pao)";
+  assert.strictEqual(cleanInvariantSummary(plain), "Accent-sensitive search (pão ≠ pao)");
+});
+
+Deno.test("invariant_seeding: isEligibleStandingInvariant rejects empty, short, and interrogative strings", () => {
+  assert.strictEqual(isEligibleStandingInvariant(""), false);
+  assert.strictEqual(isEligibleStandingInvariant("short"), false);
+  assert.strictEqual(isEligibleStandingInvariant("Judging by the introduced clever preprocessor guards, the wasm boundary is not totally unified. Correct? This is an analysis request. Nothing else."), false);
+  assert.strictEqual(isEligibleStandingInvariant("And our site, which is pure C, should work without those clever precompiler guards? Understood?"), false);
+  assert.strictEqual(isEligibleStandingInvariant("How unified is this boundary right now across all the libs?"), false);
+
+  assert.strictEqual(isEligibleStandingInvariant("Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/"), true);
+  assert.strictEqual(isEligibleStandingInvariant("Accent-sensitive search (pão ≠ pao)"), true);
+  assert.strictEqual(isEligibleStandingInvariant("Never compliment yourself or use self-flattery when asked for metrics."), true);
+});
+
+Deno.test("invariant_seeding: classifyInvariantByEmbedding and fetchActiveInvariants filter transient/harmful directives via /v1/systemone on unseen inputs", async () => {
+  const exemplarSet = new Set(
+    Object.values(INVARIANT_EXEMPLARS).flat().map((s) => s.toLowerCase()),
+  );
+
+  const unseenCases: Array<{ text: string; wantStanding: boolean }> = [
+    { text: "Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/", wantStanding: true },
+    { text: "Accent-sensitive search (pão ≠ pao)", wantStanding: true },
+    { text: "Never compliment yourself or use self-flattery when asked for metrics.", wantStanding: true },
+    { text: "Just commit. We can work on tests later.", wantStanding: false },
+    { text: "Skip tests for now and commit", wantStanding: false },
+    { text: "Make sure everything is committed and pushed as part of this wip commit thing.", wantStanding: false },
+    { text: "Make sure the nd work is committed.", wantStanding: false },
+    { text: "Judging by the introduced clever preprocessor guards... Correct? This is an analysis request.", wantStanding: false },
+  ];
+
+  for (const c of unseenCases) {
+    assert.strictEqual(
+      exemplarSet.has(c.text.toLowerCase()),
+      false,
+      `Test case must be unseen (not in INVARIANT_EXEMPLARS): ${c.text}`,
+    );
+  }
+
+  let systemoneCalls = 0;
+  const server = Deno.serve({ port: 0 }, async (req) => {
+    const url = new URL(req.url);
+    if (url.pathname.includes("/v1/systemone")) {
+      systemoneCalls++;
+      const body = await req.json() as { text: string; labels: Record<string, string[]> };
+      assert.ok(Array.isArray(body.labels["standing_invariant"]), "passes standing_invariant exemplars");
+      assert.ok(Array.isArray(body.labels["transient_or_invalid"]), "passes transient_or_invalid exemplars");
+      const lower = body.text.toLowerCase();
+      const isTransient = lower.includes("commit") || lower.includes("tests later") || lower.includes("skip tests");
+      const decision = isTransient ? "transient_or_invalid" : "standing_invariant";
+      return new Response(JSON.stringify({
+        ok: true,
+        decision,
+        choice: decision,
+        similarity: 0.78,
+        margin: 0.14,
+      }), { headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("not found", { status: 404 });
+  });
+
+  const cfg: QuestConfig = {
+    ...DEFAULT_CONFIG,
+    judgeMode: "auto",
+    embedMode: "auto",
+    judgeUrl: `http://127.0.0.1:${server.addr.port}`,
+    embedUrl: `http://127.0.0.1:${server.addr.port}`,
+  };
+
+  try {
+    for (const c of unseenCases) {
+      const ok = await classifyInvariantByEmbedding(c.text, cfg);
+      assert.strictEqual(ok, c.wantStanding, `classifyInvariantByEmbedding("${c.text}") expected ${c.wantStanding}, got ${ok}`);
+    }
+    assert.ok(systemoneCalls >= 7, `expected /v1/systemone calls for non-question inputs, got ${systemoneCalls}`);
+
+    const g = globalThis as Record<string, unknown>;
+    const prev = g["__pi_mm_directives"];
+    try {
+      g["__pi_mm_directives"] = [
+        { ref: 12, summary: "Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/" },
+        { ref: 35107, summary: "Just commit. We can work on tests later." },
+        { ref: 25357, summary: "Judging by the introduced clever preprocessor guards... Correct? This is an analysis request." },
+        { ref: 45, summary: "Accent-sensitive search (pão ≠ pao)" },
+      ];
+      const verified = await fetchActiveInvariants("/nonexistent/dir", cfg);
+      assert.strictEqual(verified.length, 2);
+      assert.strictEqual(verified[0].ref, 12);
+      assert.strictEqual(verified[1].ref, 45);
+
+      const formatted = formatInvariantsComment(verified);
+      assert.strictEqual(formatted.includes("• Invariant (Ref 12): Pure-C isomorphic UX"), true);
+      assert.strictEqual(formatted.includes("• Invariant (Ref 45): Accent-sensitive search"), true);
+      assert.strictEqual(formatted.includes("35107"), false);
+      assert.strictEqual(formatted.includes("25357"), false);
+    } finally {
+      g["__pi_mm_directives"] = prev;
+    }
+  } finally {
+    await server.shutdown();
+  }
+});
+
+Deno.test("invariant_seeding: formatInvariantsComment formats active invariants and filters interrogatives", () => {
   const invs = [
     { ref: 12, summary: "Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/" },
+    { ref: 25357, summary: "Judging by the introduced clever preprocessor guards... Correct? This is an analysis request." },
     { ref: 45, summary: "Accent-sensitive search (pão ≠ pao)" },
   ];
 
@@ -16,6 +133,7 @@ Deno.test("invariant_seeding: formatInvariantsComment formats active invariants 
   assert.strictEqual(formatted.includes("[Standing Repository Invariants from Memory]:"), true);
   assert.strictEqual(formatted.includes("• Invariant (Ref 12): Pure-C isomorphic UX: no #ifdef or engine symbols in mods/*/ux/"), true);
   assert.strictEqual(formatted.includes("• Invariant (Ref 45): Accent-sensitive search (pão ≠ pao)"), true);
+  assert.strictEqual(formatted.includes("25357"), false);
 });
 
 Deno.test("invariant_seeding: renderDraftTemplate includes invariants comment block", () => {

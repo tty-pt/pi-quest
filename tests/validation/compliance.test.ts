@@ -312,6 +312,39 @@ Deno.test("validationBrief: retains intermediate commits when baseCommit is prov
   replaceState(IDLE_STATE);
 });
 
+Deno.test("validationBrief: scopes git diff to touchedFiles when concurrent files exist in repo", async () => {
+  const cwd = tmp();
+  mkdirSync(join(cwd, ".git"), { recursive: true });
+  const userRequest = "Edit only fileA";
+  writeSampleDraftFile(cwd, userRequest, "Modify fileA", "none");
+
+  const state = createTestQuest(userRequest);
+  state.baseCommit = "c0ffee111";
+  state.touchedFiles = [join(cwd, "fileA.ts")];
+  replaceState(state);
+
+  let capturedDiffArgs: string[] = [];
+  const pi = fakePi();
+  (pi as unknown as { exec: unknown }).exec = async (cmd: string, args: string[]) => {
+    if (cmd === "git" && args[0] === "rev-parse") return { code: 0, stdout: "c0ffee111" };
+    if (cmd === "git" && args[0] === "diff") {
+      capturedDiffArgs = args;
+      return { code: 0, stdout: "diff --git a/fileA.ts b/fileA.ts\n+const a = 1;" };
+    }
+    return { code: 0, stdout: "" };
+  };
+
+  const ctx = fakeCtx(cwd);
+  const brief = await validationBrief(ctx, state, pi);
+
+  check(capturedDiffArgs.includes("--"), "diff includes path separator --");
+  check(capturedDiffArgs.includes("fileA.ts"), "diff passes touched file pathspec");
+  check(!capturedDiffArgs.includes("fileB.ts"), "diff excludes untouched foreign file");
+  check(brief.codeDiff!.includes("+const a = 1;"), "codeDiff contains scoped patch");
+
+  replaceState(IDLE_STATE);
+});
+
 Deno.test("validationBrief: provides touchedFiles manifest and switches guidance when workspace is non-git", () => {
   const nonGitDir = tmp();
   // Ensure no .git exists

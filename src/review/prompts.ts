@@ -5,138 +5,23 @@
 import type { Qid } from "../domain/qid";
 import type { QuestDifficulty, QuestKind, ReviewKind, ReviewVerdict } from "../domain/quest";
 import { DEFAULT_CONFIG, type DraftThresholds } from "../config";
+import {
+  READ_ONLY_RULES,
+  SELF_ATTACK,
+  OUTPUT_FORMAT,
+  AMENDMENT_VALIDITY_GUIDANCE,
+  contextBlock,
+  type ReviewMaterial,
+} from "./prompt-blocks";
 
-export interface ReviewMaterial {
-  objective: string;
-  plan: string;
-  kind?: QuestKind;
-  difficulty?: QuestDifficulty;
-  evidence: string[];
-  amendments: string[];
-  rebuttal?: string;
-  implementationSummary?: string;
-  planDiff?: string;
-  previousVerdict?: ReviewVerdict;
-  previousFindings?: string;
-  // HIGH_LEVEL: #plan revision — re-review briefs name the revision context.
-  revisionNote?: string;
-  // HIGH_LEVEL: #plan revision — validators see the plan's revision history.
-  planRevisionHistory?: string[];
-  // HIGH_LEVEL: #validation — analysis-quest validators judge the analysis
-  // against the bounded research transcript; the extract is truncated, so the
-  // validator sees the substance, never the full session.
-  transcriptExtract?: string;
-  // The plan's verifiable file:line surface. Reviewers spot-check these lines
-  // instead of re-auditing the whole tree for unasserted claims.
-  claimManifest?: string;
-  codeDiff?: string;
-  testReceipt?: string;
-  rtmChecklist?: string;
-  touchedFiles?: string[];
-  // Draft requirements (## Requirements bullets) so the reviewer can judge the maturity bar.
-  requirements?: string[];
-}
-
-const READ_ONLY_RULES = `MANDATORY INVARIANTS:
-1. You are strictly read-only. Do not edit files, run mutating commands, or change project state.
-2. Do not trust summaries or claims. Independently inspect the repository and verify important claims with your read/search tools.
-3. You judge and report. You never modify quest state, the plan, or implementation files.
-4. Stray repo-root notes and forensics docs (e.g. RUN1.md, RUN*.md) are NOT quest history — they document unrelated sessions. The QUEST MATERIAL below is the only authority for this review; ignore any document the material does not reference.
-5. Spot-check the CLAIM MANIFEST lines when present; do not re-derive the whole tree for claims the manifest does not make.`;
-
-const SELF_ATTACK = `TWO-PASS SELF-ATTACK:
-PASS 1: Independently evaluate the material against the request and repository evidence.
-PASS 2: Attack your own conclusion — what requirement could still be missing, what assumption is most dangerous, what is least supported by evidence?
-Only the post-self-critique verdict counts.`;
-
-const OUTPUT_FORMAT = `OUTPUT FORMAT — your response MUST end with exactly this structure:
-
-VERDICT: PASS | FAIL
-SEVERITY: NONE | MINOR | MAJOR | CRITICAL
-
-BUDGET: decide first, then write. Put the VERDICT: and SEVERITY: lines at the very start of your final reply — a run ending on analysis with no VERDICT counts as FAIL.
-
-On PASS, approval is unconditional — do NOT write a REQUIRED REVISIONS section:
-SUPPORTING FINDINGS:
-- Finding: <why the material passes, with concrete evidence>
-
-ADVISORIES (optional, non-blocking observations only):
-- <observation the implementer may consider; never a condition of approval>
-
-On FAIL:
-FINDINGS:
-- Issue: <concrete issue or omission>
-  Evidence: <concrete evidence from repository, plan, or logs>
-
-REQUIRED REVISIONS:
-- <concrete change or targeted investigation required>`;
-
-function contextBlock(material: ReviewMaterial): string {
-  const evidence = material.evidence.length > 0
-    ? material.evidence.join("\n")
-    : "(no evidence items recorded in the draft file)";
-  const amendments = material.amendments.length > 0
-    ? material.amendments.join("\n")
-    : "(no amendments recorded)";
-  const rebuttal = material.rebuttal
-    ? `\n--- IMPLEMENTER REBUTTAL ---\n${material.rebuttal}\n`
-    : "";
-  const diff = material.planDiff
-    ? `\nCHANGES SINCE LAST REVIEW:\n${material.planDiff}\n`
-    : "";
-  const prior = material.previousVerdict
-    ? `\nPRIOR VERDICT: ${material.previousVerdict}\nPRIOR FINDINGS:\n${material.previousFindings ?? "(none)"}\nRe-verify prior findings yourself against the full material above; a prior FAIL presumes nothing about this revision.\n`
-    : "";
-  const revision = material.revisionNote
-    ? `\nPLAN REVISION UNDER REVIEW:\n${material.revisionNote}\nThe objective above is unchanged — a revision that introduces a new goal or acceptance criterion is out of scope and must FAIL.\n`
-    : "";
-  const history = (material.planRevisionHistory ?? []).length > 0
-    ? `\nPLAN REVISION HISTORY (the approved plan moved during implementation):\n${(material.planRevisionHistory ?? []).join("\n")}\n`
-    : "";
-  const manifest = material.claimManifest
-    ? `\nCLAIM MANIFEST (spot-check these in the tree; do not re-derive the whole tree):\n${material.claimManifest}\n`
-    : "";
-  const transcript = material.transcriptExtract
-    ? `\nRESEARCH TRANSCRIPT (bounded extract, most recent first):\n${material.transcriptExtract}\n`
-    : "";
-  const rtm = material.rtmChecklist
-    ? `\nREQUIREMENTS TRACEABILITY MATRIX (RTM):\n${material.rtmChecklist}\n`
-    : "";
-  const codeDiff = material.codeDiff
-    ? `\nGIT DIFF (actual changes to verify against requirements):\n${material.codeDiff}\n`
-    : (material.touchedFiles && material.touchedFiles.length > 0
-      ? `\nTOUCHED FILES (no VCS diff available — inspect these files directly in workspace):\n${material.touchedFiles.map((f) => `- ${f}`).join("\n")}\n`
-      : "");
-  const testReceipt = material.testReceipt
-    ? `\nTEST VERIFICATION RECEIPT:\n${material.testReceipt}\n`
-    : "";
-  const requirements = material.requirements !== undefined
-    ? `\nREQUIREMENTS (${material.requirements.length} recorded in the draft file's ## Requirements section):\n${material.requirements.length > 0 ? material.requirements.map((r) => r.startsWith("- ") ? r : `- ${r}`).join("\n") : "(no requirements recorded in the draft file)"}\n`
-    : "";
-  const difficultyTag = material.difficulty
-    ? `\nQUEST DIFFICULTY: ${material.difficulty}\n`
-    : "";
-  const deliverableLabel = material.kind === "analysis" ? "APPROVED ANALYSIS" : "APPROVED PLAN";
-  return `--- QUEST MATERIAL ---
-ORIGINAL REQUEST (primary acceptance criterion):
-${material.objective || "(none)"}
-${difficultyTag}${rtm}${requirements}
-${deliverableLabel}:
-${material.plan || "(none)"}
-${diff}
-${revision}RECORDED AMENDMENTS:
-${amendments}
-${history}
-EVIDENCE:
-${evidence}
-${manifest}${codeDiff}${testReceipt}${transcript}${rebuttal}${prior}--- END MATERIAL ---`;
-}
-
-const AMENDMENT_VALIDITY_GUIDANCE = `AMENDMENT VALIDITY EVALUATION:
-When RECORDED AMENDMENTS are present, you MUST explicitly evaluate whether each amendment is VALID:
-- An amendment is valid ONLY if it resolves a genuine, proven contradiction between the original request and existing codebase reality, architectural invariants, physical/technical impossibility, or mutually conflicting instructions. The reason must cite concrete repository facts or evidence.
-- An amendment is INVALID if it weakens acceptance criteria for convenience, drops requirements without demonstrating a real contradiction, or misrepresents repository state.
-- If ANY recorded amendment is invalid, ungrounded, or unnecessary, you MUST issue VERDICT: FAIL specifying why the amendment fails.`;
+export {
+  READ_ONLY_RULES,
+  SELF_ATTACK,
+  OUTPUT_FORMAT,
+  AMENDMENT_VALIDITY_GUIDANCE,
+  contextBlock,
+  type ReviewMaterial,
+};
 
 function draftGuidance(
   maturity: DraftThresholds,
@@ -146,7 +31,7 @@ function draftGuidance(
   const diffGuidance = difficulty === "trivial"
     ? `\nPOSTURE (TRIVIAL DIFFICULTY): This task is small/lightweight in scope. Verify the targeted fix and verification step; do NOT demand multi-phase sequencing, extra requirements, or excessive evidence.\n`
     : difficulty === "complex"
-    ? `\nPOSTURE (COMPLEX DIFFICULTY): This task has high blast radius or system complexity. Verify that separable work is decomposed into modular sub-quests (e.g. - [ ] SQ1: Goal [paths: ...] [tests: ...] [req: ...]) with bounded allowedPaths and verification commands, and rigorously scrutinize boundary invariants, risk mitigation, and requirement coverage.\n`
+    ? `\nPOSTURE (COMPLEX DIFFICULTY): This task has high blast radius or system complexity. When multiple independent work streams or distinct sub-systems exist, recommend modular sub-quests (e.g. - [ ] SQ1: Goal [paths: ...] [tests: ...] [req: ...]); for unified or cohesive tasks, accept clear single-lane step sequencing without requiring artificial sub-quest decomposition. Scrutinize boundary invariants, risk mitigation, and requirement coverage.\n`
     : "";
 
   if (kind === "analysis") {
@@ -166,14 +51,9 @@ Distinguish: user requirement (blocks) vs technical constraint (binds) vs review
   }
   return `WHAT YOU MUST EVALUATE (DRAFT REVIEW):
 You review the PLAN, not implementation. Compare the draft plan against the exact recorded request:
-1. Whether the plan addresses the objective; 2. Whether requirements were omitted;
-3. Whether it substituted a different problem; 4. Whether research is sufficient;
-5. Whether assumptions remain unverified; 6. Whether the work sequence fits;
-7. Whether complexity is unnecessary; 8. Whether an alternative was dismissed without evidence;
-9. Whether it commits prematurely; 10. Whether it contradicts itself;
-11. Whether it credibly satisfies the request.
+1. Whether the plan addresses the objective; 2. Whether requirements were omitted; 3. Whether claims are backed by cited file:line evidence; 4. Whether steps are actionable; 5. Whether assumptions remain unverified; 6. Whether it stays in scope; 7. Whether it contradicts itself; 8. Whether it credibly satisfies the request.
 ${AMENDMENT_VALIDITY_GUIDANCE}${diffGuidance}
-MATURITY BAR: a reviewable draft has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an actionable plan. Below the bar, FAIL fast naming exactly what is missing.
+MATURITY BAR: a reviewable plan has ${maturity.requirements} requirements, or 1 requirement plus ${maturity.evidence} evidence items, with an actionable ## Implementation Plan section. Below the bar, FAIL fast naming exactly what is missing.
 Distinguish: user requirement (blocks) vs technical constraint (binds) vs reviewer preference (NEVER blocks).`;
 }
 
@@ -204,13 +84,21 @@ AUDIT CHECKLIST:
 1. Every item, clause, and intent in the ORIGINAL REQUEST and RTM checklist must be fully implemented in the code:
    - When GIT DIFF is provided: Verify that the diff directly implements the requested features across all modified repositories and submodules. If any requirement is missing or only partially addressed in the diff, you MUST issue VERDICT: FAIL.
    - When NO VCS DIFF is available (non-git workspace or external files without VCS): You are an autonomous auditor equipped with read, search, and inspection tools. You MUST directly inspect the target files in the workspace to verify that the implementation is present and satisfies the user's request.
-2. The TEST VERIFICATION RECEIPT must confirm clean execution (exit code 0). If tests failed or were not run, you MUST issue VERDICT: FAIL.
-3. Scan the changes and touched files for placeholder implementations: TODO, FIXME, stub functions returning dummy values, or commented-out tests. If found, issue VERDICT: FAIL.
+2. The TEST VERIFICATION RECEIPT must confirm clean execution (exit code 0) of verification commands relevant to the modified files and scope. Do not fail for unrun full-repo regression suites when targeted verification for the changed code ran cleanly.
+3. Scan the newly introduced changes (in the diff or newly authored code) for placeholder implementations: newly added TODO, FIXME, stub functions returning dummy values, or commented-out tests. Do not fail for pre-existing TODO comments in untouched legacy lines. If new placeholders or stubs were introduced by this work, issue VERDICT: FAIL.
 4. Ensure no regression of repository boundaries (e.g. #ifdef in pure-C isomorphic UX, cross-module #include "*.c").
 5. When a revision history is present, judge every plan move: a revision that corrected an impossibility while holding the objective is legitimate; a revision that weakens the acceptance bar to fit what was built must FAIL.
 6. Verify all RECORDED AMENDMENTS: each must resolve a genuine, proven contradiction backed by code reality. If an amendment dropped user requirements without an actual impossibility, issue VERDICT: FAIL.
-Reviewer preference NEVER blocks; only unmet requirements, unverified code, invalid amendments, or out-of-scope drift do.`;
+7. ANTI-HACK / ROOT-CAUSE AUDIT:
+   Inspect the diff specifically for workarounds designed to appease tests:
+   - Did the agent bypass the underlying architectural issue with hardcoded special cases or dummy branches?
+   - Did the agent patch a symptom in the caller instead of fixing the root cause in the owning subsystem?`;
 }
+
+const FAST_FAIL = (maturity: DraftThresholds, difficulty?: QuestDifficulty): string => {
+  const diffTag = difficulty ? ` (${difficulty} difficulty)` : "";
+  return `FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR${diffTag} (needs ${maturity.requirements} requirements, or 1 requirement + ${maturity.evidence} evidence items, with an actionable plan). Report exactly what structure is missing for the bar plus any requirement omissions from the request, then FAIL. Do NOT audit the plan in depth — the draft must be built up to the bar first.`;
+};
 
 export function getReviewCriteriaSummary(phase: "drafting" | "implementing", kind: QuestKind = "standard"): string {
   if (phase === "drafting") {
@@ -236,16 +124,13 @@ export function getReviewCriteriaSummary(phase: "drafting" | "implementing", kin
   return `Validation Criteria (Implementation):
 - User Request Supremacy: Full fidelity to original user request; following plan but failing request is a FAIL.
 - Diff Completeness: Every request item & RTM requirement implemented in git diff or verified via direct file inspection.
-- Verification: Clean test execution (exit code 0) with zero regressions.
+- RTM Audit: You MUST verify every item in the REQUIREMENTS TRACEABILITY MATRIX (RTM) against the git diff and test logs before issuing VERDICT: PASS.
+- Verification: Clean test execution (exit code 0) for the modified scope with zero regressions.
 - Zero Placeholders: No TODO/FIXME/stubs or dummy returns.
+- Anti-Hack & Root-Cause: Architectural root-cause fix, zero symptom patching, zero weakened tests.
 - Boundary Integrity: No architectural or module boundary violations.
 - Amendments: Verified against genuine contradictions.`;
 }
-
-const FAST_FAIL = (maturity: DraftThresholds, difficulty?: QuestDifficulty): string => {
-  const diffTag = difficulty ? ` (${difficulty} difficulty)` : "";
-  return `FAST-FAIL MODE: this draft is below the REVIEW MATURITY BAR${diffTag} (needs ${maturity.requirements} requirements, or 1 requirement + ${maturity.evidence} evidence items, with an actionable plan). Report exactly what structure is missing for the bar plus any requirement omissions from the request, then FAIL. Do NOT audit the plan in depth — the draft must be built up to the bar first.`;
-};
 
 export function buildReviewPrompt(
   kind: ReviewKind,
@@ -299,6 +184,39 @@ Verify ONLY:
 2. Did requiredTestCommands execute with exit code 0?
 3. Does the diff implement the assigned acceptance criteria?
 Do NOT debate architecture or system-wide preferences.
+
+${OUTPUT_FORMAT}`;
+}
+
+export function buildPlanApprovalPrompt(
+  qid: Qid,
+  target: string,
+  material: ReviewMaterial,
+): string {
+  const diffTag = material.difficulty ? ` (${material.difficulty} difficulty)` : "";
+  return `# PLAN APPROVAL VALIDATION: ${qid} (target revision ${target})${diffTag}
+
+You are an independent, adversarial plan validation auditor.
+The agent is about to ask the human operator to approve the implementation plan.
+Your MANDATORY job is to strictly validate the plan and verify that ALL user requests, instructions, and directives are completely and faithfully captured in the plan file BEFORE the approval question can be presented to the user.
+
+${READ_ONLY_RULES}
+
+WHAT YOU MUST EVALUATE (PLAN APPROVAL AUDIT):
+1. USER REQUEST COMPLETENESS & FIDELITY:
+   - Carefully review the ORIGINAL REQUEST and all ACTIVE USER DIRECTIVES / REFINEMENTS below.
+   - Verify that EVERY requirement, constraint, and directive from the user is explicitly and completely addressed in the plan file (under ## Requirements and/or ## Implementation Plan).
+   - If ANY user request is omitted, dropped, diluted, or deferred without justification, you MUST issue VERDICT: FAIL specifying the exact missing requests.
+   - The agent cannot unilaterally drop, soften, or alter user requirements.
+2. PLAN SOUNDNESS & ACTIONABILITY:
+   - Does the plan provide concrete, actionable steps rather than vague hand-waving?
+   - Are the work sequence and architecture sound?
+   - Are there explicit verification steps (tests/checks) to prove the work is correct?
+   - Does the plan contradict existing repository reality or invariants?
+
+${contextBlock(material)}
+
+${SELF_ATTACK}
 
 ${OUTPUT_FORMAT}`;
 }

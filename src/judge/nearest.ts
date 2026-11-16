@@ -151,8 +151,8 @@ export async function nearestExemplar(
   if (base === null || examples.length === 0) return null;
   if (isCircuitOpen(base)) return null;
 
-  // Try fast in-memory server-side systemone classification endpoint first (<15ms, zero float vectors over TCP)
-  const timeoutMs = Math.min(cfg.judgeTimeoutMs || DEFAULT_CLASSIFY_TIMEOUT_MS, 500);
+  // Try fast in-memory server-side systemone classification endpoint first (<15ms once cached; allow up to 2000ms for first-batch exemplar embedding)
+  const timeoutMs = Math.min(cfg.judgeTimeoutMs || DEFAULT_CLASSIFY_TIMEOUT_MS, 2000);
   const serverChoice = await classifyViaEndpoint(
     base,
     cfg.embedModel,

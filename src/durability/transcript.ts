@@ -3,9 +3,14 @@
 // current session plus child-research sibling sessions, tail-bounded and
 // truncation-marked so the validator never faces the full transcript.
 import { homedir } from "node:os";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { PiCtx, TranscriptEntry } from "../hooks/events";
+import { DEFAULT_TRIGGER_PREFIXES, type QuestConfig } from "../config";
+import { DEFAULT_INTENT_EXEMPLARS } from "../domain/intent-exemplars";
+import { isFallbackAdvance } from "../domain/intent";
+import { mergedExemplars } from "../judge/intent-classifier";
+import { gate, nearestExemplar } from "../judge/nearest";
 import { decodeSnapshot, SNAPSHOT_TYPE } from "./snapshots";
 
 export const TRANSCRIPT_EXTRACT_LIMIT = 8000;
@@ -92,9 +97,25 @@ async function sessionFiles(sessionsDir: string): Promise<Array<{ path: string; 
   return files.slice(0, SCAN_FILES);
 }
 
+const SCAN_TAIL_BYTES = 512 * 1024;
+
 async function tailLines(path: string): Promise<string[]> {
-  const text = await readFile(path, "utf8");
-  return text.split("\n").filter((line) => line.trim() !== "").slice(-SCAN_TAIL_LINES);
+  const fh = await open(path, "r");
+  try {
+    const info = await fh.stat();
+    const size = info.size;
+    if (size === 0) return [];
+    const readLen = Math.min(size, SCAN_TAIL_BYTES);
+    const offset = size - readLen;
+    const buf = new Uint8Array(readLen);
+    const { bytesRead } = await fh.read(buf, 0, readLen, offset);
+    const text = new TextDecoder("utf-8").decode(buf.subarray(0, bytesRead));
+    const lines = text.split("\n");
+    if (offset > 0 && lines.length > 0) lines.shift();
+    return lines.filter((line) => line.trim() !== "").slice(-SCAN_TAIL_LINES);
+  } finally {
+    await fh.close();
+  }
 }
 
 function parseLine(line: string): Array<Record<string, unknown>> | null {
@@ -224,5 +245,102 @@ export function extractRecentConversationContext(
     return `... [earlier conversation omitted] ...\n\n${joined.slice(-maxChars)}`;
   } catch {
     return "";
+  }
+}
+
+function stripLeadingTriggerPrefix(text: string): string {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  for (const p of [...DEFAULT_TRIGGER_PREFIXES, "refactor", "chore", "@quest"]) {
+    if (lower.startsWith(p.toLowerCase())) {
+      let idx = p.length;
+      while (idx < trimmed.length && ":- \t".includes(trimmed[idx])) idx++;
+      return trimmed.slice(idx).trim();
+    }
+  }
+  return trimmed;
+}
+
+const DEFAULT_ADVANCE_PHRASES: readonly string[] = DEFAULT_INTENT_EXEMPLARS.advance ?? [];
+
+export function isReferentialActivationObjective(
+  text: string,
+  extraPhrases: readonly string[] = DEFAULT_ADVANCE_PHRASES,
+): boolean {
+  const trimmed = text.trim();
+  if (trimmed === "") return true;
+  return isFallbackAdvance(trimmed, extraPhrases);
+}
+
+export async function resolvePriorConversationObjective(
+  ctx: PiCtx,
+  rawObjective: string,
+  cfg?: QuestConfig,
+): Promise<string> {
+  const trimmed = rawObjective.trim();
+  const phrases = [...DEFAULT_ADVANCE_PHRASES, ...(cfg?.steeringPhrases ?? [])];
+  if (isReferentialActivationObjective(trimmed, phrases)) {
+    return extractPriorConversationObjective(ctx, trimmed, phrases) || trimmed;
+  }
+  if (trimmed.length < 60 && cfg && cfg.embedMode !== "off" && cfg.judgeMode !== "off") {
+    try {
+      const verdict = await nearestExemplar(cfg, mergedExemplars(cfg), trimmed);
+      if (verdict !== null) {
+        const kind = gate(verdict, {
+          minSimilarity: cfg.intentMinSimilarity,
+          minMargin: 0.002,
+          harmless: "refinement",
+          actionable: new Set(["advance", "ack"]),
+        });
+        if (kind === "advance" || kind === "ack") {
+          return extractPriorConversationObjective(ctx, "", phrases) || trimmed;
+        }
+      }
+    } catch { /* fallback to sync */ }
+  }
+  return trimmed;
+}
+
+export function extractPriorConversationObjective(
+  ctx: PiCtx,
+  rawObjective = "",
+  extraPhrases: readonly string[] = DEFAULT_ADVANCE_PHRASES,
+): string {
+  const trimmed = rawObjective.trim();
+  const referential = isReferentialActivationObjective(trimmed, extraPhrases);
+  if (!referential && trimmed.length >= 25) return trimmed;
+  try {
+    const entries = ctx?.sessionManager?.getEntries?.();
+    if (!Array.isArray(entries) || entries.length === 0) return trimmed;
+    const userMessages: string[] = [];
+    let lastAssistant = "";
+    for (let i = entries.length - 1; i >= 0 && userMessages.length < 4; i--) {
+      const entry = entries[i];
+      if (!entry) continue;
+      const text = messageText(entry["data"] ?? entry);
+      if (!text) continue;
+      if (text.startsWith("[assistant] ") && lastAssistant === "") {
+        lastAssistant = text.slice("[assistant] ".length).trim();
+      } else if (text.startsWith("[user] ")) {
+        const body = text.slice("[user] ".length).trim();
+        if (
+          body.length > 0 && !body.startsWith("/") && body !== trimmed &&
+          !isReferentialActivationObjective(body, extraPhrases) &&
+          !isReferentialActivationObjective(stripLeadingTriggerPrefix(body), extraPhrases)
+        ) {
+          userMessages.unshift(body);
+        }
+      }
+    }
+    if (userMessages.length === 0 && lastAssistant === "") return trimmed;
+    const primaryUserGoal = userMessages[userMessages.length - 1] ?? "";
+    if (!referential && trimmed !== "") {
+      return primaryUserGoal ? `${trimmed} — Context: ${primaryUserGoal.slice(0, 300)}` : trimmed;
+    }
+    if (primaryUserGoal !== "") return primaryUserGoal.slice(0, 500);
+    const firstLine = lastAssistant.split("\n").find((l) => l.trim().length > 10)?.trim() ?? "";
+    return firstLine.slice(0, 400) || trimmed;
+  } catch {
+    return trimmed;
   }
 }

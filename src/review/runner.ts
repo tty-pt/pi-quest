@@ -36,6 +36,7 @@ export interface RunnerEnv {
   ctx: PiCtx;
   ownerRunId: string;
   model?: string;
+  routerDefault?: string;
   thinking?: string;
   toolName?: string;
   maxDurationMs?: number;
@@ -47,6 +48,95 @@ export function createRunner(env: RunnerEnv): ReviewRunner | null {
   if (!isReviewerAvailable(env.pi, toolName)) return null;
   return {
     launch: (prompt, signal) => runReview(env, prompt, signal),
+  };
+}
+
+function parseResponseText(result: Record<string, unknown> | undefined, record: Record<string, unknown>): string {
+  if (result?.["kind"] === "text" && typeof result["text"] === "string") {
+    return result["text"] as string;
+  }
+  if (result?.["kind"] === "structured" && result["value"] !== undefined) {
+    try {
+      return JSON.stringify(result["value"]);
+    } catch {
+      return "";
+    }
+  }
+  const fallback = record["contentText"] ?? record["text"];
+  return typeof fallback === "string" ? fallback : "";
+}
+
+function resolveSubagentModel(env: RunnerEnv): string | undefined {
+  let subagentModel = env.model;
+  if (subagentModel && subagentModel.toLowerCase().startsWith("quest/")) {
+    const physical = lastRoutedModel();
+    subagentModel = (physical && !physical.toLowerCase().startsWith("quest/")) ? physical : undefined;
+  }
+  if (!subagentModel) {
+    const ctxModel = (env.ctx as { model?: unknown } | undefined)?.model;
+    const isVirtual = typeof ctxModel === "string"
+      ? ctxModel.toLowerCase().startsWith("quest/")
+      : (typeof (ctxModel as { id?: string })?.id === "string" && (ctxModel as { id: string }).id.toLowerCase().startsWith("quest/"));
+    if (isVirtual) {
+      const physical = lastRoutedModel();
+      if (physical && !physical.toLowerCase().startsWith("quest/")) {
+        subagentModel = physical;
+      } else if (env.routerDefault && !env.routerDefault.toLowerCase().startsWith("quest/")) {
+        subagentModel = env.routerDefault;
+      } else {
+        const envDefault = process.env.PI_QUEST_ROUTER_DEFAULT;
+        if (envDefault && !envDefault.toLowerCase().startsWith("quest/")) {
+          subagentModel = envDefault;
+        }
+      }
+    }
+  }
+  return subagentModel;
+}
+
+function setupReviewWatchers(
+  env: RunnerEnv,
+  requestId: string,
+  nodeId: string,
+  signal: AbortSignal,
+  maxDurationMs: number,
+  inactivityLimitMs: number,
+  fail: (err: Error) => void,
+): { noteActivity: () => void; cleanup: () => void } {
+  let lastActivityAt = Date.now();
+  const startTime = Date.now();
+  let settled = false;
+
+  const maxTimer = setTimeout(() => {
+    fail(new Error("Subagent execution timed out (quest_journal_deadline: max_duration)"));
+  }, maxDurationMs);
+
+  const inactivityInterval = setInterval(() => {
+    const now = Date.now();
+    if (now - lastActivityAt > inactivityLimitMs && now - startTime > inactivityLimitMs) {
+      fail(new Error("Subagent execution timed out (quest_journal_deadline: inactivity)"));
+    }
+  }, 15000);
+
+  signal.addEventListener("abort", () => {
+    if (settled) return;
+    try {
+      env.pi.events.emit("prompt-template:subagent:cancel", {
+        requestId,
+        nodeId,
+        ownerRunId: env.ownerRunId,
+      });
+    } catch { /* cancel is best-effort */ }
+    fail(new Error(`review cancelled: ${String(signal.reason || "aborted")}`));
+  }, { once: true });
+
+  return {
+    noteActivity: () => { lastActivityAt = Date.now(); },
+    cleanup: () => {
+      settled = true;
+      clearTimeout(maxTimer);
+      clearInterval(inactivityInterval);
+    },
   };
 }
 
@@ -64,113 +154,47 @@ function runReview(
     }
     const requestId = uniqueId("quest_review");
     const nodeId = uniqueId("review");
-    const startTime = Date.now();
-    let lastActivityAt = startTime;
     let settled = false;
     const unsubs: Array<() => void> = [];
 
-    const cleanup = () => {
-      settled = true;
-      clearTimeout(maxTimer);
-      clearInterval(inactivityInterval);
-      for (const unsub of unsubs) {
-        try {
-          unsub();
-        } catch {
-          // Unsubscribe is best-effort.
-        }
-      }
-    };
-
     const fail = (err: Error) => {
       if (settled) return;
-      cleanup();
+      settled = true;
+      watchers.cleanup();
+      for (const unsub of unsubs) {
+        try { unsub(); } catch { /* ignore */ }
+      }
       reject(err);
     };
 
-    const maxTimer = setTimeout(() => {
-      fail(new Error("Subagent execution timed out (quest_journal_deadline: max_duration)"));
-    }, maxDurationMs);
-
-    const inactivityInterval = setInterval(() => {
-      const now = Date.now();
-      if (now - lastActivityAt > inactivityLimitMs && now - startTime > inactivityLimitMs) {
-        fail(new Error("Subagent execution timed out (quest_journal_deadline: inactivity)"));
-      }
-    }, 15000);
-
-    signal.addEventListener("abort", () => {
-      if (settled) return;
-      try {
-        env.pi.events.emit("prompt-template:subagent:cancel", {
-          requestId,
-          nodeId,
-          ownerRunId: env.ownerRunId,
-        });
-      } catch {
-        // Cancel is best-effort; the timers still bound the run.
-      }
-      fail(new Error(`review cancelled: ${String(signal.reason || "aborted")}`));
-    }, { once: true });
-
-    const noteActivity = () => {
-      lastActivityAt = Date.now();
-    };
+    const watchers = setupReviewWatchers(env, requestId, nodeId, signal, maxDurationMs, inactivityLimitMs, fail);
 
     const onResponse = (data: unknown) => {
       const record = data as Record<string, unknown> | null;
       if (!record || record["requestId"] !== requestId || settled) return;
       const status = record["status"] as string | undefined;
       if (status && status !== "completed") {
-        // Preserve the bridge error text: the flow classifies launch failures
-        // (e.g. unresolvable reviewer models) for candidate fallback.
         const bridgeError = record["error"];
-        const detail = typeof bridgeError === "string" && bridgeError.length > 0
-          ? `: ${bridgeError}`
-          : "";
+        const detail = typeof bridgeError === "string" && bridgeError.length > 0 ? `: ${bridgeError}` : "";
         fail(new Error(`Subagent delegation failed (${status})${detail}`));
         return;
       }
       const result = record["result"] as Record<string, unknown> | undefined;
-      let text = "";
-      if (result?.["kind"] === "text" && typeof result["text"] === "string") {
-        text = result["text"] as string;
-      } else if (result?.["kind"] === "structured" && result["value"] !== undefined) {
-        try {
-          text = JSON.stringify(result["value"]);
-        } catch {
-          text = "";
-        }
-      } else {
-        const fallback = record["contentText"] ?? record["text"];
-        text = typeof fallback === "string" ? fallback : "";
+      const text = parseResponseText(result, record);
+      settled = true;
+      watchers.cleanup();
+      for (const unsub of unsubs) {
+        try { unsub(); } catch { /* ignore */ }
       }
-      cleanup();
       resolve({ text });
     };
 
     try {
       unsubs.push(env.pi.events.on("prompt-template:subagent:response", onResponse));
-      unsubs.push(env.pi.events.on("prompt-template:subagent:update", noteActivity));
-      unsubs.push(env.pi.events.on("subagent:activity", noteActivity));
-      unsubs.push(env.pi.events.on("subagent:started", noteActivity));
-      let subagentModel = env.model;
-      if (subagentModel && subagentModel.toLowerCase().startsWith("quest/")) {
-        const physical = lastRoutedModel();
-        subagentModel = (physical && !physical.toLowerCase().startsWith("quest/")) ? physical : undefined;
-      }
-      if (!subagentModel) {
-        const ctxModel = (env.ctx as { model?: unknown } | undefined)?.model;
-        const isVirtual = typeof ctxModel === "string"
-          ? ctxModel.toLowerCase().startsWith("quest/")
-          : (typeof (ctxModel as { id?: string })?.id === "string" && (ctxModel as { id: string }).id.toLowerCase().startsWith("quest/"));
-        if (isVirtual) {
-          const physical = lastRoutedModel();
-          if (physical && !physical.toLowerCase().startsWith("quest/")) {
-            subagentModel = physical;
-          }
-        }
-      }
+      unsubs.push(env.pi.events.on("prompt-template:subagent:update", watchers.noteActivity));
+      unsubs.push(env.pi.events.on("subagent:activity", watchers.noteActivity));
+      unsubs.push(env.pi.events.on("subagent:started", watchers.noteActivity));
+      const subagentModel = resolveSubagentModel(env);
       env.pi.events.emit("prompt-template:subagent:request", {
         requestId,
         ownerRunId: env.ownerRunId,
@@ -180,8 +204,6 @@ function runReview(
         context: "fresh",
         cwd: env.ctx.cwd,
         ...(subagentModel ? { model: subagentModel } : {}),
-        // Omitted by default (inherit): the extension never fabricates a
-        // thinking level the child registry may not carry.
         ...(env.thinking ? { thinking: env.thinking } : {}),
         result: { kind: "text" },
       });

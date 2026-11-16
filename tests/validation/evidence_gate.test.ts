@@ -234,3 +234,89 @@ Deno.test("isTestCommand matches runner tokens, not words anywhere in the comman
   check(!isTestCommand("npm install"), "npm install is not a test");
   check(isTestCommand("./ci-run.sh", undefined, ["./ci-run.sh"]), "operator testCommands extend the set");
 });
+
+Deno.test("isTestCommand matches targeted test scripts, check scripts, and unit runners", () => {
+  check(isTestCommand("sh tests/unit/run-test-lamina-bridge.sh"), "sh run-test script recognized");
+  check(isTestCommand("sh scripts/check-module-boundaries.sh"), "sh check script recognized");
+  check(isTestCommand("./scripts/check-no-site-specific-js.sh"), "direct check script recognized");
+  check(isTestCommand("node tests/unit/test-lamina-bridge-routing.mjs"), "node test script recognized");
+  check(isTestCommand("bash tests/pages/10-pages-render.sh"), "pages test script recognized");
+  check(isTestCommand("make site-wasm"), "make target recognized");
+  check(isTestCommand("make test-mod MOD=song"), "make test-mod recognized");
+  check(isTestCommand("make test-fast"), "make test-fast recognized");
+  check(!isTestCommand("cat tests/unit/run-test-lamina-bridge.sh"), "cat of test file not recognized as runner");
+  check(!isTestCommand("git diff scripts/check-module-boundaries.sh"), "git diff not recognized as runner");
+});
+
+Deno.test("assertCompletionEligibility accepts lastPassingTestReceipt if executed after file modifications", async () => {
+  const quest = createQuest("Task", QID);
+  quest.phase = "implementing";
+  quest.kind = "standard";
+  quest.lastFileModifiedAt = 1000;
+  quest.lastPassingTestReceipt = {
+    command: "make test-mod MOD=song",
+    exitCode: 0,
+    tailOutput: "OK",
+    executedAt: 2000,
+  };
+
+  // Latest test is a failing out-of-scope command
+  await assertCompletionEligibility(quest, {
+    getDiffStat: async () => "file.c | 1 +",
+    getLatestTest: () => ({
+      command: "make test",
+      exitCode: 1,
+      tailOutput: "Unrelated flake",
+      executedAt: 3000,
+    }),
+  });
+  // Completes cleanly because passing test was executed at 2000 > modified at 1000
+});
+
+Deno.test("assertCompletionEligibility rejects superficial single-file touch when multi-requirement plan exists", async () => {
+  const quest = createQuest("Task", QID);
+  quest.phase = "implementing";
+  quest.kind = "standard";
+  quest.difficulty = "major";
+  quest.rtm = [
+    { id: "R1", description: "First req", status: "pending" },
+    { id: "R2", description: "Second req", status: "pending" },
+    { id: "R3", description: "Third req", status: "pending" },
+  ];
+
+  let threw = false;
+  let errMsg = "";
+  try {
+    await assertCompletionEligibility(quest, {
+      getDiffStat: async () => "mods/song/parser.c | 1 +\n 1 file changed",
+      getDiffPatch: async () => "+x",
+      getLatestTest: () => ({ command: "make test", exitCode: 0, tailOutput: "ok" }),
+    });
+  } catch (err) {
+    threw = true;
+    errMsg = (err as Error).message;
+  }
+
+  check(threw, "threw on superficial touch with 3 requirements");
+  check(errMsg.includes("Implementation depth check failed"), "mentions implementation depth");
+});
+
+Deno.test("assertCompletionEligibility allows multi-requirement task when substantive diff is present", async () => {
+  const quest = createQuest("Task", QID);
+  quest.phase = "implementing";
+  quest.kind = "standard";
+  quest.difficulty = "major";
+  quest.rtm = [
+    { id: "R1", description: "First req", status: "pending" },
+    { id: "R2", description: "Second req", status: "pending" },
+    { id: "R3", description: "Third req", status: "pending" },
+  ];
+
+  await assertCompletionEligibility(quest, {
+    getDiffStat: async () => "mods/song/parser.c | 50 +++\nmods/song/test.c | 20 ++\n 2 files changed",
+    getDiffPatch: async () => "diff --git a/mods/song/parser.c b/mods/song/parser.c\n+ substantive implementation text here with multiple lines and functions",
+    getLatestTest: () => ({ command: "make test", exitCode: 0, tailOutput: "ok" }),
+  });
+  // No exception thrown
+});
+

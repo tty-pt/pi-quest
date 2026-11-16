@@ -5,7 +5,8 @@
 // is disjoint from the shipped exemplars so the numbers are held-out.
 import { check } from "../check.ts";
 import { DEFAULT_CONFIG, type QuestConfig } from "../../src/config.ts";
-import { clearIntentMemo, interpretUserTurn, type UserIntentKind } from "../../src/domain/intent.ts";
+import { type UserIntentKind } from "../../src/domain/intent.ts";
+import { clearIntentMemo, interpretUserTurn } from "../../src/judge/intent-classifier.ts";
 import { type Case, evaluateStrategy, formatReport, serverInfo, type Strategy } from "./harness.ts";
 
 const LIVE = Deno.env.get("PI_QUEST_EVAL_JUDGE") === "1";
@@ -29,6 +30,9 @@ const CORPUS: Array<[string, UserIntentKind]> = [
   ["fix the lint errors before you go on", "subquest_now"], ["antes de avançar, corrige o teste do parser", "subquest_now"],
   ["afterwards, we need a README section", "subquest_later"], ["depois disto, adiciona um changelog", "subquest_later"],
   ["thanks", "ack"], ["obrigado", "ack"], ["nice work", "ack"], ["hi", "ack"],
+  ["I'll compact but you will forget your most important thoughts. Help me out by giving me a handoff prompt.", "handoff"],
+  ["You are not succeeding. Check what my requests were and what was actually accomplished and give a handoff prompt for a new agent.", "handoff"],
+  ["give a very detailed handoff prompt right now", "handoff"], ["faz um handoff para outro agente continuar", "handoff"],
 ];
 
 Deno.test({
@@ -36,7 +40,7 @@ Deno.test({
   ignore: !LIVE,
   fn: async () => {
     const cfg: QuestConfig = { ...DEFAULT_CONFIG, judgeMode: "auto", judgeUrl: URL_, judgeProtocol: "systemone" };
-    const actionable = new Set<string>(["advance", "abort", "constraint", "subquest_now", "subquest_later"]);
+    const actionable = new Set<string>(["advance", "abort", "constraint", "subquest_now", "subquest_later", "handoff"]);
     const strategy: Strategy = {
       name: `embeddings(${cfg.embedModel})`,
       classify: async (text) => {

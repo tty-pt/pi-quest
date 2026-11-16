@@ -20,16 +20,20 @@ async function resolveCitableFile(cwd: string, ref: string): Promise<string | nu
     return citableFileCache.get(cacheKey)!;
   }
   const candidates: string[] = [join(cwd, ref)];
+  const SEARCH_DIRS = ["src", "lib", "pkg", "external", "mods"];
+  for (const dir of SEARCH_DIRS) {
+    candidates.push(join(cwd, dir, ref));
+  }
   if (!ref.includes("/")) {
-    try {
-      for (const top of readdirSync(join(cwd, "mods"))) {
-        candidates.push(join(cwd, "mods", top, ref));
+    for (const dir of SEARCH_DIRS) {
+      try {
+        for (const top of readdirSync(join(cwd, dir))) {
+          candidates.push(join(cwd, dir, top, ref));
+        }
+      } catch {
+        // Dir not present or not readable.
       }
-    } catch {
-      // No mods dir to probe.
     }
-  } else {
-    candidates.push(join(cwd, "mods", ref));
   }
   for (const candidate of candidates) {
     try {

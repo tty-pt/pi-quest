@@ -52,3 +52,20 @@ Deno.test("tracker knows in-flight reviews", () => {
   check(!hasInFlight("qid-4"), "settled on cancel");
   check(!hasAnyInFlight(), "idle again");
 });
+
+Deno.test("tracker supersedeReviewThenBootFresh passes a live AbortSignal that aborts when superseded", () => {
+  const signals: AbortSignal[] = [];
+  supersedeReviewThenBootFresh("qid-5", "rev-1", (sig) => {
+    signals.push(sig);
+  });
+  check(signals.length === 1, "first boot called with signal");
+  check(signals[0].aborted === false, "first signal initially not aborted");
+  supersedeReviewThenBootFresh("qid-5", "rev-2", (sig) => {
+    signals.push(sig);
+  });
+  check(signals.length === 2, "second boot called with signal");
+  check(signals[0].aborted === true, "first signal immediately aborted by superseding boot");
+  check(signals[1].aborted === false, "second signal active");
+  cancelReview("qid-5");
+  check(signals[1].aborted === true, "second signal aborted on cancelReview");
+});

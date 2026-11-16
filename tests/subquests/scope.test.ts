@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getState, replaceState } from "../../src/app/store.ts";
 import { createQuest, IDLE_STATE } from "../../src/domain/quest.ts";
-import { createDraft, promote } from "../../src/domain/transitions.ts";
+import { createDraft, claimComplete, promote } from "../../src/domain/transitions.ts";
 import { draftPath } from "../../src/domain/paths.ts";
 import type { Qid } from "../../src/domain/qid.ts";
 import { triageInQuestRequest } from "../../src/subquests/scope.ts";
@@ -255,3 +255,79 @@ Deno.test("a message that merely contains a steering word is still a directive",
   }
 });
 
+
+Deno.test("triage serves handoff meta-requests without recording them", () => {
+  const t = triageInQuestRequest("abc123", "handoff", "give me a handoff prompt");
+  check(t !== null && t.action === "handoff" && t.record === false, "handoff is not recorded");
+  check(t!.steer.includes("NOT a requirement"), "steer says why");
+});
+
+Deno.test("a handoff request mid-quest writes a handoff and never becomes R#/amendment/refinement", async () => {
+  const ask = "I'll compact but you will forget your most important thoughts. Help me out by giving me a handoff prompt.";
+  const restore = stubIntentEmbeddings({ [ask]: "handoff" });
+  const h = await implementingHarness("1xHand", JUDGE_ON);
+  try {
+    await h.handler({ text: ask }, h.ctx);
+    await h.handler({ text: ask }, h.ctx);
+    const after = getState();
+    check(after.phase === "implementing", "stays implementing");
+    check(after.amendments.length === 0 && after.refinements.length === 0, "nothing recorded");
+    const doc = await Deno.readTextFile(join(h.cwd, draftPath("1xHand" as Qid)));
+    check(!doc.includes("[User Directive]"), "no requirement appended to the quest doc");
+    const handoffs = [...Deno.readDirSync(join(h.cwd, ".pi", "quest", "handoffs"))];
+    check(handoffs.length >= 1, "baseline handoff written");
+    const steer = JSON.stringify(h.pi.sent);
+    check(steer.includes("quest_handoff") && steer.includes(".pi/quest/handoffs/"), "agent steered to enrich it");
+  } finally {
+    restore();
+    replaceState(IDLE_STATE);
+    rmSync(h.cwd, { recursive: true, force: true });
+  }
+});
+
+Deno.test("negative and style constraints never award themselves a subquest", () => {
+  const directives = [
+    "avoid magic constants, please",
+    "Please avoid magic constants in the rendering loop",
+    "don't use raw pointers here",
+    "never allocate on the stack in audio.c",
+    "stop doing regex string replacements",
+    "remember to avoid global variables",
+    "naming convention: use snake_case for private helpers",
+  ];
+
+  for (const text of directives) {
+    const t = triageInQuestRequest("1xTest", "subquest_now", text);
+    check(t !== null, `triaged "${text}"`);
+    check(t!.action === "amend_requirement", `"${text}" routed to amend_requirement, not preempt_subquest`);
+  }
+});
+
+Deno.test("operator rejection or feedback during validating cancels validation and returns quest to implementing", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-quest-val-decline-"));
+  try {
+    writeQuestSettings(cwd, JUDGE_OFF);
+    const pi = fakePi();
+    installSubQuests(pi);
+    const qid = "1xDecl" as Qid;
+    const base = createDraft(createQuest("Test quest", qid), "test-draft");
+    const authored = { ...base, draft: { ...base.draft!, planAuthored: true, contentHash: "h1" } };
+    const validating = claimComplete(promote(authored, "user"));
+    replaceState(validating);
+    const filePath = join(cwd, draftPath(qid));
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, "# Test\n\n## Requirements\n- R1: test\n\n## Implementation Plan\n1. Do thing\n", "utf8");
+
+    const ctx = fakeCtx(cwd);
+    const handler = pi.eventHandlers["input"]![0];
+
+    await handler({ text: "No. That's not good. DECLINE. Have you looked at what happens when you zoom out?" }, ctx);
+    const after = getState();
+    check(after.phase === "implementing", `expected validating quest to return to implementing on DECLINE/feedback, got ${after.phase}`);
+    check(after.amendments.length === 1, "directive recorded as amendment");
+    check(pi.sent.some((s) => JSON.stringify(s).includes("Validation cancelled and quest returned to implementing")), "steered agent back to implementing");
+  } finally {
+    replaceState(IDLE_STATE);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

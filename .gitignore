@@ -1,4 +1,4 @@
 node_modules/
-pi-quest-bundle.zip
 *.tgz
 *:Zone.Identifier
+/pi-quest-bundle.zip

@@ -1,13 +1,13 @@
-// HIGH_LEVEL: #commands — Ctrl+P opens the floating plan viewer, Ctrl+Shift+P opens the editor.
+// HIGH_LEVEL: #commands — /quest edit and /quest plan open the active quest plan in $EDITOR.
 // HIGH_LEVEL: #surface — on-demand inspection, zero inference.
 // SPEC: B1.3 (draft stays inspectable), B1.8 (amendments stay inspectable).
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { getState } from "../../app/store";
+import type { Qid } from "../../domain/qid";
 import { draftPath } from "../../domain/paths";
+import { draftFilePath } from "../../files";
 import type { Pi, PiCtx } from "../../hooks/events";
 import { readQuestConfig } from "../../config";
-import { openPlanViewer, OVERLAY_FRAME } from "../../views/plan-overlay";
 
 const TOAST_BODY_MAX = 800;
 
@@ -19,81 +19,60 @@ function notify(ctx: PiCtx, text: string): void {
   }
 }
 
-export async function viewActivePlan(ctx: PiCtx): Promise<void> {
+export async function resolveActivePlanFile(
+  ctx: PiCtx,
+): Promise<{ qid: string; relPath: string; fullPath: string; content: string } | { error: string }> {
   const state = getState();
   if (state.qid === null) {
-    notify(ctx, "No active quest.");
-    return;
+    return { error: "No active quest." };
   }
-  let qid = state.qid;
-  let file = draftPath(qid);
-  let content: string;
+  const qid = state.qid;
+  const relPath = draftPath(qid);
+  const fullPath = draftFilePath(ctx.cwd, qid as Qid);
   try {
-    content = await readFile(join(ctx.cwd, file), "utf8");
+    const content = await readFile(fullPath, "utf8");
+    return { qid, relPath, fullPath, content };
   } catch {
-    // If this is a child sub-quest mounted in memory, fall back to the parent quest plan
     if (state.parentQid) {
+      const parentRel = draftPath(state.parentQid);
+      const parentFull = draftFilePath(ctx.cwd, state.parentQid as Qid);
       try {
-        const parentFile = draftPath(state.parentQid);
-        content = await readFile(join(ctx.cwd, parentFile), "utf8");
-        qid = state.parentQid;
-        file = parentFile;
+        const content = await readFile(parentFull, "utf8");
+        return { qid: state.parentQid, relPath: parentRel, fullPath: parentFull, content };
       } catch {
-        notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
-        return;
+        return { error: `Quest ${qid} has no draft file yet (${relPath}).` };
       }
-    } else {
-      notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
-      return;
     }
-  }
-  const title = `Quest ${qid} — plan (${file})`;
-  if (ctx.mode !== "tui" || typeof ctx.ui.custom !== "function") {
-    const excerpt = content.slice(0, TOAST_BODY_MAX);
-    notify(ctx, `${title}\n${excerpt}`);
-    return;
-  }
-  try {
-    const cols = process.stdout.columns ?? 120;
-    const rows = process.stdout.rows ?? 40;
-    // Full-size box (cols − 2 × rows − 2, even offsets), nudged one cell
-    // inside both axes so a 1-cell margin frames it on all sides. The list
-    // body is budgeted so the worst-case frame (body + OVERLAY_FRAME chrome)
-    // lands exactly at maxHeight: pi only trims an overlay above that bound,
-    // so the bottom border can never be amputated.
-    const width = cols - 2;
-    const rowBudget = Math.max(OVERLAY_FRAME + 1, rows - 2);
-    const visible = Math.max(1, rowBudget - OVERLAY_FRAME);
-    await ctx.ui.custom<void>(async (_tui, theme, _kb, done) => {
-      return openPlanViewer(title, content, theme, () => done(), { visible, width });
-    }, {
-      overlay: true,
-      overlayOptions: { width, maxHeight: rowBudget, anchor: "top-left", offsetX: 1, offsetY: 1 },
-    });
-  } catch {
-    // The viewer is best-effort; the draft file remains the source.
+    return { error: `Quest ${qid} has no draft file yet (${relPath}).` };
   }
 }
 
-export async function editActivePlan(pi: Pi, ctx: PiCtx): Promise<void> {
-  const state = getState();
-  if (state.qid === null) {
-    notify(ctx, "No active quest.");
+export async function viewActivePlan(ctx: PiCtx): Promise<void> {
+  const resolved = await resolveActivePlanFile(ctx);
+  if ("error" in resolved) {
+    notify(ctx, resolved.error);
     return;
   }
-  const qid = state.qid;
-  const file = draftPath(qid);
-  const fullPath = join(ctx.cwd, file);
-  try {
-    await readFile(fullPath, "utf8");
-  } catch {
-    notify(ctx, `Quest ${qid} has no draft file yet (${file}).`);
+  const title = `Quest ${resolved.qid} — plan (${resolved.relPath})`;
+  const excerpt = resolved.content.slice(0, TOAST_BODY_MAX);
+  notify(ctx, `${title}\n${excerpt}`);
+}
+
+export async function editActivePlan(pi: Pi, ctx: PiCtx): Promise<void> {
+  const resolved = await resolveActivePlanFile(ctx);
+  if ("error" in resolved) {
+    notify(ctx, resolved.error);
     return;
   }
   const config = await readQuestConfig(ctx.cwd);
-  const editor = config.planEditor ?? process.env.EDITOR ?? "vi";
-  const res = await pi.exec(editor, [fullPath], { cwd: ctx.cwd });
+  const envEditor = typeof Deno !== "undefined" ? Deno.env.get("EDITOR") : process.env.EDITOR;
+  const editor = (config.planEditor && config.planEditor.trim() !== "")
+    ? config.planEditor.trim()
+    : (envEditor && envEditor.trim() !== "" ? envEditor.trim() : "vi");
+  const res = await pi.exec(editor, [resolved.fullPath], { cwd: ctx.cwd });
   if (res.code !== 0) {
-    notify(ctx, `Editor exited with code ${res.code}.`);
+    notify(ctx, `Editor exited with code ${res.code} (${resolved.relPath}).`);
+  } else {
+    notify(ctx, `Edited ${resolved.relPath}`);
   }
 }

@@ -1,10 +1,9 @@
 // HIGH_LEVEL: #drafting — review retry backoff and reboot dispatch.
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { getState, updateState } from "../app/store";
 import { sendWake } from "../app/interpreter";
 import type { QuestConfig } from "../config";
-import { draftPath } from "../domain/paths";
+import { draftFilePath } from "../files";
 import type { Pi, PiCtx } from "../hooks/events";
 import { isCurrentReview, supersedeReviewThenBootFresh } from "../review/tracker";
 import { noteDraftUpdated } from "../durability/status";
@@ -58,7 +57,7 @@ export function noteReviewLaunchFailed(
   target: string,
   detail: string,
   userPathSteered: Set<string>,
-  bootReview: (pi: Pi, ctx: PiCtx, target: string, config: QuestConfig) => Promise<void>,
+  bootReview: (pi: Pi, ctx: PiCtx, target: string, config: QuestConfig, signal?: AbortSignal) => Promise<void>,
 ): void {
   const attempts = retryAttempts.get(qid) ?? 0;
   if (attempts < MAX_REVIEW_RETRIES) {
@@ -81,15 +80,15 @@ export async function bumpReviewCountAndReboot(
   config: QuestConfig,
   attempt: number,
   retryTarget: string,
-  bootReview: (pi: Pi, ctx: PiCtx, target: string, config: QuestConfig) => Promise<void>,
+  bootReview: (pi: Pi, ctx: PiCtx, target: string, config: QuestConfig, signal?: AbortSignal) => Promise<void>,
 ): Promise<void> {
   const state = getState();
-  if (state.phase !== "drafting" || state.qid === null) return;
+  if (state.disabled === true || state.phase !== "drafting" || state.qid === null) return;
   const qid = state.qid;
   if (retryAttempts.get(qid) !== attempt) return;
   let file: string;
   try {
-    file = join(ctx.cwd, draftPath(qid));
+    file = draftFilePath(ctx.cwd, qid);
   } catch {
     return;
   }
@@ -123,7 +122,7 @@ export async function bumpReviewCountAndReboot(
   });
   noteDraftUpdated(ctx);
   if (isCurrentReview(qid, hash)) return;
-  supersedeReviewThenBootFresh(qid, hash, () => {
-    void bootReview(pi, ctx, hash, config);
+  supersedeReviewThenBootFresh(qid, hash, (signal) => {
+    void bootReview(pi, ctx, hash, config, signal);
   });
 }

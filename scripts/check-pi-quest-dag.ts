@@ -43,7 +43,8 @@ for (const f of files) {
       else acc.push(seg);
       return acc;
     }, []).join("/");
-    for (const cand of [`${norm}.ts`, `${norm}/index.ts`]) {
+    const baseNorm = norm.endsWith(".ts") ? norm.slice(0, -3) : norm;
+    for (const cand of [norm, `${baseNorm}.ts`, `${baseNorm}/index.ts`]) {
       if (exists.has(cand)) {
         deps.push(cand);
         break;

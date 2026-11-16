@@ -23,22 +23,37 @@ export function pushStackFrame(
       acknowledged: false,
     });
 
+  const complexParent = { ...linkedParent, difficulty: "complex" as const };
   const parentFrame: StackFrame = {
     qid: linkedParent.qid!,
     role: linkedParent.depth === 0 ? "coordinator" : "worker",
     contract: linkedParent.contract,
     savedPhase: linkedParent.phase,
-    savedState: { ...linkedParent },
+    savedState: complexParent,
   };
 
   const existingStack = linkedParent.questStack ?? [];
   const baseChild = createQuest(contract.title, childQid, linkedParent.qid);
+  const wtPath = contract.worktreePath ?? linkedParent.worktreePath ?? linkedParent.contract?.worktreePath;
+  const wtBranch = contract.worktreeBranch ?? linkedParent.worktreeBranch ?? linkedParent.contract?.worktreeBranch;
   return markChanged(baseChild, {
-    phase: "implementing",
+    phase: "drafting",
     depth: linkedParent.depth + 1,
     contract,
+    name: contract.title,
+    draft: {
+      name: contract.title,
+      planAuthored: false,
+      approvedBy: null,
+      outstandingFindings: false,
+      contentHash: null,
+      approvedPlanHash: null,
+      planRevisions: [],
+    },
+    worktreePath: wtPath,
+    worktreeBranch: wtBranch,
     questStack: [...existingStack, parentFrame],
-    exactNextAction: "Implement contract requirements against declared allowedPaths.",
+    exactNextAction: "Author sub-quest draft plan (## Requirements, ## Evidence, ## Implementation Plan) and submit for review.",
   });
 }
 

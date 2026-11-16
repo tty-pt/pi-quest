@@ -32,7 +32,7 @@ function holdForRevisionReview(event: ToolCallEvent): { block: true; reason: str
   if (toolClass === "journal" || toolClass === "ask") return undefined;
   return {
     block: true,
-    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn. (Hint: reply APPROVE or run /quest-cancel-review to unblock immediately.)",
+    reason: "AWAITING_REVIEW: PLAN_REVISION_REVIEW — Plan revision under re-review — end your turn; the verdict arrives as a new turn. (Hint: reply APPROVE or run /quest cancel to unblock immediately.)",
     terminate: true,
   };
 }
@@ -48,6 +48,7 @@ function notifyWarning(ctx: PiCtx, text: string): void {
 export function installDraftGate(pi: Pi): void {
   pi.on("tool_call", (event: ToolCallEvent, ctx: PiCtx) => {
     try {
+      if (getState().disabled === true) return undefined;
       const held = holdForRevisionReview(event);
       if (held !== undefined) return held;
       const decision = decide(getState(), {

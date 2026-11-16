@@ -19,17 +19,28 @@ export function recordPlanRevision(
   note: string,
   previousPlan: string,
   now: number = Date.now(),
+  stagedPlan?: string,
 ): QuestState {
   const draft = requireImplementingDraft(state);
   if (nextHash.trim() === "") throw new Error("plan revision needs a content hash");
   if (previousHash !== null && previousHash.trim() === "") throw new Error("plan revision needs a content hash");
   return markChanged(state, {
+    pendingDirectiveRevision: false,
+    pendingDirectiveText: undefined,
     draft: {
       ...draft,
       contentHash: nextHash,
+      ...(stagedPlan !== undefined ? { stagedPlan } : {}),
       planRevisions: [...(draft.planRevisions ?? []), { hash: previousHash, at: now, note, plan: previousPlan }],
     },
   });
+}
+
+function clearReviewNextAction(state: QuestState): string {
+  if (state.exactNextAction.startsWith("Review running for quest")) {
+    return "Implement the approved plan; claim completion via quest_update_state {claimComplete: true} when done.";
+  }
+  return state.exactNextAction;
 }
 
 // Adopt a reviewed revision: the binding moves to the reviewed hash and the
@@ -38,7 +49,11 @@ export function approvePlanRevision(state: QuestState, hash: string, planText: s
   const draft = requireImplementingDraft(state);
   if (hash.trim() === "") throw new Error("plan approval needs a content hash");
   return markChanged(state, {
-    draft: { ...draft, approvedPlanHash: hash, lastReviewedPlan: planText },
+    pendingDirectiveRevision: false,
+    pendingDirectiveText: undefined,
+    activeReview: null,
+    exactNextAction: clearReviewNextAction(state),
+    draft: { ...draft, approvedPlanHash: hash, lastReviewedPlan: planText, stagedPlan: null },
   });
 }
 
@@ -47,6 +62,8 @@ export function approvePlanRevision(state: QuestState, hash: string, planText: s
 export function revertPlanRevision(state: QuestState): QuestState {
   const draft = requireImplementingDraft(state);
   return markChanged(state, {
-    draft: { ...draft, contentHash: draft.approvedPlanHash },
+    activeReview: null,
+    exactNextAction: clearReviewNextAction(state),
+    draft: { ...draft, contentHash: draft.approvedPlanHash, stagedPlan: null },
   });
 }

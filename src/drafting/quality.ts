@@ -11,7 +11,8 @@ import type { QuestConfig } from "../config";
 import { mergeExemplars, nearestExemplar } from "../judge/nearest";
 import { VERIFICATION_EXEMPLARS, VERIFY_CLUSTERS } from "./verification-exemplars";
 import { resolveCitations } from "./citations";
-import { deliverableBody, type DraftSections } from "./plan-text";
+import { deliverableBody, extractRtmFromRequirements, type DraftSections } from "./plan-text";
+import { checkRtmCoverage, checkRtmVerificationCoverage } from "../domain/contract";
 
 export { DEFAULT_DRAFT_QUALITY, parseDraftQuality } from "./quality-config";
 export type { DraftQualityConfig, DraftQualityMode, DraftQualityTier } from "./quality-config";
@@ -94,15 +95,31 @@ export async function assessDraftQuality(
     gaps.push(`add ${tier.citations - report.resolved} more resolvable citations (file:line) in evidence or the ${kind === "analysis" ? "analysis" : "plan"} (have ${report.resolved}/${tier.citations})${bad}`);
   }
   let steps = 0;
+  let rtmReport = "";
   if (kind === "standard") {
     steps = countSteps(body);
     if (steps < tier.steps) gaps.push(`break the plan into at least ${tier.steps} discrete steps as a numbered or bulleted list (have ${steps})`);
-    if (tier.requireVerification && (await judgeHasVerificationStep(config, body)) === false) {
+    const judgeVerify = tier.requireVerification ? await judgeHasVerificationStep(config, body) : null;
+    if (judgeVerify === false) {
       gaps.push("add a verification step (a test or check that proves the change)");
+    }
+    const rtm = extractRtmFromRequirements(sections.requirements);
+    if (rtm.length > 0) {
+      const coverage = checkRtmCoverage(rtm, body, sections.requirements.length);
+      rtmReport = `, requirements covered: ${coverage.coveredCount}/${coverage.total}`;
+      if (difficulty !== "trivial" && !coverage.covered) {
+        gaps.push(`map requirement(s) ${coverage.missing.join(", ")} into the plan or sub-quest backlog`);
+      }
+      if (judgeVerify === true && difficulty !== "trivial") {
+        const vCoverage = checkRtmVerificationCoverage(rtm, body);
+        if (!vCoverage.verified) {
+          gaps.push(`add verification step for requirement(s) ${vCoverage.unverified.join(", ")} (e.g. Verification [${vCoverage.unverified[0]}]: test command)`);
+        }
+      }
     }
   }
   const stepNote = kind === "standard" ? `, ${steps} steps` : "";
-  const summary = `draft quality (${difficulty}, ${cfg.mode}): ${report.resolved}/${report.total} citations resolve${stepNote}; ` +
+  const summary = `draft quality (${difficulty}, ${cfg.mode}): ${report.resolved}/${report.total} citations resolve${stepNote}${rtmReport}; ` +
     (gaps.length === 0 ? "bar met" : `missing: ${gaps.join("; ")}`);
   return { gaps, blocks: cfg.mode === "enforce" && gaps.length > 0, resolved: report.resolved, total: report.total, summary };
 }

@@ -2,9 +2,9 @@ import assert from "node:assert";
 import {
   isFallbackAdvance,
   parseLeadingAdvance,
-  interpretUserTurn,
   FALLBACK_ADVANCE_WORD,
 } from "../../src/domain/intent.ts";
+import { interpretUserTurn } from "../../src/judge/intent-classifier.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 
 Deno.test("intent_compound: isFallbackAdvance recognizes single fallback word and extra phrases", () => {
