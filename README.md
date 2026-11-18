@@ -22,6 +22,8 @@ Install the extension:
 pi install npm:@tty-pt/pi-quest
 ```
 
+`pi-quest` bundles `@tty-pt/axil` and `@tty-pt/auren` dependencies so it automatically discovers and launches a background `axil-auren` daemon (`axil -d` on `:4242`) from prebuilt `node_modules/@tty-pt/*` binaries without requiring system-installed `/usr/bin/axil` or `/usr/lib/libaxil-auren.so`.
+
 Every quest executes through three phases:
 
 1. **Drafting**: The agent explores the codebase (read/search/test runs flow freely) and authors its draft plan (`.pi/quest/future/<qid>.md`). Editing `.pi/quest/future/<qid>.md` while in `provisional` automatically transitions the quest to `drafting` (`planAuthored: true`). Passive file edits to the draft coalesce within a turn and boot a single independent reviewer at `turn_end`, while drafter and reviewer exchange structured `[Drafter–Reviewer Dialogue]` rounds in the background as you continue chatting. You can reply `go` or `proceed` at any moment to bypass review.
